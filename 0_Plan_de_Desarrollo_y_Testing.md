@@ -12,7 +12,7 @@
 
 **Objetivo:** Crear un entorno "headless" puramente lógico, matemático e inquebrantable en Python.
 
-### Tareas a Ejecutar
+### Tareas a Ejecutar Fase 1
 
 - [ ] Programar las clases `Carta`, `Baraja` y `Jugador`.
 - [ ] Implementar el bucle de la mano (repartir, 13 bazas, conteo de puntos).
@@ -34,7 +34,7 @@ Esta fase se considera **TERMINADA** únicamente cuando pase las siguientes prue
 
 **Objetivo:** Envolver el Módulo 1 en un entorno estándar que una red neuronal pueda comprender numéricamente.
 
-### Tareas a Ejecutar
+### Tareas a Ejecutar Fase 2
 
 - [ ] Importar `gymnasium` e implementar la clase `CorazonesEnv(gym.Env)`.
 - [ ] Construir el método `reset()` que inicialice el Módulo 1 y devuelva la matriz inicial.
@@ -42,7 +42,7 @@ Esta fase se considera **TERMINADA** únicamente cuando pase las siguientes prue
 - [ ] Implementar el sistema de Recompensas de Corto y Largo Plazo (Suma Cero).
 - [ ] Conectar el `Action Masking` extrayendo las cartas válidas de `obtener_jugadas_legales()`.
 
-### Definition of Done (Criterios de Aceptación)
+### Definition of Done (Criterios de Aceptación - Fase 2)
 
 Esta fase se considera **TERMINADA** cuando:
 
@@ -64,7 +64,7 @@ Esta fase se considera **TERMINADA** cuando:
 - [ ] Programar el bucle de *Fictitious Self-Play* que guarde y cargue modelos históricos aleatorios de una carpeta local.
 - [ ] Configurar entornos vectorizados (`SubprocVecEnv`) para paralelizar simulaciones.
 
-### Definition of Done (Criterios de Aceptación)
+### Definition of Done (Criterios de Aceptación - Fase 3)
 
 Esta fase se considera **TERMINADA** cuando se validen las capacidades de aprendizaje:
 

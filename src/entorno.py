@@ -47,7 +47,11 @@ class CorazonesEnv(gym.Env):
 
     PUNTUACION_MAXIMA: float = 100.0  # Umbral de fin de partida
 
-    def __init__(self, agente_idx: int = 0) -> None:
+    def __init__(
+        self,
+        agente_idx: int = 0,
+        politicas_oponentes: Optional[Dict[int, object]] = None,
+    ) -> None:
         super().__init__()
 
         if not (0 <= agente_idx <= 3):
@@ -55,6 +59,10 @@ class CorazonesEnv(gym.Env):
                 f"agente_idx debe estar entre 0 y 3, recibido {agente_idx}")
 
         self.agente_idx: int = agente_idx
+
+        # Políticas de oponentes: dict jugador_idx → callable(motor, idx, legales) → Carta
+        # Si no se especifica, se usa selección aleatoria
+        self._politicas_oponentes: Dict[int, object] = politicas_oponentes or {}
 
         # Espacios Gymnasium
         self.observation_space = spaces.Box(
@@ -131,11 +139,24 @@ class CorazonesEnv(gym.Env):
         """
         mask = self.action_masks()
 
+        # Si no hay acciones legales, el juego ya terminó o no es turno del agente
+        if not np.any(mask):
+            obs = self._construir_observacion()
+            return obs, 0.0, self._juego_terminado(), False, {
+                "puntuacion_historica": list(self._puntuacion_historica),
+                "puntos_mano": list(self._puntos_mano_actual),
+                "agente_idx": self.agente_idx,
+            }
+
         # Fallback: si la acción es ilegal, elegir una legal aleatoria
         if not mask[action]:
             legales = [i for i, m in enumerate(mask) if m]
             if legales:
                 action = self._rng.choice(legales)
+            else:
+                # Sin legales: devolver estado actual
+                obs = self._construir_observacion()
+                return obs, 0.0, self._juego_terminado(), False, {}
 
         # Convertir acción (int) a Carta
         carta = Carta._TODAS[action]
@@ -249,7 +270,13 @@ class CorazonesEnv(gym.Env):
             if not legales:
                 # No debería ocurrir; por seguridad
                 return
-            carta = self._rng.choice(legales)
+            # Usar política configurada o random por defecto
+            if actual in self._politicas_oponentes:
+                carta = self._politicas_oponentes[actual](
+                    self.motor, actual, legales
+                )
+            else:
+                carta = self._rng.choice(legales)
             self._ejecutar_jugada(actual, carta)
 
     def _resolver_baza_actual(self) -> None:
