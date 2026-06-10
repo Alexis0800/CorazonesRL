@@ -18,6 +18,10 @@ Uso:
 """
 
 from __future__ import annotations
+from src.red import obtener_policy_kwargs
+from src.carta import Carta
+from src.bots import bot_conservador, bot_agresivo, bot_evasivo
+from src.entorno import CorazonesEnv
 
 import os
 import sys
@@ -30,11 +34,6 @@ import numpy as np
 
 # Asegurar que src está en el path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-from src.entorno import CorazonesEnv
-from src.bots import bot_conservador, bot_agresivo, bot_evasivo
-from src.carta import Carta
-from src.red import obtener_policy_kwargs
 
 
 # ------------------------------------------------------------------
@@ -50,7 +49,8 @@ DIRECTORIO_LOGS: str = os.path.join(
 )
 
 # Mapeo de asientos a nombres para logging
-NOMBRES_ASIENTOS: Dict[int, str] = {0: "Norte", 1: "Este", 2: "Sur", 3: "Oeste"}
+NOMBRES_ASIENTOS: Dict[int, str] = {
+    0: "Norte", 1: "Este", 2: "Sur", 3: "Oeste"}
 
 
 # ------------------------------------------------------------------
@@ -98,7 +98,8 @@ class PoliticaSB3:
         mask = np.zeros(52, dtype=np.bool_)
         for c in legales:
             mask[c.id] = True
-        action, _ = self.model.predict(obs, action_masks=mask, deterministic=True)
+        action, _ = self.model.predict(
+            obs, action_masks=mask, deterministic=True)
         return Carta._TODAS[int(action)]
 
 
@@ -121,7 +122,8 @@ def crear_entorno_entrenamiento(
     Returns:
         Instancia de CorazonesEnv configurada.
     """
-    env = CorazonesEnv(agente_idx=agente_idx, politicas_oponentes=politicas or {})
+    env = CorazonesEnv(agente_idx=agente_idx,
+                       politicas_oponentes=politicas or {})
     if seed is not None:
         env.reset(seed=seed)
     return env
@@ -182,7 +184,8 @@ def listar_snapshots() -> List[str]:
     snapshots = glob.glob(os.path.join(DIRECTORIO_MODELOS, "snapshot_*.zip"))
     # Ordenar por número de paso (extraído del nombre)
     snapshots.sort(
-        key=lambda p: int(os.path.basename(p).replace("snapshot_", "").replace(".zip", ""))
+        key=lambda p: int(os.path.basename(p).replace(
+            "snapshot_", "").replace(".zip", ""))
     )
     return [p.replace(".zip", "") for p in snapshots]
 

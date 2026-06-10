@@ -62,7 +62,8 @@ class CorazonesEnv(gym.Env):
 
         # Políticas de oponentes: dict jugador_idx → callable(motor, idx, legales) → Carta
         # Si no se especifica, se usa selección aleatoria
-        self._politicas_oponentes: Dict[int, object] = politicas_oponentes or {}
+        self._politicas_oponentes: Dict[int,
+                                        object] = politicas_oponentes or {}
 
         # Espacios Gymnasium
         self.observation_space = spaces.Box(

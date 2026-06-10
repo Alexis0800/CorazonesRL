@@ -57,7 +57,8 @@ class CorazonesAEC:
 
         # Espacios por agente
         self.observation_spaces: Dict[str, spaces.Box] = {
-            agent: spaces.Box(low=0.0, high=1.0, shape=(187,), dtype=np.float32)
+            agent: spaces.Box(low=0.0, high=1.0,
+                              shape=(187,), dtype=np.float32)
             for agent in self.possible_agents
         }
         self.action_spaces: Dict[str, spaces.Discrete] = {
@@ -385,7 +386,8 @@ class CorazonesAEC:
         # [172:176] Puntajes históricos (/100)
         for jug_idx in range(4):
             rel = (jug_idx - a) % 4
-            obs[172 + rel] = min(self._puntuacion_historica[jug_idx] / 100.0, 1.0)
+            obs[172 +
+                rel] = min(self._puntuacion_historica[jug_idx] / 100.0, 1.0)
 
         # [176:180] Puntos mano actual (/26)
         for jug_idx in range(4):

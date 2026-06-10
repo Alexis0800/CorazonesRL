@@ -311,7 +311,8 @@ class TestOverfitting:
 
             while not done:
                 mask = env.action_masks()
-                action, _ = model.predict(obs, action_masks=mask, deterministic=False)
+                action, _ = model.predict(
+                    obs, action_masks=mask, deterministic=False)
                 obs, reward, terminated, truncated, _ = env.step(int(action))
                 recompensa_ep += reward
                 done = terminated or truncated
