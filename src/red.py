@@ -26,7 +26,8 @@ from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 class CorazonesFeatureExtractor(BaseFeaturesExtractor):
     """Extractor de características MLP para el entorno de Corazones.
 
-    Arquitectura: 187 → 256 → 256 → 128 → features_dim.
+    Arquitectura: 187 → 256 → 256 → 128 (sin capa extra final).
+    128 neuronas de salida alimentan directamente al Actor-Critic de PPO.
 
     Diseñada para procesar el vector de observación one-hot de 187
     dimensiones y extraer características relevantes para el Actor
@@ -34,13 +35,13 @@ class CorazonesFeatureExtractor(BaseFeaturesExtractor):
 
     Args:
         observation_space: Espacio de observación Box(187,) del entorno.
-        features_dim: Dimensión del vector de características de salida.
+        features_dim: Dimensión del vector de características de salida (128).
     """
 
     def __init__(
         self,
         observation_space: gym.spaces.Box,
-        features_dim: int = 512,
+        features_dim: int = 128,
     ) -> None:
         super().__init__(observation_space, features_dim)
 
@@ -51,9 +52,7 @@ class CorazonesFeatureExtractor(BaseFeaturesExtractor):
             nn.ReLU(),
             nn.Linear(256, 256),
             nn.ReLU(),
-            nn.Linear(256, 128),
-            nn.ReLU(),
-            nn.Linear(128, features_dim),
+            nn.Linear(256, features_dim),  # 256 → 128 directamente
             nn.ReLU(),
         )
 
@@ -64,7 +63,7 @@ class CorazonesFeatureExtractor(BaseFeaturesExtractor):
             observations: Tensor de shape (batch_size, 187).
 
         Returns:
-            Tensor de características de shape (batch_size, features_dim).
+            Tensor de características de shape (batch_size, 128).
         """
         return self.net(observations)
 
@@ -75,14 +74,14 @@ class CorazonesFeatureExtractor(BaseFeaturesExtractor):
 
 def obtener_policy_kwargs(
     net_arch: Optional[Sequence[int]] = None,
-    features_dim: int = 512,
+    features_dim: int = 128,
 ) -> Dict:
     """Retorna los policy_kwargs para MaskablePPO con la arquitectura
     especificada en el Master Plan.
 
     Args:
         net_arch: Arquitectura de capas ocultas. Por defecto [256, 256, 128].
-        features_dim: Dimensión de salida del extractor.
+        features_dim: Dimensión de salida del extractor (128).
 
     Returns:
         Diccionario con argumentos para el constructor de MaskablePPO.

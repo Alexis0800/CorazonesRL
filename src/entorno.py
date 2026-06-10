@@ -37,13 +37,24 @@ class CorazonesEnv(gym.Env):
     # ------------------------------------------------------------------
     # Constantes de recompensa
     # ------------------------------------------------------------------
+    # Recompensas por evento (escala consistente, todas en rango ±1 a ±10)
     REWARD_CORAZON: float = -1.0
-    REWARD_DAMA_PICAS: float = -13.0
-    REWARD_SHOOTING_MOON: float = 50.0
-    REWARD_PRIMERO: float = 1000.0
-    REWARD_SEGUNDO: float = 300.0
-    REWARD_TERCERO: float = -300.0
-    REWARD_CUARTO: float = -1000.0
+    REWARD_DAMA_PICAS: float = -10.0
+    REWARD_SHOOTING_MOON: float = 30.0
+    # Recompensa final DOMINANTE (ganar la partida es lo que importa)
+    REWARD_PRIMERO: float = 100.0
+    REWARD_SEGUNDO: float = 40.0
+    REWARD_TERCERO: float = -40.0
+    REWARD_CUARTO: float = -100.0
+
+    # Recompensas densas (reward shaping) — señales sutiles, no dominantes
+    REWARD_NO_GANAR_BAZA_CON_PUNTOS: float = 0.5
+    REWARD_DESCARTAR_CORAZON_SEGURO: float = 0.3
+    REWARD_DESCARTAR_DAMA_SEGURO: float = 3.0
+    REWARD_GANAR_BAZA_SIN_PUNTOS: float = -0.15
+    # Nueva: penalización por estar perdiendo al final de la mano
+    REWARD_PERDER_MANO: float = -2.0
+    REWARD_GANAR_MANO: float = 2.0
 
     PUNTUACION_MAXIMA: float = 100.0  # Umbral de fin de partida
 
@@ -281,10 +292,15 @@ class CorazonesEnv(gym.Env):
             self._ejecutar_jugada(actual, carta)
 
     def _resolver_baza_actual(self) -> None:
-        """Resuelve la baza, asigna recompensas al agente y actualiza
+        """Resuelve la baza, asigna recompensas densas al agente y actualiza
         el tracking de la Dama de Picas."""
         # Capturar las cartas de la mesa ANTES de resolver
         cartas_en_mesa = [c for _, c in self.motor.mesa]
+        idx_agente_en_mesa = None
+        for i, (j, _) in enumerate(self.motor.mesa):
+            if j == self.agente_idx:
+                idx_agente_en_mesa = i
+                break
 
         ganador = self.motor.resolver_baza()
 
@@ -298,13 +314,33 @@ class CorazonesEnv(gym.Env):
                 self._dama_picas_en = ganador
                 break
 
+        # Puntos totales en esta baza
+        puntos_baza = sum(c.puntos for c in cartas_en_mesa)
+
         # Calcular recompensa para el agente por esta baza
         if ganador == self.agente_idx:
+            # Penalización por puntos ganados (corazones + dama)
             for c in cartas_en_mesa:
                 if c.es_corazon:
                     self._recompensa_pendiente += self.REWARD_CORAZON
                 if c.es_dama_de_picas:
                     self._recompensa_pendiente += self.REWARD_DAMA_PICAS
+            # Si ganó baza sin puntos, pequeña penalización
+            if puntos_baza == 0:
+                self._recompensa_pendiente += self.REWARD_GANAR_BAZA_SIN_PUNTOS
+        else:
+            # El agente NO ganó la baza → ¡BUENO si la baza tenía puntos!
+            if puntos_baza > 0:
+                self._recompensa_pendiente += self.REWARD_NO_GANAR_BAZA_CON_PUNTOS * \
+                    min(puntos_baza, 3)
+
+            # ¿El agente jugó un corazón o la Dama en esta baza y NO la ganó?
+            if idx_agente_en_mesa is not None:
+                carta_agente = cartas_en_mesa[idx_agente_en_mesa]
+                if carta_agente.es_corazon:
+                    self._recompensa_pendiente += self.REWARD_DESCARTAR_CORAZON_SEGURO
+                if carta_agente.es_dama_de_picas:
+                    self._recompensa_pendiente += self.REWARD_DESCARTAR_DAMA_SEGURO
 
     def _finalizar_mano(self) -> None:
         """Finaliza la mano actual: aplica puntuación, verifica pleno,
@@ -319,11 +355,23 @@ class CorazonesEnv(gym.Env):
                 break
 
         # Aplicar puntuación (el motor maneja la conversión de pleno)
-        self.motor.aplicar_puntuacion()
+        puntuaciones_mano = self.motor.aplicar_puntuacion()
 
         # Actualizar puntuación histórica desde el motor
         for i in range(4):
             self._puntuacion_historica[i] = self.motor.jugadores[i].puntuacion_historica
+
+        # Recompensa por mano: premiar si el agente sumó menos puntos que el promedio
+        if self._pleno_jugador is None:
+            puntos_agente = puntuaciones_mano[self.agente_idx]
+            puntos_otros = [puntuaciones_mano[i]
+                            for i in range(4) if i != self.agente_idx]
+            if puntos_agente < min(puntos_otros):
+                self._recompensa_pendiente += self.REWARD_GANAR_MANO
+            elif puntos_agente > max(puntos_otros):
+                self._recompensa_pendiente += self.REWARD_PERDER_MANO
+        elif self._pleno_jugador == self.agente_idx:
+            self._recompensa_pendiente += self.REWARD_GANAR_MANO * 2
 
     def _juego_terminado(self) -> bool:
         """Determina si la partida ha terminado (algún jugador >= 100 puntos)."""

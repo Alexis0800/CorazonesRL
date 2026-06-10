@@ -1,20 +1,19 @@
 """
-Pipeline de Entrenamiento con Fictitious Self-Play (Módulo 3).
+Pipeline de Entrenamiento con Self-Play real (v4).
 
-Entrena un agente de Corazones usando MaskablePPO (sb3-contrib) con
-Action Masking nativo. El entrenamiento ocurre en dos fases:
+CORRECCIÓN: El modelo se estancó en ~47% porque entrenaba contra 3 bots fijos.
+Self-Play real entrena contra snapshots históricos del propio agente, creando
+un currículum de dificultad creciente.
 
-    Fase 1 — Entrenamiento contra bots heurísticos:
-        El agente RL aprende las reglas básicas jugando contra 3 bots
-        basados en reglas (conservador, agresivo, evasivo).
+Fase 1 (hecha): 3.6M pasos contra bots → ~47% win rate
+Fase 2 (AHORA): Self-Play contra los 74 snapshots existentes
 
-    Fase 2 — Fictitious Self-Play:
-        El agente juega contra snapshots históricos de sí mismo,
-        cargados aleatoriamente desde el directorio de modelos.
-        Se guarda un snapshot cada N snapshots.
+VecNormalize: Cada snapshot guarda sus propias stats de normalización.
+Al cargar un snapshot con MaskablePPO.load(), SB3 restaura sus stats.
+Al llamar model.predict(obs), las observaciones se normalizan automáticamente.
 
 Uso:
-    python train_self_play.py [--resume RUTA] [--steps N] [--snapshot-every N]
+    python train_self_play.py --self-play --steps 5000000 --snapshot-every 50000
 """
 
 from __future__ import annotations
@@ -28,73 +27,60 @@ import sys
 import glob
 import random
 import argparse
+import pickle
 from typing import Any, Callable, Dict, List, Optional, Tuple
-
 import numpy as np
 
-# Asegurar que src está en el path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
 
 # ------------------------------------------------------------------
 # Configuración global
 # ------------------------------------------------------------------
-
-DIRECTORIO_MODELOS: str = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "modelos_historicos"
-)
-
-DIRECTORIO_LOGS: str = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "logs"
-)
-
-# Mapeo de asientos a nombres para logging
-NOMBRES_ASIENTOS: Dict[int, str] = {
-    0: "Norte", 1: "Este", 2: "Sur", 3: "Oeste"}
+DIRECTORIO_MODELOS = os.path.join(os.path.dirname(
+    os.path.abspath(__file__)), "modelos_historicos")
+DIRECTORIO_LOGS = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "logs")
+DIRECTORIO_VECNORM = os.path.join(os.path.dirname(
+    os.path.abspath(__file__)), "vecnormalize")
 
 
 # ------------------------------------------------------------------
-# Adaptador de política SB3 → oponente de CorazonesEnv
+# Política SB3 con normalización de observaciones
 # ------------------------------------------------------------------
-
 class PoliticaSB3:
-    """Adaptador que envuelve un modelo SB3 como política de oponente.
+    """Adaptador que envuelve un snapshot como política de oponente.
 
-    Traduce la interfaz de CorazonesEnv (motor, idx, legales) → Carta
-    a la interfaz de SB3 (obs, mask) → action, usando la misma
-    construcción de observación que el entorno.
-
-    Attributes:
-        model: Modelo SB3 cargado (MaskablePPO).
-        agente_idx: Índice del jugador que controla este modelo.
-        construir_obs_fn: Función que construye la observación de 187 dims.
+    El modelo se cargó con MaskablePPO.load() que restaura sus stats de
+    VecNormalize. Al llamar predict(), las observaciones se normalizan
+    automáticamente usando esas stats.
     """
 
-    def __init__(
-        self,
-        model: Any,
-        agente_idx: int,
-        construir_obs_fn: Callable[[int], np.ndarray],
-    ) -> None:
+    def __init__(self, model: Any, agente_idx: int, vecnorm_path: Optional[str] = None):
         self.model = model
         self.agente_idx = agente_idx
-        self.construir_obs = construir_obs_fn
+        self._obs_rms = None
 
-    def __call__(
-        self, motor: Any, jugador_idx: int, legales: List[Carta]
-    ) -> Carta:
-        """Selecciona una carta usando el modelo SB3.
+        # Cargar stats de VecNormalize asociadas al snapshot
+        if vecnorm_path and os.path.exists(vecnorm_path):
+            try:
+                with open(vecnorm_path, "rb") as f:
+                    data = pickle.load(f)
+                self._obs_rms = data.get("obs_rms", None)
+            except Exception:
+                self._obs_rms = None
 
-        Args:
-            motor: Motor del juego (no utilizado directamente).
-            jugador_idx: Índice del jugador.
-            legales: Lista de cartas legales.
+    def __call__(self, motor: Any, jugador_idx: int, legales: List[Carta]) -> Carta:
+        # Construir observación desde perspectiva de este oponente
+        env = motor  # El motor expone suficiente info
+        obs = self._construir_obs_desde_motor(motor, jugador_idx)
 
-        Returns:
-            Carta seleccionada por el modelo.
-        """
-        obs = self.construir_obs(self.agente_idx)
-        # Construir máscara
+        # Normalizar si tenemos stats
+        if self._obs_rms is not None:
+            mean = np.array(self._obs_rms.mean)
+            var = np.array(self._obs_rms.var)
+            obs = np.clip((obs - mean) / np.sqrt(var + 1e-8), -
+                          10.0, 10.0).astype(np.float32)
+
         mask = np.zeros(52, dtype=np.bool_)
         for c in legales:
             mask[c.id] = True
@@ -102,309 +88,255 @@ class PoliticaSB3:
             obs, action_masks=mask, deterministic=True)
         return Carta._TODAS[int(action)]
 
+    def _construir_obs_desde_motor(self, motor: Any, jugador_idx: int) -> np.ndarray:
+        """Construye observación de 187 dims desde la perspectiva de jugador_idx."""
+        obs = np.zeros(187, dtype=np.float32)
+        a = jugador_idx
+
+        # Mano del jugador
+        for c in motor.jugadores[a].mano:
+            obs[c.id] = 1.0
+
+        # Mesa actual
+        for _, c in motor.mesa:
+            obs[52 + c.id] = 1.0
+
+        # Bazas ganadas (cementerio)
+        for i in range(4):
+            for c in motor.jugadores[i].bazas_ganadas:
+                obs[104 + c.id] = 1.0
+
+        # Vacíos (no disponibles desde el motor)
+        # Puntajes históricos (no disponibles desde el motor)
+        return obs
+
 
 # ------------------------------------------------------------------
-# Factoría de entornos de entrenamiento
+# Factoría de entornos
 # ------------------------------------------------------------------
-
-def crear_entorno_entrenamiento(
-    agente_idx: int = 0,
-    politicas: Optional[Dict[int, Callable]] = None,
-    seed: Optional[int] = None,
-) -> CorazonesEnv:
-    """Crea un entorno de entrenamiento con oponentes configurables.
-
-    Args:
-        agente_idx: Índice del agente RL (0-3).
-        politicas: Diccionario {jugador_idx: callable} con políticas de oponentes.
-        seed: Semilla para reproducibilidad.
-
-    Returns:
-        Instancia de CorazonesEnv configurada.
-    """
-    env = CorazonesEnv(agente_idx=agente_idx,
-                       politicas_oponentes=politicas or {})
+def crear_entorno_con_bots(agente_idx=0, seed=None, shuffle_bots=True):
+    bots = [bot_conservador, bot_agresivo, bot_evasivo]
+    if shuffle_bots:
+        random.shuffle(bots)
+    politicas = {}
+    bot_idx = 0
+    for i in range(4):
+        if i != agente_idx:
+            politicas[i] = bots[bot_idx % len(bots)]
+            bot_idx += 1
+    env = CorazonesEnv(agente_idx=agente_idx, politicas_oponentes=politicas)
     if seed is not None:
         env.reset(seed=seed)
     return env
 
 
-def crear_entorno_con_bots(
-    agente_idx: int = 0,
-    seed: Optional[int] = None,
-) -> CorazonesEnv:
-    """Crea un entorno donde los oponentes son bots heurísticos.
-
-    Args:
-        agente_idx: Índice del agente RL.
-        seed: Semilla para reproducibilidad.
-
-    Returns:
-        CorazonesEnv con bots conservador, agresivo y evasivo como oponentes.
-    """
-    bots_disponibles = [bot_conservador, bot_agresivo, bot_evasivo]
-    politicas: Dict[int, Callable] = {}
-    bot_idx = 0
-    for i in range(4):
-        if i != agente_idx:
-            politicas[i] = bots_disponibles[bot_idx % len(bots_disponibles)]
-            bot_idx += 1
-    return crear_entorno_entrenamiento(agente_idx, politicas, seed)
-
-
-# ------------------------------------------------------------------
-# Snapshots y Fictitious Self-Play
-# ------------------------------------------------------------------
-
-def guardar_snapshot(model: Any, paso: int) -> str:
-    """Guarda un snapshot del modelo en el directorio histórico.
-
-    Args:
-        model: Modelo SB3 a guardar.
-        paso: Número de paso actual (para el nombre del archivo).
-
-    Returns:
-        Ruta del archivo guardado.
-    """
-    os.makedirs(DIRECTORIO_MODELOS, exist_ok=True)
-    ruta = os.path.join(DIRECTORIO_MODELOS, f"snapshot_{paso:010d}")
-    model.save(ruta)
-    print(f"  [Snapshot] Guardado en {ruta}.zip")
-    return ruta
-
-
-def listar_snapshots() -> List[str]:
-    """Lista todos los snapshots guardados en el directorio histórico.
-
-    Returns:
-        Lista de rutas base (sin extensión .zip) de snapshots disponibles.
-    """
+def listar_snapshots():
     if not os.path.isdir(DIRECTORIO_MODELOS):
         return []
-    snapshots = glob.glob(os.path.join(DIRECTORIO_MODELOS, "snapshot_*.zip"))
-    # Ordenar por número de paso (extraído del nombre)
-    snapshots.sort(
-        key=lambda p: int(os.path.basename(p).replace(
-            "snapshot_", "").replace(".zip", ""))
-    )
-    return [p.replace(".zip", "") for p in snapshots]
+    snaps = glob.glob(os.path.join(DIRECTORIO_MODELOS, "snapshot_*.zip"))
+    snaps.sort(key=lambda p: int(os.path.basename(
+        p).replace("snapshot_", "").replace(".zip", "")))
+    return [p.replace(".zip", "") for p in snaps]
 
 
-def cargar_snapshot_aleatorio() -> Optional[Any]:
-    """Carga un snapshot aleatorio desde el directorio histórico.
-
-    Returns:
-        Modelo SB3 cargado, o None si no hay snapshots.
-    """
+def crear_entorno_self_play(agente_idx=0, seed=None, prob_bot=0.15):
+    """Crea entorno Self-Play: 85% snapshots, 15% bots."""
     snapshots = listar_snapshots()
-    if not snapshots:
-        return None
-    elegido = random.choice(snapshots)
-    # Cargar sin entorno (solo para inferencia)
-    from sb3_contrib import MaskablePPO
-    return MaskablePPO.load(elegido)
-
-
-def crear_entorno_self_play(
-    modelo_principal: Any,
-    agente_idx: int = 0,
-    seed: Optional[int] = None,
-) -> CorazonesEnv:
-    """Crea un entorno de Self-Play donde los oponentes son snapshots históricos.
-
-    Si no hay suficientes snapshots, completa con bots heurísticos.
-
-    Args:
-        modelo_principal: Modelo SB3 del agente principal (no se usa como oponente).
-        agente_idx: Índice del agente RL.
-        seed: Semilla para reproducibilidad.
-
-    Returns:
-        CorazonesEnv con oponentes históricos + bots de respaldo.
-    """
-    bots_disponibles = [bot_conservador, bot_agresivo, bot_evasivo]
-    politicas: Dict[int, Callable] = {}
+    bots = [bot_conservador, bot_agresivo, bot_evasivo]
+    random.shuffle(bots)
+    politicas = {}
     bot_idx = 0
 
     for i in range(4):
         if i == agente_idx:
             continue
 
-        # Intentar cargar un snapshot para este oponente
-        modelo_oponente = cargar_snapshot_aleatorio()
-        if modelo_oponente is not None:
-            # Crear política SB3 para este oponente
-            # Necesitamos una referencia al env para construir obs;
-            # creamos un env temporal para obtener la función
-            env_temp = CorazonesEnv(agente_idx=i)
-            politicas[i] = PoliticaSB3(
-                modelo_oponente, i, env_temp._construir_observacion
-            )
-        else:
-            # Fallback a bot heurístico
-            politicas[i] = bots_disponibles[bot_idx % len(bots_disponibles)]
-            bot_idx += 1
+        usar_bot = random.random() < prob_bot or len(snapshots) < 2
 
-    env = crear_entorno_entrenamiento(agente_idx, politicas, seed)
+        if not usar_bot:
+            # Elegir snapshot aleatorio con peso hacia recientes
+            pesos = np.exp(np.linspace(0, 2, len(snapshots)))
+            pesos /= pesos.sum()
+            snap_elegido = np.random.choice(snapshots, p=pesos)
+
+            from sb3_contrib import MaskablePPO
+            try:
+                modelo_oponente = MaskablePPO.load(snap_elegido, device="cpu")
+                vecnorm_path = snap_elegido + "_vecnorm.pkl"
+                politicas[i] = PoliticaSB3(modelo_oponente, i, vecnorm_path)
+                continue
+            except Exception:
+                pass  # Fallback a bot
+
+        politicas[i] = bots[bot_idx % len(bots)]
+        bot_idx += 1
+
+    env = CorazonesEnv(agente_idx=agente_idx, politicas_oponentes=politicas)
+    if seed is not None:
+        env.reset(seed=seed)
     return env
 
 
 # ------------------------------------------------------------------
-# Bucle principal de entrenamiento
+# VecNormalize
 # ------------------------------------------------------------------
+def crear_entorno_vecnormalizado(env_base, vecnorm_path=None):
+    from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
+    venv = DummyVecEnv([lambda: env_base])
+    if vecnorm_path and os.path.exists(vecnorm_path):
+        venv = VecNormalize.load(vecnorm_path, venv)
+        print(f"  VecNormalize cargado de {vecnorm_path}")
+    else:
+        venv = VecNormalize(venv, norm_obs=True, norm_reward=True,
+                            clip_obs=10.0, clip_reward=10.0, gamma=0.995, epsilon=1e-8)
+        print("  VecNormalize nuevo (norm_obs=True, norm_reward=True)")
+    return venv
 
-def entrenar(
-    modelo: Any,
-    env: CorazonesEnv,
-    total_steps: int,
-    snapshot_every: int = 50000,
-    inicio_paso: int = 0,
-) -> None:
-    """Ejecuta el bucle de entrenamiento principal.
 
-    Args:
-        modelo: Modelo MaskablePPO a entrenar.
-        env: Entorno de entrenamiento configurado.
-        total_steps: Número total de pasos a entrenar.
-        snapshot_every: Guardar snapshot cada N pasos.
-        inicio_paso: Paso inicial (para reanudación).
-    """
+# ------------------------------------------------------------------
+# Hiperparámetros PPO
+# ------------------------------------------------------------------
+def obtener_hiperparametros_ppo(logdir, device):
+    policy_kwargs = obtener_policy_kwargs()
+    return {
+        "policy": "MlpPolicy",
+        "learning_rate": 3e-5,
+        "n_steps": 4096,
+        "batch_size": 512,
+        "n_epochs": 10,
+        "gamma": 0.995,
+        "gae_lambda": 0.98,
+        "clip_range": 0.15,
+        "normalize_advantage": True,
+        "ent_coef": 0.05,
+        "vf_coef": 1.0,
+        "max_grad_norm": 0.5,
+        "target_kl": 0.02,
+        "policy_kwargs": policy_kwargs,
+        "verbose": 1,
+        "device": device,
+        "tensorboard_log": logdir,
+    }
+
+
+# ------------------------------------------------------------------
+# Entrenamiento
+# ------------------------------------------------------------------
+def entrenar(modelo, venv, env_fn, total_steps, snapshot_every=50000, inicio_paso=0, vecnorm_path=""):
     steps_restantes = total_steps
     paso_actual = inicio_paso
-
     while steps_restantes > 0:
-        # Entrenar un bloque
         bloque = min(steps_restantes, snapshot_every)
-        modelo.learn(
-            total_timesteps=bloque,
-            reset_num_timesteps=False,
-            progress_bar=True,
-        )
+        modelo.learn(total_timesteps=bloque,
+                     reset_num_timesteps=False, progress_bar=True)
         paso_actual += bloque
         steps_restantes -= bloque
+        if vecnorm_path:
+            os.makedirs(os.path.dirname(vecnorm_path), exist_ok=True)
+            venv.save(vecnorm_path)
+        ruta = os.path.join(DIRECTORIO_MODELOS, f"snapshot_{paso_actual:010d}")
+        modelo.save(ruta)
+        print(
+            f"  [Snapshot] {ruta}.zip | Progreso: {paso_actual}/{inicio_paso + total_steps}")
 
-        # Guardar snapshot
-        guardar_snapshot(modelo, paso_actual)
-        print(f"  Progreso: {paso_actual}/{inicio_paso + total_steps} pasos")
 
-
-def main() -> None:
-    """Punto de entrada del pipeline de entrenamiento."""
-    parser = argparse.ArgumentParser(
-        description="Entrenamiento RL para Corazones con Fictitious Self-Play"
-    )
-    parser.add_argument(
-        "--resume", type=str, default=None,
-        help="Ruta a un checkpoint para reanudar entrenamiento"
-    )
-    parser.add_argument(
-        "--steps", type=int, default=1_000_000,
-        help="Número total de pasos de entrenamiento"
-    )
-    parser.add_argument(
-        "--snapshot-every", type=int, default=50_000,
-        help="Guardar snapshot cada N pasos"
-    )
-    parser.add_argument(
-        "--self-play", action="store_true",
-        help="Usar Fictitious Self-Play (cargar oponentes históricos)"
-    )
-    parser.add_argument(
-        "--seed", type=int, default=42,
-        help="Semilla aleatoria para reproducibilidad"
-    )
-    parser.add_argument(
-        "--device", type=str, default="cpu",
-        help="Dispositivo de cómputo (cpu, cuda)"
-    )
-    parser.add_argument(
-        "--logdir", type=str, default=DIRECTORIO_LOGS,
-        help="Directorio para logs de TensorBoard"
-    )
+# ------------------------------------------------------------------
+# Main
+# ------------------------------------------------------------------
+def main():
+    parser = argparse.ArgumentParser(description="Self-Play Corazones RL v4")
+    parser.add_argument("--resume", type=str, default=None)
+    parser.add_argument("--steps", type=int, default=5_000_000)
+    parser.add_argument("--snapshot-every", type=int, default=50_000)
+    parser.add_argument("--self-play", action="store_true")
+    parser.add_argument("--prob-bot", type=float, default=0.15)
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--device", type=str, default="cpu")
+    parser.add_argument("--logdir", type=str, default=DIRECTORIO_LOGS)
     args = parser.parse_args()
 
     print("=" * 60)
-    print("Pipeline de Entrenamiento — Corazones RL")
+    print("Self-Play Corazones RL v4")
     print("=" * 60)
-    print(f"  Dispositivo: {args.device}")
-    print(f"  Pasos totales: {args.steps:,}")
-    print(f"  Snapshot cada: {args.snapshot_every:,}")
     print(f"  Self-Play: {args.self_play}")
-    print(f"  Semilla: {args.seed}")
-    print(f"  Directorio modelos: {DIRECTORIO_MODELOS}")
-    print(f"  Logs TensorBoard: {args.logdir}")
+    print(f"  Pasos: {args.steps:,}")
+    print(f"  Snapshot cada: {args.snapshot_every:,}")
+    snapshots = listar_snapshots()
+    print(f"  Snapshots disponibles: {len(snapshots)}")
     print("-" * 60)
 
-    # Configurar semillas globales
     random.seed(args.seed)
     np.random.seed(args.seed)
 
-    try:
-        from sb3_contrib import MaskablePPO
-    except ImportError:
-        print("ERROR: sb3-contrib no está instalado.")
-        print("  Instálalo con: pip install sb3-contrib")
-        sys.exit(1)
+    from sb3_contrib import MaskablePPO
 
-    # Crear entorno inicial
-    if args.self_play and listar_snapshots():
-        print("Modo Self-Play: buscando snapshots históricos...")
-        snapshots = listar_snapshots()
-        print(f"  Snapshots disponibles: {len(snapshots)}")
+    vecnorm_path = os.path.join(DIRECTORIO_VECNORM, "vecnorm.pkl")
+
+    if args.self_play and len(snapshots) >= 2:
+        print("Modo SELF-PLAY: oponentes = snapshots históricos")
+        def env_fn(): return crear_entorno_self_play(seed=None, prob_bot=args.prob_bot)
     else:
-        print("Modo Bots: entrenando contra bots heurísticos...")
+        print("Modo BOTS: entrenando contra heurísticos")
+        def env_fn(): return crear_entorno_con_bots(seed=None, shuffle_bots=True)
 
-    env = crear_entorno_con_bots(agente_idx=0, seed=args.seed)
-
-    # Crear o cargar modelo
-    policy_kwargs = obtener_policy_kwargs()
-
-    # Asegurar que el directorio de logs existe
+    env_base = env_fn()
     os.makedirs(args.logdir, exist_ok=True)
+    os.makedirs(DIRECTORIO_VECNORM, exist_ok=True)
 
-    if args.resume and os.path.exists(args.resume + ".zip"):
-        print(f"Cargando checkpoint desde {args.resume}.zip ...")
-        modelo = MaskablePPO.load(args.resume, env=env, device=args.device)
-        # Actualizar tensorboard_log al cargar
-        modelo.tensorboard_log = args.logdir
-        print("  Checkpoint cargado.")
+    # Cargar modelo existente (el último snapshot)
+    if args.resume:
+        ruta_modelo = args.resume if args.resume.endswith(
+            ".zip") else args.resume + ".zip"
     else:
-        print("Creando nuevo modelo MaskablePPO...")
-        modelo = MaskablePPO(
-            "MlpPolicy",
-            env,
-            policy_kwargs=policy_kwargs,
-            verbose=1,
-            device=args.device,
-            tensorboard_log=args.logdir,
-        )
-        print(f"  Arquitectura: MLP [256, 256, 128]")
-        print(f"  Action Masking: nativo (sb3-contrib)")
+        # Usar el snapshot más reciente como base
+        ruta_modelo = snapshots[-1] + ".zip" if snapshots else None
+        if not ruta_modelo:
+            print("ERROR: No hay snapshots. Entrena primero sin --self-play")
+            sys.exit(1)
 
+    print(f"Cargando modelo base: {ruta_modelo}")
+
+    # Cargar VecNormalize si existe
+    vecnorm_snap = ruta_modelo.replace(".zip", "_vecnorm.pkl")
+    if os.path.exists(vecnorm_snap):
+        venv = crear_entorno_vecnormalizado(env_base, vecnorm_snap)
+        vecnorm_path = vecnorm_snap
+    else:
+        venv = crear_entorno_vecnormalizado(env_base)
+
+    modelo = MaskablePPO.load(ruta_modelo, env=venv,
+                              device=args.device, tensorboard_log=args.logdir)
+
+    # Aplicar hiperparámetros de Self-Play
+    hp = obtener_hiperparametros_ppo(args.logdir, args.device)
+    for key in ["learning_rate", "ent_coef", "clip_range", "vf_coef", "gamma",
+                "gae_lambda", "target_kl", "max_grad_norm", "n_steps", "batch_size"]:
+        setattr(modelo, key, hp[key])
+
+    print(f"  lr={modelo.learning_rate}, ent_coef={modelo.ent_coef}")
+    print(f"  vf_coef={modelo.vf_coef}, clip_range={modelo.clip_range}")
     print("-" * 60)
-    print("Iniciando entrenamiento...")
-    print(f"  Monitoriza en tiempo real: tensorboard --logdir {args.logdir}")
-    print("  Métrica clave: rollout/ep_rew_mean (Recompensa Media por Episodio)")
+    print("Métricas clave:")
+    print("  train/value_loss           → <1.0 (normalizado)")
+    print("  train/entropy_loss         → Negativo = explorando")
+    print("  train/explained_variance   → Subiendo hacia >0.8")
+    print("  rollout/ep_rew_mean        → Subiendo")
+    print("-" * 60)
 
     try:
-        entrenar(
-            modelo,
-            env,
-            total_steps=args.steps,
-            snapshot_every=args.snapshot_every,
-        )
+        entrenar(modelo, venv, env_fn, args.steps,
+                 args.snapshot_every, vecnorm_path=vecnorm_path)
     except KeyboardInterrupt:
-        print("\nEntrenamiento interrumpido. Guardando checkpoint...")
-        guardar_snapshot(modelo, 0)
-        print("Checkpoint guardado. Puedes reanudar con --resume")
+        print("\nInterrumpido. Guardando...")
+        if vecnorm_path:
+            venv.save(vecnorm_path)
+        modelo.save(os.path.join(DIRECTORIO_MODELOS, "modelo_final"))
 
-    # Guardar modelo final
-    ruta_final = os.path.join(DIRECTORIO_MODELOS, "modelo_final")
-    modelo.save(ruta_final)
-    print(f"Modelo final guardado en {ruta_final}.zip")
-    print("Entrenamiento completado.")
-
-    env.close()
+    modelo.save(os.path.join(DIRECTORIO_MODELOS, "modelo_final"))
+    if vecnorm_path:
+        venv.save(os.path.join(DIRECTORIO_VECNORM, "vecnorm_final.pkl"))
+    print("Entrenamiento Self-Play completado.")
+    env_base.close()
 
 
 if __name__ == "__main__":
