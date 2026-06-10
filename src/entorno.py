@@ -51,7 +51,8 @@ class CorazonesEnv(gym.Env):
         super().__init__()
 
         if not (0 <= agente_idx <= 3):
-            raise ValueError(f"agente_idx debe estar entre 0 y 3, recibido {agente_idx}")
+            raise ValueError(
+                f"agente_idx debe estar entre 0 y 3, recibido {agente_idx}")
 
         self.agente_idx: int = agente_idx
 
@@ -367,7 +368,8 @@ class CorazonesEnv(gym.Env):
         # --- [172:176] Puntajes históricos (normalizados /100) ---
         for jug_idx in range(4):
             rel = (jug_idx - a) % 4
-            obs[172 + rel] = min(self._puntuacion_historica[jug_idx] / 100.0, 1.0)
+            obs[172 +
+                rel] = min(self._puntuacion_historica[jug_idx] / 100.0, 1.0)
 
         # --- [176:180] Puntos de la mano actual (normalizados /26) ---
         for jug_idx in range(4):
