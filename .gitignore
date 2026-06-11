@@ -29,6 +29,22 @@ htmlcov/
 .pyre/
 .hypothesis/
 
+# Modelos entrenados y logs (archivos binarios grandes)
+modelos_historicos/
+logs/
+vecnormalize/
+
+# TensorBoard
+*.tfevents.*
+
+# VS Code / IDE
+.vscode/
+.agents/
+
+# OS
+.DS_Store
+Thumbs.db
+
 # Jupyter
 .ipynb_checkpoints/
 

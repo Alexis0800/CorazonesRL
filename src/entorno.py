@@ -37,22 +37,21 @@ class CorazonesEnv(gym.Env):
     # ------------------------------------------------------------------
     # Constantes de recompensa
     # ------------------------------------------------------------------
-    # Recompensas por evento (escala consistente, todas en rango ±1 a ±10)
+    # Recompensas por evento (casting de cartas)
     REWARD_CORAZON: float = -1.0
     REWARD_DAMA_PICAS: float = -10.0
-    REWARD_SHOOTING_MOON: float = 30.0
-    # Recompensa final DOMINANTE (ganar la partida es lo que importa)
-    REWARD_PRIMERO: float = 100.0
-    REWARD_SEGUNDO: float = 40.0
-    REWARD_TERCERO: float = -40.0
-    REWARD_CUARTO: float = -100.0
+    REWARD_SHOOTING_MOON: float = 50.0
+    # Recompensa final: ganar la partida es lo más importante (5x refuerzo)
+    REWARD_PRIMERO: float = 500.0
+    REWARD_SEGUNDO: float = 200.0
+    REWARD_TERCERO: float = -200.0
+    REWARD_CUARTO: float = -500.0
 
-    # Recompensas densas (reward shaping) — señales sutiles, no dominantes
+    # Recompensas densas (reward shaping): señales sutiles, no dominantes
     REWARD_NO_GANAR_BAZA_CON_PUNTOS: float = 0.5
     REWARD_DESCARTAR_CORAZON_SEGURO: float = 0.3
     REWARD_DESCARTAR_DAMA_SEGURO: float = 3.0
     REWARD_GANAR_BAZA_SIN_PUNTOS: float = -0.15
-    # Nueva: penalización por estar perdiendo al final de la mano
     REWARD_PERDER_MANO: float = -2.0
     REWARD_GANAR_MANO: float = 2.0
 
@@ -381,7 +380,7 @@ class CorazonesEnv(gym.Env):
         """Calcula la recompensa de fin de partida basada en la posición final.
 
         Returns:
-            Recompensa según el puesto: +1000 (1º), +300 (2º), -300 (3º), -1000 (4º).
+            Recompensa según el puesto: +500 (1º), +200 (2º), -200 (3º), -500 (4º).
         """
         # Ordenar jugadores por puntuación (menor es mejor)
         puntuaciones = list(self._puntuacion_historica)

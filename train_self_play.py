@@ -309,7 +309,7 @@ def main():
 
     # Aplicar hiperparámetros de Self-Play
     hp = obtener_hiperparametros_ppo(args.logdir, args.device)
-    for key in ["learning_rate", "ent_coef", "clip_range", "vf_coef", "gamma",
+    for key in ["learning_rate", "ent_coef", "vf_coef", "gamma",
                 "gae_lambda", "target_kl", "max_grad_norm", "n_steps", "batch_size"]:
         setattr(modelo, key, hp[key])
 

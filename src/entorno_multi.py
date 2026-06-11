@@ -37,15 +37,15 @@ class CorazonesAEC:
     }
 
     # ------------------------------------------------------------------
-    # Constantes de recompensa
+    # Constantes de recompensa (sincronizadas con CorazonesEnv)
     # ------------------------------------------------------------------
     REWARD_CORAZON: float = -1.0
-    REWARD_DAMA_PICAS: float = -13.0
+    REWARD_DAMA_PICAS: float = -10.0
     REWARD_SHOOTING_MOON: float = 50.0
-    REWARD_PRIMERO: float = 1000.0
-    REWARD_SEGUNDO: float = 300.0
-    REWARD_TERCERO: float = -300.0
-    REWARD_CUARTO: float = -1000.0
+    REWARD_PRIMERO: float = 500.0
+    REWARD_SEGUNDO: float = 200.0
+    REWARD_TERCERO: float = -200.0
+    REWARD_CUARTO: float = -500.0
     PUNTUACION_MAXIMA: float = 100.0
 
     def __init__(self) -> None:
