@@ -255,7 +255,8 @@ if __name__ == "__main__":
 
     print("-" * 55)
     print(f"Resultados ({metricas['total_partidas']} partidas):")
-    print(f"  🥇 1º lugar: {metricas['pct_primero']:.1%} ({metricas['victorias']} victorias)")
+    print(
+        f"  🥇 1º lugar: {metricas['pct_primero']:.1%} ({metricas['victorias']} victorias)")
     print(f"  🥈 2º lugar: {metricas['pct_segundo']:.1%}")
     print(f"  📊 Top-2:    {metricas['pct_top2']:.1%}")
     print(f"  🥉 3º lugar: {metricas['pct_tercero']:.1%}")

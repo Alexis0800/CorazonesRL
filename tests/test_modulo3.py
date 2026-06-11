@@ -450,8 +450,10 @@ class TestNormalizacionEvaluacion:
             assert obs_rms is not None, "obs_rms debe ser accesible como atributo"
             mean = np.array(obs_rms.mean)
             var = np.array(obs_rms.var)
-            assert mean.shape == (187,), f"mean shape debe ser (187,), es {mean.shape}"
-            assert var.shape == (187,), f"var shape debe ser (187,), es {var.shape}"
+            assert mean.shape == (
+                187,), f"mean shape debe ser (187,), es {mean.shape}"
+            assert var.shape == (
+                187,), f"var shape debe ser (187,), es {var.shape}"
             assert obs_rms.count > 0, "count debe ser > 0 tras simular pasos"
 
             # Probar normalización manual (equivalente a SB3)
@@ -523,7 +525,8 @@ class TestMetricasMultiNivel:
         ev_mod = importlib.import_module("evaluar_modelo")
 
         # Simular resultados: 3 primeros, 1 segundo, 2 terceros, 0 cuartos en 6 partidas
-        posiciones = [0, 0, 0, 1, 2, 2]  # índices de posición: 0=1º, 1=2º, 2=3º, 3=4º
+        # índices de posición: 0=1º, 1=2º, 2=3º, 3=4º
+        posiciones = [0, 0, 0, 1, 2, 2]
         puntuaciones = [5.0, 10.0, 15.0, 20.0, 25.0, 30.0]
         metricas = ev_mod._construir_metricas(posiciones, puntuaciones, 6)
 
@@ -539,7 +542,8 @@ class TestMetricasMultiNivel:
         assert metricas["pct_primero"] == pytest.approx(0.5)  # 3/6
         assert metricas["pct_segundo"] == pytest.approx(1 / 6)
         assert metricas["pct_top2"] == pytest.approx(4 / 6)  # 3+1
-        assert metricas["punt_promedio"] == pytest.approx(17.5)  # (5+10+15+20+25+30)/6
+        assert metricas["punt_promedio"] == pytest.approx(
+            17.5)  # (5+10+15+20+25+30)/6
         assert metricas["total_partidas"] == 6
         assert metricas["victorias"] == 3
 

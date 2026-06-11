@@ -264,7 +264,8 @@ def crear_entorno_self_play_v2(
         Entorno CorazonesEnv configurado con oponentes mixtos.
     """
     todos_snapshots = listar_snapshots_v2()
-    snapshots = _filtrar_snapshots_por_calidad(todos_snapshots, min_snapshot_steps)
+    snapshots = _filtrar_snapshots_por_calidad(
+        todos_snapshots, min_snapshot_steps)
 
     bots = [bot_conservador, bot_agresivo, bot_evasivo]
     random.shuffle(bots)
@@ -480,9 +481,11 @@ def entrenar(
         )
 
         # Pruning: eliminar snapshots antiguos si exceden el máximo
-        eliminados = _aplicar_snapshot_pruning(directorio_snapshots, max_snapshots)
+        eliminados = _aplicar_snapshot_pruning(
+            directorio_snapshots, max_snapshots)
         if eliminados > 0:
-            print(f"  [Pruning] {eliminados} snapshot(s) antiguo(s) eliminado(s)")
+            print(
+                f"  [Pruning] {eliminados} snapshot(s) antiguo(s) eliminado(s)")
 
     return paso_actual
 
@@ -532,11 +535,13 @@ def main():
 
     # --- Determinar el modelo base ---
     if args.resume:
-        ruta_modelo = args.resume if args.resume.endswith(".zip") else args.resume + ".zip"
+        ruta_modelo = args.resume if args.resume.endswith(
+            ".zip") else args.resume + ".zip"
         print(f"Reanudando desde: {ruta_modelo}")
         inicio_paso = _extraer_paso_de_ruta(ruta_modelo)
     elif args.base_model:
-        ruta_modelo = args.base_model if args.base_model.endswith(".zip") else args.base_model + ".zip"
+        ruta_modelo = args.base_model if args.base_model.endswith(
+            ".zip") else args.base_model + ".zip"
         print(f"Modelo base: {ruta_modelo}")
         inicio_paso = _extraer_paso_de_ruta(ruta_modelo)
     else:
@@ -564,13 +569,17 @@ def main():
     # --- Modo de entrenamiento ---
     if args.self_play:
         snaps_v2 = listar_snapshots_v2()
-        snaps_calidad = _filtrar_snapshots_por_calidad(snaps_v2, MIN_SNAPSHOT_STEPS)
+        snaps_calidad = _filtrar_snapshots_por_calidad(
+            snaps_v2, MIN_SNAPSHOT_STEPS)
         if len(snaps_calidad) >= 2:
-            print(f"Modo SELF-PLAY v2: {len(snaps_calidad)} snapshots de calidad")
+            print(
+                f"Modo SELF-PLAY v2: {len(snaps_calidad)} snapshots de calidad")
             def env_fn(): return crear_entorno_self_play_v2(
                 seed=None, prob_bot=args.prob_bot)
         else:
-            print(f"Modo BOTS (snapshots de calidad insuficientes: {len(snaps_calidad)})")
+            print(
+                f"Modo BOTS (snapshots de calidad insuficientes: {len(snaps_calidad)})")
+
             def env_fn(): return crear_entorno_con_bots(seed=None, shuffle_bots=True)
     else:
         print("Modo BOTS: entrenando contra heurísticos")

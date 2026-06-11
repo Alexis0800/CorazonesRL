@@ -8,7 +8,7 @@
 
 ## 📦 1. Preparar el ZIP para transferir
 
-### En esta PC (origen) — ejecutar en PowerShell:
+### En esta PC (origen) — ejecutar en PowerShell
 
 ```powershell
 # Ir a la raíz del proyecto
@@ -45,11 +45,11 @@ Write-Host "ZIP completo creado"
 
 ### 2.1 Requisitos previos
 
-- **Python 3.11+** instalado (descargar de https://python.org)
+- **Python 3.11+** instalado (descargar de <https://python.org>)
 - ⚠️ **Desactivar los App Execution Aliases** de Python en Windows:
   - Settings → Apps → Advanced app settings → App execution aliases
   - Desactivar `python.exe` y `python3.exe`
-- **Git** instalado (https://git-scm.com)
+- **Git** instalado (<https://git-scm.com>)
 
 ### 2.2 Clonar o copiar el proyecto
 
@@ -156,6 +156,7 @@ tensorboard --logdir logs/
 ```
 
 Métricas clave a vigilar:
+
 - `train/explained_variance` → Debe mantenerse > 0.7
 - `train/entropy_loss` → Negativo = explorando (bien)
 - `train/value_loss` → < 1.0 y estable
