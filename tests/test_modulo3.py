@@ -390,3 +390,371 @@ class TestPipelineEntrenamiento:
         """El directorio de snapshots históricos debe crearse automáticamente."""
         from train_self_play import DIRECTORIO_MODELOS
         assert DIRECTORIO_MODELOS is not None
+
+
+# ============================================================
+# Pruebas del Script de Evaluación (evaluar_modelo.py)
+# ============================================================
+
+class TestNormalizacionEvaluacion:
+    """Verifica que la normalización de observaciones funciona correctamente
+    con archivos VecNormalize de SB3 (objetos, no diccionarios)."""
+
+    def test_normalizar_con_vecnormalize_objeto(self):
+        """Corrección del bug: VecNormalize se carga como objeto, NO como dict.
+        data.get('obs_rms') falla. Debe usarse vn.obs_rms directamente."""
+        import pickle
+        import numpy as np
+        from stable_baselines3.common.vec_env import VecNormalize, DummyVecEnv
+        from src.entorno import CorazonesEnv
+        import tempfile
+        import os
+
+        # Crear un VecNormalize real y guardarlo
+        env = CorazonesEnv(agente_idx=0)
+        venv = VecNormalize(
+            DummyVecEnv([lambda: env]),
+            norm_obs=True,
+            norm_reward=False,
+        )
+        # Simular algunos pasos para poblar estadísticas
+        venv.reset()
+        for _ in range(100):
+            mask = env.action_masks()
+            if np.any(mask):
+                legales = np.where(mask)[0]
+                action = np.random.choice(legales)
+                obs, _, done, _, _ = env.step(int(action))
+                if done:
+                    env.reset()
+        env.close()
+
+        # Guardar y recargar
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "vecnorm.pkl")
+            venv.save(path)
+
+            # === Método ERRÓNEO (el bug actual) ===
+            with open(path, "rb") as f:
+                data = pickle.load(f)
+            # Verificar que NO es un dict
+            assert not isinstance(data, dict), (
+                "VecNormalize pickle NO devuelve un dict, devuelve un objeto VecNormalize"
+            )
+            # Verificar que data.get() FALLA (causa recursión infinita)
+            with pytest.raises(Exception):
+                data.get("obs_rms", None)
+
+            # === Método CORRECTO ===
+            obs_rms = data.obs_rms
+            assert obs_rms is not None, "obs_rms debe ser accesible como atributo"
+            mean = np.array(obs_rms.mean)
+            var = np.array(obs_rms.var)
+            assert mean.shape == (187,), f"mean shape debe ser (187,), es {mean.shape}"
+            assert var.shape == (187,), f"var shape debe ser (187,), es {var.shape}"
+            assert obs_rms.count > 0, "count debe ser > 0 tras simular pasos"
+
+            # Probar normalización manual (equivalente a SB3)
+            obs_raw = np.ones(187, dtype=np.float32)
+            obs_norm = np.clip(
+                (obs_raw - mean) / np.sqrt(var + 1e-8), -10.0, 10.0
+            ).astype(np.float32)
+            assert obs_norm.shape == (187,)
+            assert obs_norm.dtype == np.float32
+            # Verificar que la normalización efectivamente cambió los valores
+            assert not np.allclose(obs_norm, obs_raw), (
+                "La normalización debe modificar los valores de la observación"
+            )
+
+    def test_normalizar_sin_archivo_devuelve_raw(self):
+        """Si el archivo VecNormalize no existe, debe devolver obs sin modificar."""
+        import numpy as np
+        # Importar la función del script de evaluación
+        import importlib
+        ev_mod = importlib.import_module("evaluar_modelo")
+        normalizar = ev_mod.normalizar_obs_si_hay_stats
+
+        obs = np.ones(187, dtype=np.float32)
+        result = normalizar(obs, "ruta/que/no/existe.pkl")
+        assert np.array_equal(result, obs), (
+            "Sin archivo vecnorm, debe devolver la obs sin cambios"
+        )
+
+    def test_normalizar_con_path_none_devuelve_raw(self):
+        """Si vecnorm_path es None o vacío, debe devolver obs sin modificar."""
+        import numpy as np
+        import importlib
+        ev_mod = importlib.import_module("evaluar_modelo")
+        normalizar = ev_mod.normalizar_obs_si_hay_stats
+
+        obs = np.ones(187, dtype=np.float32)
+        result_none = normalizar(obs, None)
+        result_empty = normalizar(obs, "")
+        assert np.array_equal(result_none, obs)
+        assert np.array_equal(result_empty, obs)
+
+
+class TestMetricasMultiNivel:
+    """Verifica que la evaluación retorna métricas de clasificación completas:
+    porcentaje en 1º, 2º, 3º, 4º lugar y puntuación promedio."""
+
+    def test_evaluar_retorna_diccionario_metricas(self):
+        """La función evaluar debe retornar un dict con todas las métricas."""
+        import importlib
+        ev_mod = importlib.import_module("evaluar_modelo")
+        # Verificar que existe la nueva función de métricas
+        assert hasattr(ev_mod, "evaluar_con_metricas"), (
+            "Debe existir la función evaluar_con_metricas"
+        )
+
+    def test_formato_metricas(self):
+        """Verificar que las métricas tienen el formato esperado."""
+        import importlib
+        ev_mod = importlib.import_module("evaluar_modelo")
+
+        # Verificar que existe la función que construye el dict de métricas
+        assert hasattr(ev_mod, "_construir_metricas"), (
+            "Debe existir _construir_metricas para generar el dict de resultados"
+        )
+
+    def test_suma_posiciones_es_100(self):
+        """La suma de porcentajes de las 4 posiciones debe ser 100%."""
+        import importlib
+        ev_mod = importlib.import_module("evaluar_modelo")
+
+        # Simular resultados: 3 primeros, 1 segundo, 2 terceros, 0 cuartos en 6 partidas
+        posiciones = [0, 0, 0, 1, 2, 2]  # índices de posición: 0=1º, 1=2º, 2=3º, 3=4º
+        puntuaciones = [5.0, 10.0, 15.0, 20.0, 25.0, 30.0]
+        metricas = ev_mod._construir_metricas(posiciones, puntuaciones, 6)
+
+        suma = (
+            metricas["pct_primero"]
+            + metricas["pct_segundo"]
+            + metricas["pct_tercero"]
+            + metricas["pct_cuarto"]
+        )
+        assert abs(suma - 1.0) < 0.001, (
+            f"Suma de posiciones debe ser 100%, es {suma:.1%}"
+        )
+        assert metricas["pct_primero"] == pytest.approx(0.5)  # 3/6
+        assert metricas["pct_segundo"] == pytest.approx(1 / 6)
+        assert metricas["pct_top2"] == pytest.approx(4 / 6)  # 3+1
+        assert metricas["punt_promedio"] == pytest.approx(17.5)  # (5+10+15+20+25+30)/6
+        assert metricas["total_partidas"] == 6
+        assert metricas["victorias"] == 3
+
+    def test_metrica_victoria_es_menor_puntuacion(self):
+        """Victoria en Corazones = tener la puntuación MÁS BAJA (menos puntos)."""
+        import importlib
+        ev_mod = importlib.import_module("evaluar_modelo")
+
+        # Caso: agente tiene 5 puntos, rivales tienen 15, 20, 25
+        # El agente va PRIMERO (menos puntos = mejor)
+        punt_agente = 5
+        punt_rivales = [15, 20, 25]
+        posicion = ev_mod._calcular_posicion(punt_agente, punt_rivales)
+        assert posicion == 0, (
+            f"Con {punt_agente} pts vs {punt_rivales}, debería ser 1º (índice 0), fue {posicion}"
+        )
+
+        # Caso: agente tiene 30 puntos, todos los demás menos → 4º lugar
+        posicion = ev_mod._calcular_posicion(30, [5, 10, 15])
+        assert posicion == 3, (
+            f"Con 30 pts vs [5,10,15], debería ser 4º (índice 3), fue {posicion}"
+        )
+
+        # Caso: empate en el mejor lugar → gana el que tenga menos puntos
+        posicion = ev_mod._calcular_posicion(10, [10, 20, 30])
+        assert posicion == 0, "Empate en 10 con otro → debe ser considerado 1º"
+
+    def test_resultado_referencia_aleatoria(self):
+        """Un bot puramente aleatorio debería tener ~25% win rate
+        y ~25% en cada posición (verificación estadística débil)."""
+        import numpy as np
+        from src.entorno import CorazonesEnv
+
+        victorias = 0
+        n = 100
+        for seed in range(n):
+            env = CorazonesEnv(agente_idx=0)
+            env.reset(seed=seed)
+            done = False
+            while not done:
+                mask = env.action_masks()
+                legales = np.where(mask)[0]
+                if len(legales) > 0:
+                    action = np.random.choice(legales)
+                    _, _, terminated, truncated, _ = env.step(int(action))
+                    done = terminated or truncated
+                else:
+                    break
+            punt_agente = env._puntuacion_historica[0]
+            punt_rivales = [env._puntuacion_historica[i] for i in range(1, 4)]
+            if punt_agente < min(punt_rivales):
+                victorias += 1
+            env.close()
+
+        wr = victorias / n
+        # Con 100 partidas, 25% aleatorio debería dar entre 10% y 40%
+        assert 0.10 <= wr <= 0.40, (
+            f"Bot aleatorio: wr={wr:.1%}, esperado ~25% (rango [10%, 40%] para 100 muestras)"
+        )
+
+
+# ============================================================
+# Pruebas del Pipeline de Entrenamiento v2 (Anti-Colapso)
+# ============================================================
+
+class TestQualityFilterSnapshots:
+    """Verifica el filtro de calidad para snapshots en self-play v2."""
+
+    def test_filtrar_snapshots_por_calidad_min_pasos(self):
+        """Solo se usan como oponentes snapshots con al menos min_steps.
+        Esto evita que el agente entrene contra versiones demasiado débiles."""
+        import importlib
+        ts = importlib.import_module("train_self_play")
+
+        # Simular lista de snapshots
+        snaps = [
+            "snapshot_0000050000",
+            "snapshot_0000150000",
+            "snapshot_0000300000",
+            "snapshot_0000500000",
+            "snapshot_0001000000",
+        ]
+        # Con min_steps=200000, solo deberían quedar los >= 200k
+        filtrados = ts._filtrar_snapshots_por_calidad(snaps, min_steps=200000)
+        assert len(filtrados) == 3, (
+            f"Esperados 3 snapshots >= 200k (300k, 500k, 1M), obtenidos {len(filtrados)}: {filtrados}"
+        )
+        assert "snapshot_0000300000" in filtrados
+        assert "snapshot_0000500000" in filtrados
+        assert "snapshot_0001000000" in filtrados
+
+    def test_filtrar_snapshots_vacio_sin_suficientes(self):
+        """Si no hay snapshots que cumplan el mínimo, devuelve lista vacía."""
+        import importlib
+        ts = importlib.import_module("train_self_play")
+
+        snaps = ["snapshot_0000050000", "snapshot_0000100000"]
+        filtrados = ts._filtrar_snapshots_por_calidad(snaps, min_steps=500000)
+        assert filtrados == [], (
+            "Sin snapshots que cumplan el mínimo, debe devolver lista vacía"
+        )
+
+    def test_filtrar_snapshots_lista_vacia(self):
+        """Lista vacía de entrada produce lista vacía de salida."""
+        import importlib
+        ts = importlib.import_module("train_self_play")
+
+        assert ts._filtrar_snapshots_por_calidad([], min_steps=100000) == []
+
+    def test_filtrar_snapshots_extrae_paso_correctamente(self):
+        """La extracción del número de paso desde el nombre es robusta."""
+        import importlib
+        ts = importlib.import_module("train_self_play")
+
+        snaps = [
+            "modelos_historicos/v1_backup/snapshot_0000150000",
+            "modelos_historicos/v2/snapshot_0000250000",
+        ]
+        filtrados = ts._filtrar_snapshots_por_calidad(snaps, min_steps=100000)
+        # 150k >= 100k, 250k >= 100k → ambos pasan
+        assert len(filtrados) == 2
+
+
+class TestHiperparametrosV2:
+    """Verifica que los hiperparámetros v2 son los correctos para
+    prevenir el colapso de política."""
+
+    def test_hiperparametros_v2_lr_y_ent_coef(self):
+        """V2 usa learning_rate=1e-4 y ent_coef=0.08 (más exploración)."""
+        import importlib
+        ts = importlib.import_module("train_self_play")
+
+        hp = ts.obtener_hiperparametros_v2("dummy_logdir", "cpu")
+        assert hp["learning_rate"] == 1e-4, (
+            f"V2 debe usar lr=1e-4, tiene {hp['learning_rate']}"
+        )
+        assert hp["ent_coef"] == 0.08, (
+            f"V2 debe usar ent_coef=0.08, tiene {hp['ent_coef']}"
+        )
+
+    def test_hiperparametros_v2_prob_bot_default(self):
+        """V2 usa prob_bot=0.40 por defecto (40% bots, 60% snapshots)."""
+        import importlib
+        ts = importlib.import_module("train_self_play")
+
+        assert hasattr(ts, "PROB_BOT_V2"), "Debe existir PROB_BOT_V2"
+        assert ts.PROB_BOT_V2 == 0.40, (
+            f"PROB_BOT_V2 debe ser 0.40, es {ts.PROB_BOT_V2}"
+        )
+
+    def test_hiperparametros_v2_min_snapshot_steps(self):
+        """V2 define un umbral mínimo de pasos para snapshots de calidad."""
+        import importlib
+        ts = importlib.import_module("train_self_play")
+
+        assert hasattr(ts, "MIN_SNAPSHOT_STEPS"), (
+            "Debe existir MIN_SNAPSHOT_STEPS como umbral de calidad"
+        )
+        assert ts.MIN_SNAPSHOT_STEPS >= 100000, (
+            f"MIN_SNAPSHOT_STEPS debe ser >= 100k, es {ts.MIN_SNAPSHOT_STEPS}"
+        )
+
+    def test_hiperparametros_v2_max_snapshots_pool(self):
+        """V2 limita el pool de snapshots a máximo N para pruning."""
+        import importlib
+        ts = importlib.import_module("train_self_play")
+
+        assert hasattr(ts, "MAX_SNAPSHOTS_POOL"), (
+            "Debe existir MAX_SNAPSHOTS_POOL para pruning"
+        )
+        assert 10 <= ts.MAX_SNAPSHOTS_POOL <= 50, (
+            f"MAX_SNAPSHOTS_POOL debe estar entre 10 y 50, es {ts.MAX_SNAPSHOTS_POOL}"
+        )
+
+
+class TestDirectoriosV2:
+    """Verifica la nueva estructura de directorios para v2."""
+
+    def test_directorio_modelos_v2_definido(self):
+        """Debe existir una constante para el directorio de snapshots v2."""
+        import importlib
+        ts = importlib.import_module("train_self_play")
+
+        assert hasattr(ts, "DIRECTORIO_MODELOS_V2"), (
+            "Debe existir DIRECTORIO_MODELOS_V2"
+        )
+        assert "v2" in ts.DIRECTORIO_MODELOS_V2, (
+            f"El directorio v2 debe contener 'v2' en la ruta: {ts.DIRECTORIO_MODELOS_V2}"
+        )
+
+    def test_directorio_v2_se_crea_automaticamente(self):
+        """El directorio v2 se crea al importar el módulo."""
+        import os
+        import importlib
+        ts = importlib.import_module("train_self_play")
+
+        # Forzar creación
+        os.makedirs(ts.DIRECTORIO_MODELOS_V2, exist_ok=True)
+        assert os.path.isdir(ts.DIRECTORIO_MODELOS_V2), (
+            f"El directorio {ts.DIRECTORIO_MODELOS_V2} debe existir"
+        )
+
+    def test_listar_snapshots_v2_solo_v2(self):
+        """listar_snapshots_v2() solo lista snapshots del directorio v2."""
+        import os
+        import importlib
+        ts = importlib.import_module("train_self_play")
+
+        # Debe existir la función
+        assert hasattr(ts, "listar_snapshots_v2"), (
+            "Debe existir listar_snapshots_v2()"
+        )
+        # Verificar que no incluye snapshots del directorio viejo
+        snaps = ts.listar_snapshots_v2()
+        for s in snaps:
+            assert "v2" in s or os.path.basename(s).startswith("snapshot_"), (
+                f"Snapshot v2 no debe contener rutas del directorio viejo: {s}"
+            )
