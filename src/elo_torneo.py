@@ -372,9 +372,11 @@ def torneo_elo(
         modo = "Puro (adyacentes)" if elo_puro else "Normal (bots)"
         dirs_list = ", ".join(sorted(set(s[1] for s in snaps)))
         print("=" * 60)
-        print(f"🏆 Torneo Elo — {len(snaps)} snapshots ({dirs_list}) | Modo: {modo}")
+        print(
+            f"🏆 Torneo Elo — {len(snaps)} snapshots ({dirs_list}) | Modo: {modo}")
         print(f"   Partidas por enfrentamiento: {num_partidas}")
-        print(f"   Total de partidas: {num_partidas * len(snaps) * (len(snaps) - 1) // 2}")
+        print(
+            f"   Total de partidas: {num_partidas * len(snaps) * (len(snaps) - 1) // 2}")
         print("=" * 60)
 
     # Inicializar ratings (key = ruta)

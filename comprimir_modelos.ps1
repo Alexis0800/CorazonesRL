@@ -27,15 +27,15 @@ New-Item -ItemType Directory -Path $v5_snaps -Force | Out-Null
 
 Write-Host "  v5: últimos 10 snapshots..."
 Get-ChildItem "$root\modelos_historicos\v5\snapshot_*.zip" `
-    | Sort-Object Name `
-    | Select-Object -Last 10 `
-    | Copy-Item -Destination $v5_snaps
+| Sort-Object Name `
+| Select-Object -Last 10 `
+| Copy-Item -Destination $v5_snaps
 
 # v5 vecnorm files
 Get-ChildItem "$root\modelos_historicos\v5\*vecnorm*" `
-    | Sort-Object Name `
-    | Select-Object -Last 10 `
-    | Copy-Item -Destination $v5_snaps -ErrorAction SilentlyContinue
+| Sort-Object Name `
+| Select-Object -Last 10 `
+| Copy-Item -Destination $v5_snaps -ErrorAction SilentlyContinue
 
 # eval_log
 Copy-Item "$root\modelos_historicos\v5\eval_log.jsonl" $v5_snaps -ErrorAction SilentlyContinue
@@ -46,9 +46,9 @@ New-Item -ItemType Directory -Path $v6_snaps -Force | Out-Null
 
 Write-Host "  v6: últimos 5 snapshots (referencia)..."
 Get-ChildItem "$root\modelos_historicos\v6\snapshot_*.zip" `
-    | Sort-Object Name `
-    | Select-Object -Last 5 `
-    | Copy-Item -Destination $v6_snaps -ErrorAction SilentlyContinue
+| Sort-Object Name `
+| Select-Object -Last 5 `
+| Copy-Item -Destination $v6_snaps -ErrorAction SilentlyContinue
 
 # --- VecNormalize completo ---
 Write-Host "  VecNormalize..."
