@@ -69,7 +69,7 @@ Write-Host ""
 Write-Host "Para usar en la otra PC:" -ForegroundColor Yellow
 Write-Host "  1. Copiar corazones_modelos.zip a la raíz del proyecto"
 Write-Host "  2. Expand-Archive corazones_modelos.zip -DestinationPath . -Force"
-Write-Host "  3. python train_self_play.py --self-play --steps 5000000 --eval-every 5"
+Write-Host '  3. python train_self_play.py --self-play --steps 5000000 --eval-every 5'
 
 # Limpiar temp
 Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue

@@ -447,22 +447,35 @@ def torneo_elo(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Torneo Elo entre snapshots históricos de Corazones RL")
-    parser.add_argument("--directorio", type=str, default=_MODELOS_V5_DIR,
-                        help="Directorio de snapshots")
+    parser.add_argument("--directorio", type=str, default=None,
+                        help="Directorio único de snapshots (atajo, equivale a --directorios)")
+    parser.add_argument("--directorios", type=str, nargs="+", default=None,
+                        help="Directorios de snapshots (múltiples)")
     parser.add_argument("--partidas", type=int, default=30,
                         help="Partidas por enfrentamiento (default=30)")
     parser.add_argument("--min-paso", type=int, default=0,
                         help="Paso mínimo (default=0 = todos)")
     parser.add_argument("--max-snapshots", type=int, default=15,
                         help="Máximo de snapshots en el torneo (default=15)")
+    parser.add_argument("--elo-puro", action="store_true", default=False,
+                        help="Usar snapshots adyacentes en vez de bots (más preciso)")
     args = parser.parse_args()
 
+    # Resolver directorios
+    if args.directorios:
+        directorios = args.directorios
+    elif args.directorio:
+        directorios = [args.directorio]
+    else:
+        directorios = [_MODELOS_V5_DIR]
+
     resultado = torneo_elo(
-        directorio=args.directorio,
+        directorios=directorios,
         num_partidas=args.partidas,
         min_paso=args.min_paso,
         max_snapshots=args.max_snapshots,
         verbose=True,
+        elo_puro=args.elo_puro,
     )
 
     if not resultado["ranking"]:
@@ -475,11 +488,11 @@ if __name__ == "__main__":
     print(f"{'Pos':<5} {'Snapshot':<30} {'Paso':<12} {'Elo':<8} {'Δ desde anterior'}")
     print("-" * 60)
 
-    for pos, (snap, rating, paso) in enumerate(resultado["ranking"]):
+    for pos, (snap, rating, paso, origen) in enumerate(resultado["ranking"]):
         nombre = resultado["nombres"].get(snap, os.path.basename(snap))
         delta = ""
         if pos > 0:
-            _, prev_rating, _ = resultado["ranking"][pos - 1]
+            _, prev_rating, _, _ = resultado["ranking"][pos - 1]
             diff = rating - prev_rating
             delta = f"{diff:+.0f}"
         print(f"{pos+1:<5} {nombre:<30} {paso:>10,}  {rating:<8.0f} {delta}")
