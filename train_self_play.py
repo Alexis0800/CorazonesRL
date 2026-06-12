@@ -40,17 +40,26 @@ DIRECTORIO_MODELOS = os.path.join(os.path.dirname(
     os.path.abspath(__file__)), "modelos_historicos")
 DIRECTORIO_MODELOS_V2 = os.path.join(os.path.dirname(
     os.path.abspath(__file__)), "modelos_historicos", "v2")
+DIRECTORIO_MODELOS_V5 = os.path.join(os.path.dirname(
+    os.path.abspath(__file__)), "modelos_historicos", "v5")
 DIRECTORIO_LOGS = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "logs")
 DIRECTORIO_VECNORM = os.path.join(os.path.dirname(
     os.path.abspath(__file__)), "vecnormalize")
+DIRECTORIO_VECNORM_V5 = os.path.join(os.path.dirname(
+    os.path.abspath(__file__)), "vecnormalize", "v5")
+DIRECTORIO_MODELOS_V6 = os.path.join(os.path.dirname(
+    os.path.abspath(__file__)), "modelos_historicos", "v6")
+DIRECTORIO_VECNORM_V6 = os.path.join(os.path.dirname(
+    os.path.abspath(__file__)), "vecnormalize", "v6")
 
 # ------------------------------------------------------------------
-# Constantes v2 (anti-colapso de política)
+# Constantes Fase 5B (Self-Play agresivo, mínimo anclaje a bots)
 # ------------------------------------------------------------------
-PROB_BOT_V2: float = 0.40          # 40% bots heurísticos como anclaje
-MIN_SNAPSHOT_STEPS: int = 200_000  # Umbral mínimo de pasos para usar un snapshot
-MAX_SNAPSHOTS_POOL: int = 25       # Máximo de snapshots en el pool activo
+PROB_BOT_V2: float = 0.10          # 10% bots heurísticos (anclaje mínimo)
+MIN_SNAPSHOT_STEPS: int = 500_000  # Solo snapshots maduros (≥500K pasos)
+# Máximo de snapshots en el pool activo (subido a 50 para evitar pruning prematuro)
+MAX_SNAPSHOTS_POOL: int = 50
 
 
 # ------------------------------------------------------------------
@@ -98,8 +107,8 @@ class PoliticaSB3:
         return Carta._TODAS[int(action)]
 
     def _construir_obs_desde_motor(self, motor: Any, jugador_idx: int) -> np.ndarray:
-        """Construye observación de 187 dims desde la perspectiva de jugador_idx."""
-        obs = np.zeros(187, dtype=np.float32)
+        """Construye observación de 190 dims desde la perspectiva de jugador_idx."""
+        obs = np.zeros(190, dtype=np.float32)
         a = jugador_idx
 
         # Mano del jugador
@@ -115,8 +124,9 @@ class PoliticaSB3:
             for c in motor.jugadores[i].bazas_ganadas:
                 obs[104 + c.id] = 1.0
 
-        # Vacíos (no disponibles desde el motor)
-        # Puntajes históricos (no disponibles desde el motor)
+        # Vacíos (no disponibles desde el motor) — quedan en 0
+        # Puntajes históricos (no disponibles desde el motor) — quedan en 0
+        # Features estratégicas v5 (no disponibles desde el motor) — quedan en 0
         return obs
 
 
@@ -156,6 +166,28 @@ def listar_snapshots_v2() -> List[str]:
     """
     os.makedirs(DIRECTORIO_MODELOS_V2, exist_ok=True)
     snaps = glob.glob(os.path.join(DIRECTORIO_MODELOS_V2, "snapshot_*.zip"))
+    snaps.sort(key=lambda p: int(os.path.basename(
+        p).replace("snapshot_", "").replace(".zip", "")))
+    return [p.replace(".zip", "") for p in snaps]
+
+
+def listar_snapshots_v5() -> List[str]:
+    """Lista snapshots del directorio v5 (190 dims), ordenados por paso.
+
+    Returns:
+        Lista de rutas absolutas sin extensión .zip.
+    """
+    os.makedirs(DIRECTORIO_MODELOS_V5, exist_ok=True)
+    snaps = glob.glob(os.path.join(DIRECTORIO_MODELOS_V5, "snapshot_*.zip"))
+    snaps.sort(key=lambda p: int(os.path.basename(
+        p).replace("snapshot_", "").replace(".zip", "")))
+    return [p.replace(".zip", "") for p in snaps]
+
+
+def listar_snapshots_v6() -> List[str]:
+    """Lista snapshots del directorio v6 (190 dims), ordenados por paso."""
+    os.makedirs(DIRECTORIO_MODELOS_V6, exist_ok=True)
+    snaps = glob.glob(os.path.join(DIRECTORIO_MODELOS_V6, "snapshot_*.zip"))
     snaps.sort(key=lambda p: int(os.path.basename(
         p).replace("snapshot_", "").replace(".zip", "")))
     return [p.replace(".zip", "") for p in snaps]
@@ -305,6 +337,103 @@ def crear_entorno_self_play_v2(
     return env
 
 
+def crear_entorno_self_play_v5(
+    agente_idx: int = 0,
+    seed: Optional[int] = None,
+    prob_bot: float = PROB_BOT_V2,
+    min_snapshot_steps: int = MIN_SNAPSHOT_STEPS,
+) -> CorazonesEnv:
+    """Crea entorno Self-Play v5 (190 dims) con snapshots del directorio v5.
+
+    Idéntico a v2 pero usa listar_snapshots_v5() y el directorio v5.
+    """
+    todos_snapshots = listar_snapshots_v5()
+    snapshots = _filtrar_snapshots_por_calidad(
+        todos_snapshots, min_snapshot_steps)
+
+    bots = [bot_conservador, bot_agresivo, bot_evasivo]
+    random.shuffle(bots)
+    politicas: Dict[int, object] = {}
+    bot_idx = 0
+
+    for i in range(4):
+        if i == agente_idx:
+            continue
+
+        usar_bot = random.random() < prob_bot or len(snapshots) < 2
+
+        if not usar_bot:
+            pasos = np.array([_extraer_paso_de_ruta(s) for s in snapshots])
+            pesos = np.exp(np.linspace(0, 2, len(snapshots)))
+            pesos /= pesos.sum()
+
+            snap_elegido = np.random.choice(snapshots, p=pesos)
+
+            from sb3_contrib import MaskablePPO
+            try:
+                modelo_oponente = MaskablePPO.load(snap_elegido, device="cpu")
+                vecnorm_path = snap_elegido + "_vecnorm.pkl"
+                politicas[i] = PoliticaSB3(modelo_oponente, i, vecnorm_path)
+                continue
+            except Exception:
+                pass
+
+        politicas[i] = bots[bot_idx % len(bots)]
+        bot_idx += 1
+
+    env = CorazonesEnv(agente_idx=agente_idx, politicas_oponentes=politicas)
+    if seed is not None:
+        env.reset(seed=seed)
+    return env
+
+
+def crear_entorno_self_play_v6(
+    agente_idx: int = 0,
+    seed: Optional[int] = None,
+    prob_bot: float = PROB_BOT_V2,
+    min_snapshot_steps: int = MIN_SNAPSHOT_STEPS,
+) -> CorazonesEnv:
+    """Crea entorno Self-Play v6 (190 dims) con snapshots del directorio v6."""
+    todos_snapshots = listar_snapshots_v6()
+    snapshots = _filtrar_snapshots_por_calidad(
+        todos_snapshots, min_snapshot_steps)
+
+    bots = [bot_conservador, bot_agresivo, bot_evasivo]
+    random.shuffle(bots)
+    politicas: Dict[int, object] = {}
+    bot_idx = 0
+
+    for i in range(4):
+        if i == agente_idx:
+            continue
+
+        usar_bot = random.random() < prob_bot or len(snapshots) < 2
+
+        if not usar_bot:
+            pasos = np.array([_extraer_paso_de_ruta(s) for s in snapshots])
+            pesos = np.exp(np.linspace(0, 2, len(snapshots)))
+            pesos /= pesos.sum()
+
+            snap_elegido = np.random.choice(snapshots, p=pesos)
+
+            from sb3_contrib import MaskablePPO
+            try:
+                modelo_oponente = MaskablePPO.load(snap_elegido, device="cpu")
+                vecnorm_path = snap_elegido + "_vecnorm.pkl"
+                politicas[i] = PoliticaSB3(modelo_oponente, i, vecnorm_path)
+                continue
+            except Exception:
+                pass
+
+        politicas[i] = bots[bot_idx % len(bots)]
+        bot_idx += 1
+
+    env = CorazonesEnv(agente_idx=agente_idx, politicas_oponentes=politicas)
+    if seed is not None:
+        env.reset(seed=seed)
+    return env
+
+
 # ------------------------------------------------------------------
 # VecNormalize
 # ------------------------------------------------------------------
@@ -385,6 +514,79 @@ def obtener_hiperparametros_v2(logdir: str, device: str) -> Dict:
     }
 
 
+def obtener_hiperparametros_v3(
+    logdir: str,
+    device: str,
+    paso_actual: int = 0,
+) -> Dict:
+    """Hiperparámetros PPO con learning rate schedule en 3 fases.
+
+    El agente necesita exploración agresiva al inicio y fine-tuning
+    conservador al madurar. Un lr fijo de 1e-4 en modelos >5M pasos
+    causa divergencia KL (early stopping frecuente) y oscilación
+    de política.
+
+    Schedule de 3 fases:
+        Fase 1 (0 – 2M pasos):   lr=1e-4, ent=0.08, clip=0.15, epochs=8
+        Fase 2 (2M – 5M pasos):  lr=5e-5, ent=0.05, clip=0.12, epochs=6
+        Fase 3 (5M+ pasos):      lr=2e-5, ent=0.03, clip=0.10, epochs=4
+
+    Args:
+        logdir: Directorio para logs de TensorBoard.
+        device: Dispositivo de cómputo ('cpu' o 'cuda').
+        paso_actual: Paso global actual para seleccionar la fase.
+
+    Returns:
+        Diccionario con hiperparámetros para MaskablePPO.
+    """
+    if paso_actual < 2_000_000:
+        # Fase 1: exploración agresiva
+        lr = 1e-4
+        ent = 0.08
+        clip = 0.15
+        epochs = 8
+        grad_norm = 1.0
+        fase = "1 (exploración)"
+    elif paso_actual < 5_000_000:
+        # Fase 2: consolidación
+        lr = 5e-5
+        ent = 0.05
+        clip = 0.12
+        epochs = 6
+        grad_norm = 0.8
+        fase = "2 (consolidación)"
+    else:
+        # Fase 3: fine-tuning conservador
+        lr = 2e-5
+        ent = 0.03
+        clip = 0.10
+        epochs = 4
+        grad_norm = 0.5
+        fase = "3 (fine-tuning)"
+
+    policy_kwargs = obtener_policy_kwargs()
+    return {
+        "policy": "MlpPolicy",
+        "learning_rate": lr,
+        "n_steps": 4096,
+        "batch_size": 512,
+        "n_epochs": epochs,
+        "gamma": 0.995,
+        "gae_lambda": 0.98,
+        "clip_range": clip,
+        "normalize_advantage": True,
+        "ent_coef": ent,
+        "vf_coef": 1.0,
+        "max_grad_norm": grad_norm,
+        "target_kl": 0.02,
+        "policy_kwargs": policy_kwargs,
+        "verbose": 1,
+        "device": device,
+        "tensorboard_log": logdir,
+        "_fase": fase,
+    }
+
+
 def _aplicar_snapshot_pruning(
     directorio: str,
     max_snapshots: int = MAX_SNAPSHOTS_POOL,
@@ -434,8 +636,12 @@ def entrenar(
     vecnorm_path: str = "",
     directorio_snapshots: str = "",
     max_snapshots: int = MAX_SNAPSHOTS_POOL,
+    eval_every: int = 0,
+    eval_partidas: int = 100,
+    min_win_rate: float = 0.0,
+    eval_log_dir: str = "",
 ):
-    """Bucle de entrenamiento con snapshots periódicos y pruning automático.
+    """Bucle de entrenamiento con snapshots periódicos, pruning y auto-evaluación.
 
     Args:
         modelo: Instancia de MaskablePPO.
@@ -447,14 +653,24 @@ def entrenar(
         vecnorm_path: Ruta para guardar VecNormalize.
         directorio_snapshots: Directorio donde guardar snapshots.
         max_snapshots: Máximo de snapshots a conservar (pruning).
+        eval_every: Evaluar cada N snapshots (0 = no evaluar).
+        eval_partidas: Partidas por evaluación.
+        min_win_rate: Si WR baja de este umbral, detener entrenamiento (0=no parar).
+        eval_log_dir: Directorio para guardar eval_log.jsonl.
     """
     if not directorio_snapshots:
-        directorio_snapshots = DIRECTORIO_MODELOS_V2
+        directorio_snapshots = DIRECTORIO_MODELOS_V5
 
     os.makedirs(directorio_snapshots, exist_ok=True)
 
+    eval_log = ""
+    if eval_every > 0 and eval_log_dir:
+        os.makedirs(eval_log_dir, exist_ok=True)
+        eval_log = os.path.join(eval_log_dir, "eval_log.jsonl")
+
     steps_restantes = total_steps
     paso_actual = inicio_paso
+    snapshot_count = 0
 
     while steps_restantes > 0:
         bloque = min(steps_restantes, snapshot_every)
@@ -465,16 +681,19 @@ def entrenar(
         )
         paso_actual += bloque
         steps_restantes -= bloque
+        snapshot_count += 1
 
         # Guardar VecNormalize
         if vecnorm_path:
             os.makedirs(os.path.dirname(vecnorm_path), exist_ok=True)
             venv.save(vecnorm_path)
 
-        # Guardar snapshot v2
+        # Guardar snapshot v5
         nombre = f"snapshot_{paso_actual:010d}"
         ruta = os.path.join(directorio_snapshots, nombre)
         modelo.save(ruta)
+        # Guardar también VecNormalize asociado a este snapshot
+        venv.save(ruta + "_vecnorm.pkl")
         print(
             f"  [Snapshot] {ruta}.zip | "
             f"Progreso: {paso_actual}/{inicio_paso + total_steps}"
@@ -487,6 +706,24 @@ def entrenar(
             print(
                 f"  [Pruning] {eliminados} snapshot(s) antiguo(s) eliminado(s)")
 
+        # Auto-evaluación periódica
+        if eval_every > 0 and snapshot_count % eval_every == 0:
+            from src.evaluacion import evaluar_snapshot_callback
+            resultado = evaluar_snapshot_callback(
+                ruta_snapshot=ruta,
+                paso=paso_actual,
+                log_path=eval_log,
+                num_partidas=eval_partidas,
+                min_win_rate=min_win_rate,
+            )
+            if (min_win_rate > 0
+                    and resultado["win_rate_bots"] < min_win_rate
+                    and paso_actual > 500_000):
+                print(
+                    f"\n  🛑 Early stopping: WR {resultado['win_rate_bots']:.1%} "
+                    f"< umbral {min_win_rate:.1%} (paso {paso_actual:,})")
+                break
+
     return paso_actual
 
 
@@ -494,10 +731,14 @@ def entrenar(
 # Main
 # ------------------------------------------------------------------
 def main():
-    parser = argparse.ArgumentParser(description="Self-Play Corazones RL v5")
-    parser.add_argument("--resume", type=str, default=None)
+    parser = argparse.ArgumentParser(
+        description="Self-Play Corazones RL v5 (190 dims)")
+    parser.add_argument("--resume", type=str, default=None,
+                        help="Reanudar desde snapshot específico (.zip)")
     parser.add_argument("--base-model", type=str, default=None,
-                        help="Modelo base para iniciar entrenamiento")
+                        help="Modelo base .zip para iniciar (ej: modelos_historicos/v5/snapshot_*.zip)")
+    parser.add_argument("--from-scratch", action="store_true",
+                        help="Crear un modelo nuevo desde cero (sin cargar snapshots previos)")
     parser.add_argument("--steps", type=int, default=2_000_000)
     parser.add_argument("--snapshot-every", type=int, default=100_000)
     parser.add_argument("--self-play", action="store_true")
@@ -505,12 +746,29 @@ def main():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", type=str, default="cpu")
     parser.add_argument("--logdir", type=str, default=DIRECTORIO_LOGS)
-    parser.add_argument("--v2", action="store_true", default=True,
-                        help="Usar pipeline v2 con quality-filter y anti-colapso")
+    parser.add_argument("--eval-every", type=int, default=5,
+                        help="Evaluar win rate cada N snapshots (0=no evaluar, default=5)")
+    parser.add_argument("--eval-partidas", type=int, default=100,
+                        help="Partidas por evaluación (default=100)")
+    parser.add_argument("--min-win-rate", type=float, default=0.0,
+                        help="Detener si WR < umbral (0=sin early stopping). Ej: 0.5")
+    parser.add_argument("--v6", action="store_true",
+                        help="Entrenar en directorio v6 (paralelo a v5, sin interferir)")
     args = parser.parse_args()
 
+    # Directorios según modo
+    if args.v6:
+        dir_snapshots = DIRECTORIO_MODELOS_V6
+        dir_vecnorm = DIRECTORIO_VECNORM_V6
+        modo_label = "v6 (paralelo)"
+    else:
+        dir_snapshots = DIRECTORIO_MODELOS_V5
+        dir_vecnorm = DIRECTORIO_VECNORM_V5
+        modo_label = "v5"
+
     print("=" * 60)
-    print("Self-Play Corazones RL v5 (Anti-Colapso)")
+    print(
+        f"Self-Play Corazones RL {modo_label} (190 dims) — LR Schedule 3 fases")
     print("=" * 60)
     print(f"  Self-Play: {args.self_play}")
     print(f"  Pasos: {args.steps:,}")
@@ -518,7 +776,14 @@ def main():
     print(f"  prob_bot: {args.prob_bot:.0%}")
     print(f"  Quality filter min steps: {MIN_SNAPSHOT_STEPS:,}")
     print(f"  Max snapshots pool: {MAX_SNAPSHOTS_POOL}")
-    print(f"  Directorio v2: {DIRECTORIO_MODELOS_V2}")
+    print(f"  Snapshots → {dir_snapshots}")
+    print(f"  VecNormalize → {dir_vecnorm}")
+    print(f"  TensorBoard → {args.logdir}")
+    if args.eval_every > 0:
+        print(
+            f"  Auto-Eval: cada {args.eval_every} snapshots ({args.eval_partidas} partidas)")
+        if args.min_win_rate > 0:
+            print(f"  Early stopping: WR < {args.min_win_rate:.0%}")
     print("-" * 60)
 
     random.seed(args.seed)
@@ -526,12 +791,13 @@ def main():
 
     from sb3_contrib import MaskablePPO
 
-    os.makedirs(DIRECTORIO_MODELOS_V2, exist_ok=True)
+    os.makedirs(dir_snapshots, exist_ok=True)
     os.makedirs(args.logdir, exist_ok=True)
-    os.makedirs(DIRECTORIO_VECNORM, exist_ok=True)
+    os.makedirs(dir_vecnorm, exist_ok=True)
 
-    vecnorm_path = os.path.join(DIRECTORIO_VECNORM, "v2_vecnorm.pkl")
+    vecnorm_path = os.path.join(dir_vecnorm, "v5_vecnorm.pkl")
     inicio_paso = 0
+    from_scratch = args.from_scratch
 
     # --- Determinar el modelo base ---
     if args.resume:
@@ -544,41 +810,45 @@ def main():
             ".zip") else args.base_model + ".zip"
         print(f"Modelo base: {ruta_modelo}")
         inicio_paso = _extraer_paso_de_ruta(ruta_modelo)
+    elif from_scratch:
+        ruta_modelo = None  # se crea uno nuevo después
+        print("Desde cero: creando modelo nuevo con pesos aleatorios")
     else:
-        # Usar el snapshot más reciente del directorio v2
-        snaps_v2 = listar_snapshots_v2()
-        if snaps_v2:
-            ruta_modelo = snaps_v2[-1] + ".zip"
+        # Auto-reanudar desde el último snapshot
+        listar_fn = listar_snapshots_v6 if args.v6 else listar_snapshots_v5
+        snaps_auto = listar_fn()
+        if snaps_auto:
+            ruta_modelo = snaps_auto[-1] + ".zip"
             inicio_paso = _extraer_paso_de_ruta(ruta_modelo)
-            print(f"Reanudando desde último snapshot v2: {ruta_modelo}")
+            print(
+                f"Reanudando desde último snapshot {modo_label}: {ruta_modelo}")
         else:
-            # Buscar en directorio viejo
-            snaps_old = listar_snapshots()
-            if snaps_old:
-                ruta_modelo = snaps_old[-1] + ".zip"
-                inicio_paso = _extraer_paso_de_ruta(ruta_modelo)
-                print(f"Usando snapshot legacy: {ruta_modelo}")
-            else:
-                print("ERROR: No hay snapshots. Especifica --base-model")
-                sys.exit(1)
-
-    if not os.path.exists(ruta_modelo):
-        print(f"ERROR: No se encuentra {ruta_modelo}")
-        sys.exit(1)
+            print(
+                f"ERROR: No hay snapshots {modo_label}. Usa --from-scratch o --base-model.")
+            print(f"  Los snapshots se guardan en: {dir_snapshots}")
+            sys.exit(1)
 
     # --- Modo de entrenamiento ---
     if args.self_play:
-        snaps_v2 = listar_snapshots_v2()
+        if args.v6:
+            snaps_pool = listar_snapshots_v6()
+            crear_sp = crear_entorno_self_play_v6
+            sp_label = "SELF-PLAY v6"
+        else:
+            snaps_pool = listar_snapshots_v5()
+            crear_sp = crear_entorno_self_play_v5
+            sp_label = "SELF-PLAY v5"
+
         snaps_calidad = _filtrar_snapshots_por_calidad(
-            snaps_v2, MIN_SNAPSHOT_STEPS)
+            snaps_pool, MIN_SNAPSHOT_STEPS)
         if len(snaps_calidad) >= 2:
             print(
-                f"Modo SELF-PLAY v2: {len(snaps_calidad)} snapshots de calidad")
-            def env_fn(): return crear_entorno_self_play_v2(
+                f"Modo {sp_label}: {len(snaps_calidad)} snapshots de calidad")
+            def env_fn(): return crear_sp(
                 seed=None, prob_bot=args.prob_bot)
         else:
             print(
-                f"Modo BOTS (snapshots de calidad insuficientes: {len(snaps_calidad)})")
+                f"Modo BOTS ({len(snaps_calidad)} snapshots de calidad, necesitas ≥2 para self-play)")
 
             def env_fn(): return crear_entorno_con_bots(seed=None, shuffle_bots=True)
     else:
@@ -588,44 +858,84 @@ def main():
     env_base = env_fn()
 
     # --- VecNormalize ---
-    vecnorm_snap = ruta_modelo.replace(".zip", "_vecnorm.pkl")
-    if os.path.exists(vecnorm_snap):
-        venv = crear_entorno_vecnormalizado(env_base, vecnorm_snap)
-        vecnorm_path = vecnorm_snap
-        print(f"  VecNormalize cargado de snapshot: {vecnorm_snap}")
-    elif os.path.exists(vecnorm_path):
-        venv = crear_entorno_vecnormalizado(env_base, vecnorm_path)
-        print(f"  VecNormalize cargado de: {vecnorm_path}")
+    if ruta_modelo is not None:
+        vecnorm_snap = ruta_modelo.replace(".zip", "_vecnorm.pkl")
+        if os.path.exists(vecnorm_snap):
+            venv = crear_entorno_vecnormalizado(env_base, vecnorm_snap)
+            vecnorm_path = vecnorm_snap
+            print(f"  VecNormalize cargado de snapshot: {vecnorm_snap}")
+        elif os.path.exists(vecnorm_path):
+            venv = crear_entorno_vecnormalizado(env_base, vecnorm_path)
+            print(f"  VecNormalize cargado de: {vecnorm_path}")
+        else:
+            venv = crear_entorno_vecnormalizado(env_base)
+            print("  VecNormalize nuevo (desde cero)")
+
+        # --- Cargar modelo ---
+        print(f"Cargando modelo: {ruta_modelo}")
+        modelo = MaskablePPO.load(
+            ruta_modelo,
+            env=venv,
+            device=args.device,
+            tensorboard_log=args.logdir,
+        )
     else:
+        # --from-scratch: crear modelo nuevo
         venv = crear_entorno_vecnormalizado(env_base)
         print("  VecNormalize nuevo (desde cero)")
+        hp = obtener_hiperparametros_v3(args.logdir, args.device, 0)
+        policy_kwargs = hp.pop(
+            "policy_kwargs", None) or obtener_policy_kwargs()
+        hp.pop("_fase", None)
+        modelo = MaskablePPO(
+            policy=hp["policy"],
+            env=venv,
+            learning_rate=hp["learning_rate"],
+            n_steps=hp["n_steps"],
+            batch_size=hp["batch_size"],
+            n_epochs=hp["n_epochs"],
+            gamma=hp["gamma"],
+            gae_lambda=hp["gae_lambda"],
+            clip_range=hp["clip_range"],
+            normalize_advantage=hp["normalize_advantage"],
+            ent_coef=hp["ent_coef"],
+            vf_coef=hp["vf_coef"],
+            max_grad_norm=hp["max_grad_norm"],
+            target_kl=hp["target_kl"],
+            policy_kwargs=policy_kwargs,
+            verbose=hp["verbose"],
+            device=hp["device"],
+            tensorboard_log=hp["tensorboard_log"],
+        )
+        print("  [OK] Modelo nuevo creado (pesos aleatorios)")
 
-    # --- Cargar modelo ---
-    print(f"Cargando modelo: {ruta_modelo}")
-    modelo = MaskablePPO.load(
-        ruta_modelo,
-        env=venv,
-        device=args.device,
-        tensorboard_log=args.logdir,
-    )
-
-    # --- Aplicar hiperparámetros v2 ---
-    hp = obtener_hiperparametros_v2(args.logdir, args.device)
+    # --- Aplicar hiperparámetros v3 (con learning rate schedule) ---
+    hp = obtener_hiperparametros_v3(args.logdir, args.device, inicio_paso)
+    fase = hp.pop("_fase", "?")
+    hp.pop("policy", None)
+    hp.pop("policy_kwargs", None)
+    hp.pop("verbose", None)
+    hp.pop("device", None)
+    hp.pop("tensorboard_log", None)
     for key in ["learning_rate", "ent_coef", "vf_coef", "gamma",
                 "gae_lambda", "target_kl", "max_grad_norm",
                 "n_steps", "batch_size", "n_epochs"]:
         setattr(modelo, key, hp[key])
 
-    # Corregir: setattr no actualiza el optimizador de PyTorch.
-    # Sin esto, el lr real sigue siendo el del modelo cargado (3e-5).
+    # sb3-contrib MaskablePPO espera clip_range como callable (función)
+    modelo.clip_range = lambda _: hp["clip_range"]
+
+    # Corregir: setattr no actualiza el optimizador de PyTorch
     if hasattr(modelo.policy, "optimizer") and modelo.policy.optimizer is not None:
         for param_group in modelo.policy.optimizer.param_groups:
             param_group["lr"] = hp["learning_rate"]
         print(f"  [OK] Optimizer lr actualizado a {hp['learning_rate']}")
 
+    print(f"  Fase: {fase}")
     print(f"  lr={modelo.learning_rate}, ent_coef={modelo.ent_coef}")
     print(f"  vf_coef={modelo.vf_coef}, n_epochs={modelo.n_epochs}")
-    print(f"  max_grad_norm={modelo.max_grad_norm}")
+    print(
+        f"  max_grad_norm={modelo.max_grad_norm}, clip_range={modelo.clip_range}")
     print("-" * 60)
     print("Métricas clave:")
     print("  train/value_loss           -> <1.0 (normalizado)")
@@ -641,23 +951,27 @@ def main():
             snapshot_every=args.snapshot_every,
             inicio_paso=inicio_paso,
             vecnorm_path=vecnorm_path,
-            directorio_snapshots=DIRECTORIO_MODELOS_V2,
+            directorio_snapshots=dir_snapshots,
             max_snapshots=MAX_SNAPSHOTS_POOL,
+            eval_every=args.eval_every,
+            eval_partidas=args.eval_partidas,
+            min_win_rate=args.min_win_rate,
+            eval_log_dir=dir_snapshots,
         )
     except KeyboardInterrupt:
         print("\nInterrumpido. Guardando...")
         if vecnorm_path:
             venv.save(vecnorm_path)
-        modelo.save(os.path.join(DIRECTORIO_MODELOS_V2, "modelo_final_v2"))
+        modelo.save(os.path.join(dir_snapshots, "modelo_final_v5"))
         print("Modelo guardado.")
         env_base.close()
         return
 
     # Guardado final
-    modelo.save(os.path.join(DIRECTORIO_MODELOS_V2, "modelo_final_v2"))
+    modelo.save(os.path.join(dir_snapshots, "modelo_final_v5"))
     if vecnorm_path:
-        venv.save(os.path.join(DIRECTORIO_VECNORM, "v2_vecnorm_final.pkl"))
-    print(f"Entrenamiento v2 completado. Paso final: {paso_final}")
+        venv.save(os.path.join(dir_vecnorm, "v5_vecnorm_final.pkl"))
+    print(f"Entrenamiento v5 completado. Paso final: {paso_final}")
     env_base.close()
 
 

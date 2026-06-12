@@ -55,6 +55,14 @@ class CorazonesEnv(gym.Env):
     REWARD_PERDER_MANO: float = -2.0
     REWARD_GANAR_MANO: float = 2.0
 
+    # --- NUEVAS RECOMPENSAS v5: correcciones estratégicas ---
+    # Penalización: ganar baza con Q♠ cuando el pozo NO es viable
+    REWARD_Q_SPADES_SIN_POZO: float = -8.0
+    # Penalización: ganar baza con corazones cuando el modo es MINIMIZAR
+    REWARD_GANAR_BAZA_CON_CORAZON: float = -3.0
+    # Penalización suave por punto acumulado en la mano
+    REWARD_POR_PUNTO_EN_MANO: float = -0.2
+
     PUNTUACION_MAXIMA: float = 100.0  # Umbral de fin de partida
 
     def __init__(
@@ -75,9 +83,9 @@ class CorazonesEnv(gym.Env):
         self._politicas_oponentes: Dict[int,
                                         object] = politicas_oponentes or {}
 
-        # Espacios Gymnasium
+        # Espacios Gymnasium (v5: 190 dimensiones con features estratégicas)
         self.observation_space = spaces.Box(
-            low=0.0, high=1.0, shape=(187,), dtype=np.float32
+            low=0.0, high=1.0, shape=(190,), dtype=np.float32
         )
         self.action_space = spaces.Discrete(52)
 
@@ -319,11 +327,24 @@ class CorazonesEnv(gym.Env):
         # Calcular recompensa para el agente por esta baza
         if ganador == self.agente_idx:
             # Penalización por puntos ganados (corazones + dama)
+            gano_corazon = False
+            gano_q_spades = False
             for c in cartas_en_mesa:
                 if c.es_corazon:
                     self._recompensa_pendiente += self.REWARD_CORAZON
+                    gano_corazon = True
                 if c.es_dama_de_picas:
                     self._recompensa_pendiente += self.REWARD_DAMA_PICAS
+                    gano_q_spades = True
+
+            # --- NUEVO v5: penalización extra si ganó Q♠ sin pozo viable ---
+            if gano_q_spades and not self._pozo_viable():
+                self._recompensa_pendiente += self.REWARD_Q_SPADES_SIN_POZO
+
+            # --- NUEVO v5: penalización extra si ganó corazones sin pozo ---
+            if gano_corazon and not self._pozo_viable():
+                self._recompensa_pendiente += self.REWARD_GANAR_BAZA_CON_CORAZON
+
             # Si ganó baza sin puntos, pequeña penalización
             if puntos_baza == 0:
                 self._recompensa_pendiente += self.REWARD_GANAR_BAZA_SIN_PUNTOS
@@ -369,6 +390,11 @@ class CorazonesEnv(gym.Env):
                 self._recompensa_pendiente += self.REWARD_GANAR_MANO
             elif puntos_agente > max(puntos_otros):
                 self._recompensa_pendiente += self.REWARD_PERDER_MANO
+
+            # --- NUEVO v5: penalización suave por punto acumulado ---
+            self._recompensa_pendiente += (
+                puntos_agente * self.REWARD_POR_PUNTO_EN_MANO
+            )
         elif self._pleno_jugador == self.agente_idx:
             self._recompensa_pendiente += self.REWARD_GANAR_MANO * 2
 
@@ -398,11 +424,11 @@ class CorazonesEnv(gym.Env):
             return self.REWARD_CUARTO
 
     # ------------------------------------------------------------------
-    # Construcción del vector de observación (187 dimensiones)
+    # Construcción del vector de observación (190 dimensiones, v5)
     # ------------------------------------------------------------------
 
     def _construir_observacion(self) -> np.ndarray:
-        """Construye el vector de observación de 187 dimensiones.
+        """Construye el vector de observación de 190 dimensiones.
 
         Bloques:
             [0:52]    Mano del agente (one-hot)
@@ -414,11 +440,14 @@ class CorazonesEnv(gym.Env):
             [180]     Corazones rotos (0.0 o 1.0)
             [181]     Posición en la baza actual (0.0, 0.33, 0.66, 1.0)
             [182:187] Rastreador de la Dama de Picas (one-hot, 5 estados)
+            [187]     pozo_viable — ¿es viable intentar shooting the moon?
+            [188]     debo_arriesgar — ¿estoy tan atrás que debo arriesgarme?
+            [189]     puedo_alimentar — ¿puedo darle puntos a un rival?
 
         Returns:
-            Array np.float32 de shape (187,).
+            Array np.float32 de shape (190,).
         """
-        obs = np.zeros(187, dtype=np.float32)
+        obs = np.zeros(190, dtype=np.float32)
         a = self.agente_idx
 
         # --- [0:52] Mano del agente ---
@@ -459,11 +488,82 @@ class CorazonesEnv(gym.Env):
         obs[181] = posiciones.get(len(self.motor.mesa), 0.0)
 
         # --- [182:187] Rastreador de la Dama de Picas ---
-        # Cinco estados mutuamente excluyentes
         if self._dama_picas_en is None:
             obs[182] = 1.0  # Oculta
         else:
             rel = (self._dama_picas_en - a) % 4
             obs[183 + rel] = 1.0
 
+        # --- [187:190] Features estratégicas v5 ---
+        obs[187] = 1.0 if self._pozo_viable() else 0.0
+        obs[188] = 1.0 if self._debo_arriesgar() else 0.0
+        obs[189] = 1.0 if self._puedo_alimentar() else 0.0
+
         return obs
+
+    # ------------------------------------------------------------------
+    # Features estratégicas v5
+    # ------------------------------------------------------------------
+
+    def _pozo_viable(self) -> bool:
+        """Determina si es viable intentar shooting the moon.
+
+        Condiciones:
+          - Corazones NO rotos
+          - ≥6 corazones en mano
+          - ≥3 corazones altos (J, Q, K, A)
+          - Puntaje histórico < 80 (margen para fallar)
+        """
+        if self.motor.corazones_rotos:
+            return False
+
+        a = self.agente_idx
+        mano = self.motor.jugadores[a].mano
+
+        corazones_en_mano = sum(1 for c in mano if c.es_corazon)
+        if corazones_en_mano < 6:
+            return False
+
+        corazones_altos = sum(
+            1 for c in mano
+            if c.es_corazon and c.valor >= 11  # J=11, Q=12, K=13, A=14
+        )
+        if corazones_altos < 3:
+            return False
+
+        if self._puntuacion_historica[a] >= 80:
+            return False
+
+        return True
+
+    def _debo_arriesgar(self) -> bool:
+        """Determina si el agente está tan atrás que debe arriesgarse.
+
+        Condiciones:
+          - Puntaje del agente > 75
+          - Existe al menos un rival con puntaje < 30
+        """
+        a = self.agente_idx
+        if self._puntuacion_historica[a] <= 75:
+            return False
+
+        for i in range(4):
+            if i != a and self._puntuacion_historica[i] < 30:
+                return True
+        return False
+
+    def _puedo_alimentar(self) -> bool:
+        """Determina si conviene darle puntos a un rival para que pierda.
+
+        Condiciones:
+          - Existe un rival con puntaje > 85 (cerca de perder)
+          - El agente tiene puntaje < 70 (margen seguro)
+        """
+        a = self.agente_idx
+        if self._puntuacion_historica[a] >= 70:
+            return False
+
+        for i in range(4):
+            if i != a and self._puntuacion_historica[i] > 85:
+                return True
+        return False

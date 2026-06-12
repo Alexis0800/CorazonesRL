@@ -32,7 +32,7 @@ def normalizar_obs_si_hay_stats(obs: np.ndarray, vecnorm_path: str) -> np.ndarra
     """Normaliza observación con stats de VecNormalize de SB3.
 
     Args:
-        obs: Vector de observación crudo de shape (187,).
+        obs: Vector de observación crudo de shape (190,).
         vecnorm_path: Ruta al archivo .pkl de VecNormalize.
 
     Returns:
@@ -234,10 +234,20 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Detectar VecNormalize asociado
+    # Orden de búsqueda:
+    # 1. Per-snapshot: modelos_historicos/v5/snapshot_*_vecnorm.pkl
+    # 2. VecNormalize global v5: vecnormalize/v5/v5_vecnorm.pkl
+    # 3. VecNormalize global v5 final: vecnormalize/v5/v5_vecnorm_final.pkl
+    # 4. VecNormalize v2 (compatibilidad): vecnormalize/v2_vecnorm_final.pkl
+    # 5. VecNormalize legacy: vecnormalize/vecnorm.pkl
     ruta_base = args.ruta.replace(".zip", "")
     vecnorm_path: Optional[str] = None
     for candidato in [
         ruta_base + "_vecnorm.pkl",
+        "vecnormalize/v5/v5_vecnorm.pkl",
+        "vecnormalize/v5/v5_vecnorm_final.pkl",
+        "vecnormalize/v2_vecnorm_final.pkl",
+        "vecnormalize/v2_vecnorm.pkl",
         "vecnormalize/vecnorm.pkl",
     ]:
         if os.path.exists(candidato):

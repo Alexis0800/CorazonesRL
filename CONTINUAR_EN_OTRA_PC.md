@@ -1,83 +1,114 @@
-# Continuar Entrenamiento en Otra PC — CorazonesRL v2
+# Continuar Entrenamiento en Otra PC — CorazonesRL v5
 
-> **Último modelo entrenado:** `snapshot_0003500000` — 84.5% win rate, 97% top-2  
-> **Tests:** 116/116 pasando  
+> **Mejor modelo:** v5/snapshot_0010400000 — Elo 1604 combinado
+> **Tests:** 251/251 pasando
 > **Fecha:** 2026-06-11
 
 ---
 
-## 📦 1. Preparar el ZIP para transferir
+## 📦 1. Comprimir modelos para transferir
 
-### En esta PC (origen) — ejecutar en PowerShell
+Solo necesitás los **últimos 10 snapshots de v5** (~50MB) + VecNormalize (~5KB).
 
-```powershell
-# Ir a la raíz del proyecto
-cd C:\Programming\Python\CorazonesRL
-
-# Crear ZIP con los modelos históricos (v1 backup + v2 actual)
-Compress-Archive -Path `
-    "modelos_historicos/v1_backup",
-    "modelos_historicos/v2",
-    "modelos_historicos/snapshot_0001500000.zip",
-    "vecnormalize" `
-    -DestinationPath "..\CorazonesRL_modelos.zip" -Force
-
-Write-Host "ZIP creado en C:\Programming\Python\CorazonesRL_modelos.zip"
-```
-
-También puedes hacer un ZIP del proyecto completo (sin `.venv`):
+### Script automático
 
 ```powershell
-cd C:\Programming\Python
-
-# Excluir .venv (se recrea en la otra PC) y __pycache__
-Compress-Archive -Path "CorazonesRL\*" `
-    -DestinationPath "CorazonesRL_completo.zip" -Force
-
-Write-Host "ZIP completo creado"
+.\comprimir_modelos.ps1
 ```
 
-> **Alternativa:** Si usas Git, simplemente haz `git push` y en la otra PC haces `git clone` o `git pull`. Luego transfieres solo `CorazonesRL_modelos.zip`.
+Esto crea `corazones_modelos.zip` con:
+- Últimos 10 snapshots de v5
+- Últimos 5 snapshots de v6 (referencia)
+- VecNormalize completo (v5/ y v6/)
+- eval_log.jsonl
+
+### Manual
+
+```powershell
+$destino = "$env:USERPROFILE\Desktop\corazones_modelos.zip"
+
+# Solo últimos snapshots v5 (los necesarios para reanudar)
+$snaps_v5 = Get-ChildItem modelos_historicos\v5\snapshot_*.zip | Sort-Object Name | Select-Object -Last 10
+$vecnorm_v5 = Get-ChildItem modelos_historicos\v5\*vecnorm* | Sort-Object Name | Select-Object -Last 10
+
+Compress-Archive -Path (
+    $snaps_v5.FullName +
+    $vecnorm_v5.FullName +
+    (Get-ChildItem vecnormalize\v5\*.pkl).FullName
+) -DestinationPath $destino -Force
+
+Write-Host "✅ $destino listo"
+```
+
+### ¿Qué modelos NO son necesarios?
+
+| Carpeta | ¿Transferir? | Motivo |
+|---|---|---|
+| `modelos_historicos/v2/` | ❌ No | 187 dims, incompatible |
+| `modelos_historicos/v5/` snapshots viejos | ❌ No | Solo últimos 10 |
+| `modelos_historicos/v6/` | ⚠️ 5 últimos | Referencia, no esencial |
+| `vecnormalize/v2/` | ❌ No | 187 dims |
+| `vecnormalize/v5/` | ✅ Sí | Necesario para normalizar |
+| `logs/` | ❌ No | Se regeneran |
 
 ---
 
 ## 💻 2. Configurar en la nueva PC
 
-### 2.1 Requisitos previos
+### 2.1 Requisitos
 
-- **Python 3.11+** instalado (descargar de <https://python.org>)
-- ⚠️ **Desactivar los App Execution Aliases** de Python en Windows:
-  - Settings → Apps → Advanced app settings → App execution aliases
-  - Desactivar `python.exe` y `python3.exe`
-- **Git** instalado (<https://git-scm.com>)
+- Python 3.12 o 3.13
+- Git
+- 8+ GB RAM
 
-### 2.2 Clonar o copiar el proyecto
+### 2.2 Clonar e instalar
 
 ```powershell
-# Opción A: Si usaste Git
-git clone <URL_DEL_REPO> CorazonesRL
-cd CorazonesRL
+git clone <URL_DEL_REPO> corazones-neuralnetwork
+cd corazones-neuralnetwork
 
-# Opción B: Si transferiste el ZIP completo
-Expand-Archive CorazonesRL_completo.zip -DestinationPath .
-cd CorazonesRL
-```
-
-### 2.3 Extraer los modelos
-
-```powershell
-# Si transferiste solo los modelos en ZIP aparte:
-Expand-Archive CorazonesRL_modelos.zip -DestinationPath . -Force
-```
-
-### 2.4 Crear entorno virtual e instalar dependencias
-
-```powershell
-# Crear venv
 python -m venv .venv
-
-# Activar (si hay error de políticas, ver sección 2.5)
 .venv\Scripts\Activate.ps1
+pip install torch stable-baselines3 sb3-contrib pettingzoo gymnasium numpy pytest tensorboard tqdm
+```
+
+### 2.3 Extraer modelos
+
+```powershell
+# Copiar corazones_modelos.zip a la raíz del proyecto
+Expand-Archive corazones_modelos.zip -DestinationPath . -Force
+```
+
+### 2.4 Verificar
+
+```powershell
+python -m pytest tests/ -q
+# Deben pasar 251 tests
+```
+
+---
+
+## 🚀 3. Continuar entrenamiento
+
+```powershell
+# Reanudar desde el último snapshot v5 (auto-detecta):
+python train_self_play.py --self-play --steps 5000000 --eval-every 5
+
+# O desde un snapshot específico:
+python train_self_play.py --self-play --resume modelos_historicos/v5/snapshot_0010400000 --steps 5000000 --eval-every 5
+```
+
+---
+
+## 📋 4. Empezar desde cero (sin modelos transferidos)
+
+Si preferís entrenar desde cero sin transferir modelos:
+
+```powershell
+python train_self_play.py --self-play --from-scratch --steps 10000000 --eval-every 5
+```
+
+Esto crea un modelo nuevo con pesos aleatorios y entrena contra bots hasta acumular suficientes snapshots para self-play (~500K pasos).
 
 # Instalar dependencias
 pip install gymnasium numpy torch stable-baselines3 sb3-contrib pytest

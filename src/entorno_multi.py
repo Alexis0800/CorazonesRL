@@ -3,7 +3,7 @@ Entorno PettingZoo AEC para el juego de Corazones (Módulo 3).
 
 Implementa la interfaz AEC (Agent Environment Cycle) de PettingZoo
 para gestionar 4 jugadores secuenciales. Cada agente recibe una
-observación de 187 dimensiones desde su perspectiva y una máscara
+observación de 190 dimensiones desde su perspectiva y una máscara
 de acciones legales.
 
 Envuelve directamente MotorCorazones (Módulo 1) sin depender de
@@ -46,6 +46,11 @@ class CorazonesAEC:
     REWARD_SEGUNDO: float = 200.0
     REWARD_TERCERO: float = -200.0
     REWARD_CUARTO: float = -500.0
+
+    # Nuevas recompensas v5
+    REWARD_Q_SPADES_SIN_POZO: float = -8.0
+    REWARD_GANAR_BAZA_CON_CORAZON: float = -3.0
+    REWARD_POR_PUNTO_EN_MANO: float = -0.2
     PUNTUACION_MAXIMA: float = 100.0
 
     def __init__(self) -> None:
@@ -58,7 +63,7 @@ class CorazonesAEC:
         # Espacios por agente
         self.observation_spaces: Dict[str, spaces.Box] = {
             agent: spaces.Box(low=0.0, high=1.0,
-                              shape=(187,), dtype=np.float32)
+                              shape=(190,), dtype=np.float32)
             for agent in self.possible_agents
         }
         self.action_spaces: Dict[str, spaces.Discrete] = {
@@ -310,11 +315,23 @@ class CorazonesAEC:
 
         # Recompensas al ganador
         ganador_nombre = self.possible_agents[ganador]
+        baza_tiene_corazon = False
+        baza_tiene_q_spades = False
         for c in cartas_en_mesa:
             if c.es_corazon:
                 self._add_reward(ganador_nombre, self.REWARD_CORAZON)
+                baza_tiene_corazon = True
             if c.es_dama_de_picas:
                 self._add_reward(ganador_nombre, self.REWARD_DAMA_PICAS)
+                baza_tiene_q_spades = True
+
+        # Penalización v5 si pozo no viable
+        pozo_ok = self._pozo_viable(ganador)
+        if baza_tiene_q_spades and not pozo_ok:
+            self._add_reward(ganador_nombre, self.REWARD_Q_SPADES_SIN_POZO)
+        if baza_tiene_corazon and not pozo_ok:
+            self._add_reward(
+                ganador_nombre, self.REWARD_GANAR_BAZA_CON_CORAZON)
 
     def _finalizar_mano_con_recompensas(self) -> None:
         """Finaliza la mano y aplica recompensa de pleno si corresponde."""
@@ -328,6 +345,11 @@ class CorazonesAEC:
         self.motor.aplicar_puntuacion()
         for i in range(4):
             self._puntuacion_historica[i] = self.motor.jugadores[i].puntuacion_historica
+            # Penalización v5 por punto acumulado
+            if puntos_crudos[i] > 0:
+                nombre = self.possible_agents[i]
+                self._add_reward(
+                    nombre, self.REWARD_POR_PUNTO_EN_MANO * puntos_crudos[i])
 
     def _juego_terminado(self) -> bool:
         """True si algún jugador alcanzó 100 puntos."""
@@ -353,15 +375,15 @@ class CorazonesAEC:
         self._rewards_since_last[agent] += amount
 
     # ------------------------------------------------------------------
-    # Construcción del vector de observación (187 dimensiones)
+    # Construcción del vector de observación (190 dimensiones)
     # ------------------------------------------------------------------
 
     def _construir_observacion(self, agente_idx: int) -> np.ndarray:
         """Construye el vector de observación desde la perspectiva del agente.
 
-        Misma estructura de 187 dimensiones que CorazonesEnv.
+        Misma estructura de 190 dimensiones que CorazonesEnv.
         """
-        obs = np.zeros(187, dtype=np.float32)
+        obs = np.zeros(190, dtype=np.float32)
         a = agente_idx
 
         # [0:52] Mano del agente
@@ -408,4 +430,43 @@ class CorazonesAEC:
             rel = (self._dama_picas_en - a) % 4
             obs[183 + rel] = 1.0
 
+        # [187:190] Features estratégicas v5
+        obs[187] = 1.0 if self._pozo_viable(agente_idx) else 0.0
+        obs[188] = 1.0 if self._debo_arriesgar(agente_idx) else 0.0
+        obs[189] = 1.0 if self._puedo_alimentar(agente_idx) else 0.0
+
         return obs
+
+    # ------------------------------------------------------------------
+    # Features estratégicas v5
+    # ------------------------------------------------------------------
+
+    def _pozo_viable(self, agente_idx: int) -> bool:
+        """Determina si es viable intentar shooting the moon."""
+        if self.motor.corazones_rotos:
+            return False
+        mano = self.motor.jugadores[agente_idx].mano
+        corazones = [c for c in mano if c.palo == 2]
+        altos = sum(1 for c in corazones if c.valor >= 11)
+        return (
+            len(corazones) >= 6
+            and altos >= 3
+            and self._puntuacion_historica[agente_idx] < 80
+        )
+
+    def _debo_arriesgar(self, agente_idx: int) -> bool:
+        """Determina si el agente está tan atrás que debe arriesgarse."""
+        mi_score = self._puntuacion_historica[agente_idx]
+        return mi_score > 75 and any(
+            self._puntuacion_historica[i] < 30 for i in range(4) if i != agente_idx
+        )
+
+    def _puedo_alimentar(self, agente_idx: int) -> bool:
+        """Determina si puedo darle puntos a un rival que está cerca de 100."""
+        mi_score = self._puntuacion_historica[agente_idx]
+        for i in range(4):
+            if i == agente_idx:
+                continue
+            if self._puntuacion_historica[i] > 85 and mi_score < 70:
+                return True
+        return False

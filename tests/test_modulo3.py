@@ -153,14 +153,14 @@ class TestPettingZooAEC:
             assert space.n == 52
         env.close()
 
-    def test_observation_spaces_son_box_187(self):
-        """Cada agente debe tener espacio de observación Box(187,)."""
+    def test_observation_spaces_son_box_190(self):
+        """Cada agente debe tener espacio de observación Box(190,)."""
         from src.entorno_multi import CorazonesAEC
         env = CorazonesAEC()
         env.reset()
         for agent in env.agents:
             space = env.observation_space(agent)
-            assert space.shape == (187,)
+            assert space.shape == (190,)
             assert space.dtype == np.float32
         env.close()
 
@@ -451,17 +451,17 @@ class TestNormalizacionEvaluacion:
             mean = np.array(obs_rms.mean)
             var = np.array(obs_rms.var)
             assert mean.shape == (
-                187,), f"mean shape debe ser (187,), es {mean.shape}"
+                190,), f"mean shape debe ser (190,), es {mean.shape}"
             assert var.shape == (
-                187,), f"var shape debe ser (187,), es {var.shape}"
+                190,), f"var shape debe ser (190,), es {var.shape}"
             assert obs_rms.count > 0, "count debe ser > 0 tras simular pasos"
 
             # Probar normalización manual (equivalente a SB3)
-            obs_raw = np.ones(187, dtype=np.float32)
+            obs_raw = np.ones(190, dtype=np.float32)
             obs_norm = np.clip(
                 (obs_raw - mean) / np.sqrt(var + 1e-8), -10.0, 10.0
             ).astype(np.float32)
-            assert obs_norm.shape == (187,)
+            assert obs_norm.shape == (190,)
             assert obs_norm.dtype == np.float32
             # Verificar que la normalización efectivamente cambió los valores
             assert not np.allclose(obs_norm, obs_raw), (
@@ -685,13 +685,13 @@ class TestHiperparametrosV2:
         )
 
     def test_hiperparametros_v2_prob_bot_default(self):
-        """V2 usa prob_bot=0.40 por defecto (40% bots, 60% snapshots)."""
+        """Fase 5B usa prob_bot=0.10 por defecto (10% bots, 90% snapshots)."""
         import importlib
         ts = importlib.import_module("train_self_play")
 
         assert hasattr(ts, "PROB_BOT_V2"), "Debe existir PROB_BOT_V2"
-        assert ts.PROB_BOT_V2 == 0.40, (
-            f"PROB_BOT_V2 debe ser 0.40, es {ts.PROB_BOT_V2}"
+        assert ts.PROB_BOT_V2 == 0.10, (
+            f"PROB_BOT_V2 debe ser 0.10 (Fase 5B), es {ts.PROB_BOT_V2}"
         )
 
     def test_hiperparametros_v2_min_snapshot_steps(self):
@@ -717,6 +717,33 @@ class TestHiperparametrosV2:
         assert 10 <= ts.MAX_SNAPSHOTS_POOL <= 50, (
             f"MAX_SNAPSHOTS_POOL debe estar entre 10 y 50, es {ts.MAX_SNAPSHOTS_POOL}"
         )
+
+
+class TestDirectoriosV6:
+    """Verifica las constantes de directorio para entrenamiento paralelo v6."""
+
+    def test_directorio_modelos_v6_definido(self):
+        """Debe existir DIRECTORIO_MODELOS_V6."""
+        import importlib
+        ts = importlib.import_module("train_self_play")
+        assert hasattr(
+            ts, "DIRECTORIO_MODELOS_V6"), "Debe existir DIRECTORIO_MODELOS_V6"
+        assert "v6" in ts.DIRECTORIO_MODELOS_V6, "Debe apuntar a v6"
+
+    def test_directorio_vecnorm_v6_definido(self):
+        """Debe existir DIRECTORIO_VECNORM_V6."""
+        import importlib
+        ts = importlib.import_module("train_self_play")
+        assert hasattr(
+            ts, "DIRECTORIO_VECNORM_V6"), "Debe existir DIRECTORIO_VECNORM_V6"
+        assert "v6" in ts.DIRECTORIO_VECNORM_V6, "Debe apuntar a v6"
+
+    def test_directorio_v6_distinto_de_v5(self):
+        """v6 y v5 deben ser directorios distintos."""
+        import importlib
+        ts = importlib.import_module("train_self_play")
+        assert ts.DIRECTORIO_MODELOS_V6 != ts.DIRECTORIO_MODELOS_V5, \
+            "v6 debe ser distinto de v5"
 
 
 class TestDirectoriosV2:
