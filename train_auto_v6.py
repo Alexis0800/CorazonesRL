@@ -75,12 +75,13 @@ def _configurar_dispositivo(device: str) -> str:
             print("  Instálalo con: pip install torch-directml")
             sys.exit(1)
     elif device == "xpu":
-        try:
-            import intel_extension_for_pytorch  # noqa: F401
-            print("[GPU] Intel XPU habilitado para Intel Arc")
-        except ImportError:
-            print("ERROR: intel-extension-for-pytorch no instalado.")
-            print("  Instálalo con: pip install intel-extension-for-pytorch")
+        import torch
+        if torch.xpu.is_available():
+            print(
+                f"[GPU] Intel XPU habilitado — {torch.xpu.device_count()} dispositivo(s) detectado(s)")
+        else:
+            print("ERROR: XPU no disponible. Verifica drivers Intel Arc y PyTorch+xpu.")
+            print("  Instálalo con: pip install torch==2.12.0+xpu --extra-index-url https://download.pytorch.org/whl/xpu")
             sys.exit(1)
     return device
 
