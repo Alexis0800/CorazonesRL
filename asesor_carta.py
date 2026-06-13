@@ -302,7 +302,7 @@ def construir_observacion_parcial(
     dama_picas_en: Optional[int],
     agente_idx: int = 0,
 ) -> np.ndarray:
-    """Construye el vector de observación de 190 dimensiones (v5).
+    """Construye el vector de observación de 194 dimensiones (v6).
 
     Bloques:
         [0:52]    Mano del agente (one-hot)
@@ -317,6 +317,7 @@ def construir_observacion_parcial(
         [187]     pozo_viable
         [188]     debo_arriesgar
         [189]     puedo_alimentar
+        [190:194] all_void_X — ¿los 3 rivales son void en palo X?
 
     Args:
         mano_ids: IDs de cartas en mano del agente.
@@ -330,9 +331,9 @@ def construir_observacion_parcial(
         agente_idx: Índice del jugador humano (0 por defecto).
 
     Returns:
-        Array np.float32 de shape (190,).
+        Array np.float32 de shape (194,).
     """
-    obs = np.zeros(190, dtype=np.float32)
+    obs = np.zeros(194, dtype=np.float32)
     a = agente_idx
 
     # [0:52] Mano
@@ -382,6 +383,14 @@ def construir_observacion_parcial(
         mano_ids, corazones_rotos, puntajes_historicos[a]) else 0.0
     obs[188] = 1.0 if _debo_arriesgar(puntajes_historicos, a) else 0.0
     obs[189] = 1.0 if _puedo_alimentar(puntajes_historicos, a) else 0.0
+
+    # --- [190:194] Features all_void v6 ---
+    for palo in range(4):
+        todos_vacios = all(
+            palo in vacios_por_jugador[j]
+            for j in range(4) if j != a
+        )
+        obs[190 + palo] = 1.0 if todos_vacios else 0.0
 
     return obs
 

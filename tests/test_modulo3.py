@@ -154,13 +154,13 @@ class TestPettingZooAEC:
         env.close()
 
     def test_observation_spaces_son_box_190(self):
-        """Cada agente debe tener espacio de observación Box(190,)."""
+        """Cada agente debe tener espacio de observación Box(194,)."""
         from src.entorno_multi import CorazonesAEC
         env = CorazonesAEC()
         env.reset()
         for agent in env.agents:
             space = env.observation_space(agent)
-            assert space.shape == (190,)
+            assert space.shape == (194,)
             assert space.dtype == np.float32
         env.close()
 
@@ -451,17 +451,17 @@ class TestNormalizacionEvaluacion:
             mean = np.array(obs_rms.mean)
             var = np.array(obs_rms.var)
             assert mean.shape == (
-                190,), f"mean shape debe ser (190,), es {mean.shape}"
+                194,), f"mean shape debe ser (194,), es {mean.shape}"
             assert var.shape == (
-                190,), f"var shape debe ser (190,), es {var.shape}"
+                194,), f"var shape debe ser (194,), es {var.shape}"
             assert obs_rms.count > 0, "count debe ser > 0 tras simular pasos"
 
             # Probar normalización manual (equivalente a SB3)
-            obs_raw = np.ones(190, dtype=np.float32)
+            obs_raw = np.ones(194, dtype=np.float32)
             obs_norm = np.clip(
                 (obs_raw - mean) / np.sqrt(var + 1e-8), -10.0, 10.0
             ).astype(np.float32)
-            assert obs_norm.shape == (190,)
+            assert obs_norm.shape == (194,)
             assert obs_norm.dtype == np.float32
             # Verificar que la normalización efectivamente cambió los valores
             assert not np.allclose(obs_norm, obs_raw), (
@@ -685,13 +685,13 @@ class TestHiperparametrosV2:
         )
 
     def test_hiperparametros_v2_prob_bot_default(self):
-        """Fase 5B usa prob_bot=0.10 por defecto (10% bots, 90% snapshots)."""
+        """Fase 5B usa prob_bot=0.30 por defecto (30% bots, 70% snapshots)."""
         import importlib
         ts = importlib.import_module("train_self_play")
 
         assert hasattr(ts, "PROB_BOT_V2"), "Debe existir PROB_BOT_V2"
-        assert ts.PROB_BOT_V2 == 0.10, (
-            f"PROB_BOT_V2 debe ser 0.10 (Fase 5B), es {ts.PROB_BOT_V2}"
+        assert ts.PROB_BOT_V2 == 0.30, (
+            f"PROB_BOT_V2 debe ser 0.30 (Fase 5B), es {ts.PROB_BOT_V2}"
         )
 
     def test_hiperparametros_v2_min_snapshot_steps(self):

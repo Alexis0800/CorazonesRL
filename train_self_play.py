@@ -56,7 +56,8 @@ DIRECTORIO_VECNORM_V6 = os.path.join(os.path.dirname(
 # ------------------------------------------------------------------
 # Constantes Fase 5B (Self-Play agresivo, mínimo anclaje a bots)
 # ------------------------------------------------------------------
-PROB_BOT_V2: float = 0.10          # 10% bots heurísticos (anclaje mínimo)
+# 30% bots (50% evasivo para cerrar punto ciego)
+PROB_BOT_V2: float = 0.30
 MIN_SNAPSHOT_STEPS: int = 500_000  # Solo snapshots maduros (≥500K pasos)
 # Máximo de snapshots en el pool activo (subido a 50 para evitar pruning prematuro)
 MAX_SNAPSHOTS_POOL: int = 50
@@ -107,8 +108,8 @@ class PoliticaSB3:
         return Carta._TODAS[int(action)]
 
     def _construir_obs_desde_motor(self, motor: Any, jugador_idx: int) -> np.ndarray:
-        """Construye observación de 190 dims desde la perspectiva de jugador_idx."""
-        obs = np.zeros(190, dtype=np.float32)
+        """Construye observación de 194 dims desde la perspectiva de jugador_idx."""
+        obs = np.zeros(194, dtype=np.float32)
         a = jugador_idx
 
         # Mano del jugador
@@ -127,14 +128,116 @@ class PoliticaSB3:
         # Vacíos (no disponibles desde el motor) — quedan en 0
         # Puntajes históricos (no disponibles desde el motor) — quedan en 0
         # Features estratégicas v5 (no disponibles desde el motor) — quedan en 0
+        # Features all_void v6 (no disponibles desde el motor) — quedan en 0
         return obs
+
+
+# ------------------------------------------------------------------
+# Transferencia de pesos entre versiones de espacio de observación
+# ------------------------------------------------------------------
+
+def transferir_pesos(
+    ruta_origen: str,
+    ruta_destino: Optional[str] = None,
+    old_dim: int = 190,
+    new_dim: int = 194,
+    device: str = "cpu",
+    directorio_destino: Optional[str] = None,
+) -> Any:
+    """Transfiere pesos de un modelo con input_dim=old_dim a uno con input_dim=new_dim.
+
+    Las nuevas columnas de la primera capa se rellenan con ceros, lo que
+    significa que las nuevas features empiezan "apagadas" y PPO aprende
+    progresivamente a usarlas. El bias de la primera capa y todos los
+    pesos de capas posteriores se copian tal cual.
+
+    Args:
+        ruta_origen: Ruta al snapshot .zip del modelo fuente.
+        ruta_destino: Ruta donde guardar el modelo transferido (opcional).
+        old_dim: Dimensión de entrada del modelo fuente (default 190).
+        new_dim: Dimensión de entrada del modelo destino (default 194).
+        device: Dispositivo de cómputo ('cpu' o 'cuda').
+        directorio_destino: Directorio donde guardar (alternativa a ruta_destino).
+
+    Returns:
+        Modelo MaskablePPO con pesos transferidos.
+    """
+    import torch
+    from sb3_contrib import MaskablePPO
+
+    # 1. Cargar modelo fuente
+    print(
+        f"📦 Cargando modelo fuente ({old_dim}→{new_dim} dims): {ruta_origen}")
+    modelo_origen = MaskablePPO.load(ruta_origen, device=device)
+
+    # 2. Extraer el paso de entrenamiento del nombre
+    paso = _extraer_paso_de_ruta(ruta_origen)
+
+    # 3. Crear modelo destino con el espacio correcto (194 dims)
+    #    Usamos un entorno temporal 194-dim para que SB3 cree la red correcta
+    env_temp = CorazonesEnv(agente_idx=0)
+    env_temp.reset(seed=42)
+
+    # Crear VecNormalize temporal para el constructor
+    from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
+    venv_temp = DummyVecEnv([lambda: env_temp])
+    venv_temp = VecNormalize(venv_temp, norm_obs=True, norm_reward=True)
+
+    hp = obtener_hiperparametros_v3(
+        directorio_destino or ".", device, paso)
+    policy_kwargs = hp.pop("policy_kwargs", None) or obtener_policy_kwargs()
+    hp.pop("_fase", None)
+    hp.pop("tensorboard_log", None)
+
+    modelo_destino = MaskablePPO(
+        policy=hp["policy"],
+        env=venv_temp,
+        **{k: v for k, v in hp.items()
+           if k in ["learning_rate", "n_steps", "batch_size",
+                    "n_epochs", "gamma", "gae_lambda",
+                    "clip_range", "normalize_advantage",
+                    "ent_coef", "vf_coef", "max_grad_norm",
+                    "target_kl", "verbose", "device"]},
+        policy_kwargs=policy_kwargs,
+    )
+    venv_temp.close()
+
+    # 4. Transferir pesos
+    state_origen = modelo_origen.policy.state_dict()
+    state_destino = modelo_destino.policy.state_dict()
+
+    for key in state_destino:
+        if key in state_origen:
+            if "weight" in key and state_origen[key].shape != state_destino[key].shape:
+                # Expandir la primera capa: (H, old_dim) → (H, new_dim)
+                old_w = state_origen[key]  # (256, 190)
+                new_w = torch.zeros_like(state_destino[key])  # (256, 194)
+                new_w[:, :old_dim] = old_w   # copiar columnas existentes
+                new_w[:, old_dim:] = 0.0     # nuevas columnas en cero
+                state_destino[key] = new_w
+                print(
+                    f"  [Transfer] {key}: {list(old_w.shape)} → {list(new_w.shape)} (padding con ceros)")
+            else:
+                state_destino[key] = state_origen[key]
+
+    modelo_destino.policy.load_state_dict(state_destino, strict=False)
+    modelo_destino._total_timesteps = int(paso)
+    print(f"  [OK] Pesos transferidos. Paso inicial: {paso:,}")
+
+    # 5. Guardar modelo transferido
+    if ruta_destino:
+        os.makedirs(os.path.dirname(ruta_destino), exist_ok=True)
+        modelo_destino.save(ruta_destino)
+        print(f"  [OK] Modelo transferido guardado en: {ruta_destino}.zip")
+
+    return modelo_destino
 
 
 # ------------------------------------------------------------------
 # Factoría de entornos
 # ------------------------------------------------------------------
 def crear_entorno_con_bots(agente_idx=0, seed=None, shuffle_bots=True):
-    bots = [bot_conservador, bot_agresivo, bot_evasivo]
+    bots = [bot_evasivo, bot_evasivo, bot_conservador, bot_agresivo]
     if shuffle_bots:
         random.shuffle(bots)
     politicas = {}
@@ -185,7 +288,7 @@ def listar_snapshots_v5() -> List[str]:
 
 
 def listar_snapshots_v6() -> List[str]:
-    """Lista snapshots del directorio v6 (190 dims), ordenados por paso."""
+    """Lista snapshots del directorio v6 (194 dims), ordenados por paso."""
     os.makedirs(DIRECTORIO_MODELOS_V6, exist_ok=True)
     snaps = glob.glob(os.path.join(DIRECTORIO_MODELOS_V6, "snapshot_*.zip"))
     snaps.sort(key=lambda p: int(os.path.basename(
@@ -236,7 +339,7 @@ def _filtrar_snapshots_por_calidad(
 def crear_entorno_self_play(agente_idx=0, seed=None, prob_bot=0.15):
     """Crea entorno Self-Play: 85% snapshots, 15% bots."""
     snapshots = listar_snapshots()
-    bots = [bot_conservador, bot_agresivo, bot_evasivo]
+    bots = [bot_evasivo, bot_evasivo, bot_conservador, bot_agresivo]
     random.shuffle(bots)
     politicas = {}
     bot_idx = 0
@@ -299,7 +402,7 @@ def crear_entorno_self_play_v2(
     snapshots = _filtrar_snapshots_por_calidad(
         todos_snapshots, min_snapshot_steps)
 
-    bots = [bot_conservador, bot_agresivo, bot_evasivo]
+    bots = [bot_evasivo, bot_evasivo, bot_conservador, bot_agresivo]
     random.shuffle(bots)
     politicas: Dict[int, object] = {}
     bot_idx = 0
@@ -351,7 +454,7 @@ def crear_entorno_self_play_v5(
     snapshots = _filtrar_snapshots_por_calidad(
         todos_snapshots, min_snapshot_steps)
 
-    bots = [bot_conservador, bot_agresivo, bot_evasivo]
+    bots = [bot_evasivo, bot_evasivo, bot_conservador, bot_agresivo]
     random.shuffle(bots)
     politicas: Dict[int, object] = {}
     bot_idx = 0
@@ -393,12 +496,12 @@ def crear_entorno_self_play_v6(
     prob_bot: float = PROB_BOT_V2,
     min_snapshot_steps: int = MIN_SNAPSHOT_STEPS,
 ) -> CorazonesEnv:
-    """Crea entorno Self-Play v6 (190 dims) con snapshots del directorio v6."""
+    """Crea entorno Self-Play v6 (194 dims) con snapshots del directorio v6."""
     todos_snapshots = listar_snapshots_v6()
     snapshots = _filtrar_snapshots_por_calidad(
         todos_snapshots, min_snapshot_steps)
 
-    bots = [bot_conservador, bot_agresivo, bot_evasivo]
+    bots = [bot_evasivo, bot_evasivo, bot_conservador, bot_agresivo]
     random.shuffle(bots)
     politicas: Dict[int, object] = {}
     bot_idx = 0
@@ -732,13 +835,15 @@ def entrenar(
 # ------------------------------------------------------------------
 def main():
     parser = argparse.ArgumentParser(
-        description="Self-Play Corazones RL v5 (190 dims)")
+        description="Self-Play Corazones RL v6 (194 dims, all_void)")
     parser.add_argument("--resume", type=str, default=None,
                         help="Reanudar desde snapshot específico (.zip)")
     parser.add_argument("--base-model", type=str, default=None,
                         help="Modelo base .zip para iniciar (ej: modelos_historicos/v5/snapshot_*.zip)")
     parser.add_argument("--from-scratch", action="store_true",
                         help="Crear un modelo nuevo desde cero (sin cargar snapshots previos)")
+    parser.add_argument("--transfer-from", type=str, default=None,
+                        help="Transferir pesos desde snapshot 190-dim a 194-dim (padding ceros)")
     parser.add_argument("--steps", type=int, default=2_000_000)
     parser.add_argument("--snapshot-every", type=int, default=100_000)
     parser.add_argument("--self-play", action="store_true")
@@ -768,7 +873,7 @@ def main():
 
     print("=" * 60)
     print(
-        f"Self-Play Corazones RL {modo_label} (190 dims) — LR Schedule 3 fases")
+        f"Self-Play Corazones RL {modo_label} (194 dims) — LR Schedule 3 fases")
     print("=" * 60)
     print(f"  Self-Play: {args.self_play}")
     print(f"  Pasos: {args.steps:,}")
@@ -799,8 +904,34 @@ def main():
     inicio_paso = 0
     from_scratch = args.from_scratch
 
+    # --- Transferencia de pesos (190 → 194 dims) ---
+    if args.transfer_from:
+        ruta_origen = args.transfer_from
+        if not ruta_origen.endswith(".zip"):
+            ruta_origen += ".zip"
+        if not os.path.exists(ruta_origen):
+            print(f"ERROR: No se encuentra el modelo fuente: {ruta_origen}")
+            sys.exit(1)
+
+        ruta_transferido = os.path.join(
+            dir_snapshots,
+            f"snapshot_{_extraer_paso_de_ruta(ruta_origen):010d}"
+        )
+        print(f"Transferencia 190→194 desde: {ruta_origen}")
+        modelo = transferir_pesos(
+            ruta_origen=ruta_origen,
+            ruta_destino=ruta_transferido,
+            directorio_destino=dir_snapshots,
+        )
+        inicio_paso = _extraer_paso_de_ruta(ruta_origen)
+        ruta_modelo = ruta_transferido + ".zip"
+        from_scratch = False  # Ya tenemos modelo, no crear desde cero
+        print(f"  [OK] Modelo 194-dim guardado. Continuando entrenamiento...")
+
     # --- Determinar el modelo base ---
-    if args.resume:
+    if args.transfer_from:
+        pass  # Ya manejado arriba
+    elif args.resume:
         ruta_modelo = args.resume if args.resume.endswith(
             ".zip") else args.resume + ".zip"
         print(f"Reanudando desde: {ruta_modelo}")

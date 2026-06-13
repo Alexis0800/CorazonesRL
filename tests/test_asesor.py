@@ -221,7 +221,7 @@ class TestConstruirObservacionParcial:
             dama_picas_en=None,
             agente_idx=0,
         )
-        assert obs.shape == (190,)
+        assert obs.shape == (194,)
         assert obs.dtype == np.float32
 
     def test_mano_en_observacion(self) -> None:
@@ -360,7 +360,7 @@ class TestFlujoCompletoSinModelo:
             dama_picas_en=None,
             agente_idx=0,
         )
-        assert obs.shape == (190,)
+        assert obs.shape == (194,)
         assert not np.any(np.isnan(obs))
 
         mask = np.zeros(52, dtype=np.bool_)

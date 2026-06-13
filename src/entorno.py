@@ -83,9 +83,9 @@ class CorazonesEnv(gym.Env):
         self._politicas_oponentes: Dict[int,
                                         object] = politicas_oponentes or {}
 
-        # Espacios Gymnasium (v5: 190 dimensiones con features estratégicas)
+        # Espacios Gymnasium (v6: 194 dimensiones con features all_void)
         self.observation_space = spaces.Box(
-            low=0.0, high=1.0, shape=(190,), dtype=np.float32
+            low=0.0, high=1.0, shape=(194,), dtype=np.float32
         )
         self.action_space = spaces.Discrete(52)
 
@@ -428,7 +428,7 @@ class CorazonesEnv(gym.Env):
     # ------------------------------------------------------------------
 
     def _construir_observacion(self) -> np.ndarray:
-        """Construye el vector de observación de 190 dimensiones.
+        """Construye el vector de observación de 194 dimensiones.
 
         Bloques:
             [0:52]    Mano del agente (one-hot)
@@ -443,11 +443,12 @@ class CorazonesEnv(gym.Env):
             [187]     pozo_viable — ¿es viable intentar shooting the moon?
             [188]     debo_arriesgar — ¿estoy tan atrás que debo arriesgarme?
             [189]     puedo_alimentar — ¿puedo darle puntos a un rival?
+            [190:194] all_void_X — ¿los 3 rivales son void en el palo X?
 
         Returns:
-            Array np.float32 de shape (190,).
+            Array np.float32 de shape (194,).
         """
-        obs = np.zeros(190, dtype=np.float32)
+        obs = np.zeros(194, dtype=np.float32)
         a = self.agente_idx
 
         # --- [0:52] Mano del agente ---
@@ -498,6 +499,17 @@ class CorazonesEnv(gym.Env):
         obs[187] = 1.0 if self._pozo_viable() else 0.0
         obs[188] = 1.0 if self._debo_arriesgar() else 0.0
         obs[189] = 1.0 if self._puedo_alimentar() else 0.0
+
+        # --- [190:194] Features all_void v6 ---
+        # Indica si los 3 rivales (idx 1,2,3 relativos al agente) son void
+        # en un palo específico. Esto previene que el modelo lidere un palo
+        # donde todos son void (se comería la baza sin querer).
+        for palo in range(4):
+            todos_vacios = all(
+                palo in self._vacios[j]
+                for j in range(4) if j != a
+            )
+            obs[190 + palo] = 1.0 if todos_vacios else 0.0
 
         return obs
 

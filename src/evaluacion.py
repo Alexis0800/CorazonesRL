@@ -86,8 +86,11 @@ def normalizar_obs_si_hay_stats(
 ) -> np.ndarray:
     """Normaliza observación con stats de VecNormalize de SB3.
 
+    Soporta padding automático de 190→194 dimensiones para
+    compatibilidad con snapshots v5 cargados en entornos v6.
+
     Args:
-        obs: Vector de observación crudo de shape (190,).
+        obs: Vector de observación crudo de shape (190,) o (194,).
         vecnorm_path: Ruta al archivo .pkl de VecNormalize.
 
     Returns:
@@ -103,6 +106,10 @@ def normalizar_obs_si_hay_stats(
             return obs
         mean = np.array(obs_rms.mean)
         var = np.array(obs_rms.var)
+        # Padding automático: stats 190-dim → 194-dim
+        if len(mean) == 190 and len(obs) == 194:
+            mean = np.concatenate([mean, np.zeros(4, dtype=np.float32)])
+            var = np.concatenate([var, np.ones(4, dtype=np.float32)])
         return np.clip(
             (obs - mean) / np.sqrt(var + 1e-8), -10.0, 10.0
         ).astype(np.float32)
@@ -237,9 +244,9 @@ class _PoliticaSnapshot:
                 self._obs_rms = None
 
     def _construir_obs(self, motor: Any, jugador_idx: int) -> np.ndarray:
-        """Construye vector 190-dim desde la perspectiva del jugador."""
+        """Construye vector 194-dim (v6) desde la perspectiva del jugador."""
         from src.carta import Carta
-        obs = np.zeros(190, dtype=np.float32)
+        obs = np.zeros(194, dtype=np.float32)
         a = jugador_idx
 
         for c in motor.jugadores[a].mano:
@@ -267,6 +274,8 @@ class _PoliticaSnapshot:
         posiciones = {0: 0.0, 1: 0.33, 2: 0.66, 3: 1.0}
         obs[181] = posiciones.get(len(motor.mesa), 0.0)
 
+        # Features v5+v6 se dejan en 0 (no disponibles desde motor para oponentes)
+
         return obs
 
     def __call__(self, motor: Any, jugador_idx: int, legales: List[Any]) -> Any:
@@ -276,6 +285,10 @@ class _PoliticaSnapshot:
         if self._obs_rms is not None:
             mean = np.array(self._obs_rms.mean)
             var = np.array(self._obs_rms.var)
+            # Padding: stats de 190-dim → 194-dim (nuevos features: mean=0, var=1)
+            if len(mean) == 190:
+                mean = np.concatenate([mean, np.zeros(4, dtype=np.float32)])
+                var = np.concatenate([var, np.ones(4, dtype=np.float32)])
             obs = np.clip((obs - mean) / np.sqrt(var + 1e-8),
                           -10.0, 10.0).astype(np.float32)
 
@@ -575,10 +588,12 @@ def _guardar_log_evaluacion(log_path: str, resultado: Dict[str, Any]) -> None:
     """Agrega una línea JSON al archivo de log de evaluaciones.
 
     Args:
-        log_path: Ruta al archivo .jsonl.
+        log_path: Ruta al archivo .jsonl (si está vacío, no escribe).
         resultado: Diccionario con métricas de la evaluación.
     """
-    os.makedirs(os.path.dirname(log_path), exist_ok=True)
+    if not log_path:
+        return
+    os.makedirs(os.path.dirname(log_path) or ".", exist_ok=True)
     with open(log_path, "a", encoding="utf-8") as f:
         f.write(json.dumps(resultado, ensure_ascii=False) + "\n")
 

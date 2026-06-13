@@ -149,7 +149,7 @@ class TestTorneoConSnapshots:
         from src.elo_torneo import _listar_snapshots_torneo
         snaps = _listar_snapshots_torneo(
             [os.path.join(os.path.dirname(__file__), "..",
-                         "modelos_historicos", "v5")],
+                          "modelos_historicos", "v5")],
             min_paso=0,
             max_snapshots=10,
         )
@@ -244,3 +244,98 @@ class TestAdyacentes:
         resultado = _encontrar_adyacentes(
             "/path/snapshot_0001000000.zip", pool)
         assert len(resultado) == 1
+
+
+# ============================================================
+# Test: Cálculo Elo convergente (sin order bias)
+# ============================================================
+
+class TestEloConvergente:
+    """Verifica que el recálculo iterativo elimina el order bias."""
+
+    def test_convergente_mismo_resultado_que_simular(self):
+        """Con un solo oponente, el ranking debe coincidir con el método no-convergente."""
+        from src.elo_torneo import _simular_resultado_torneo, _calcular_elo_convergente
+        snaps = ["A", "B"]
+        resultados = {("A", "B"): (10, 0)}
+        ratings_sim = _simular_resultado_torneo(
+            snaps, {"A": 1500, "B": 1500}, resultados)
+        ratings_conv, _ = _calcular_elo_convergente(snaps, resultados)
+        # El método convergente usa la matriz completa y da ratings más extremos,
+        # pero el ORDEN del ranking debe ser el mismo
+        assert ratings_conv["A"] > ratings_conv["B"], "A debe seguir siendo mejor que B"
+        # Verificar que el ganador tiene rating >1500 y perdedor <1500
+        assert ratings_conv["A"] > 1500
+        assert ratings_conv["B"] < 1500
+
+    def test_convergente_orden_correcto(self):
+        """Tres jugadores con desempeño claro deben ordenarse A > B > C."""
+        from src.elo_torneo import _calcular_elo_convergente
+        snaps = ["A", "B", "C"]
+        resultados = {
+            ("A", "B"): (8, 2),
+            ("B", "C"): (7, 3),
+            ("A", "C"): (9, 1),
+        }
+        ratings, _ = _calcular_elo_convergente(snaps, resultados)
+        assert ratings["A"] > ratings["B"] > ratings["C"], \
+            f"Orden incorrecto: A={ratings['A']:.0f} B={ratings['B']:.0f} C={ratings['C']:.0f}"
+
+    def test_convergente_simetrico(self):
+        """Si A y B son idénticos (5-5), deben tener ratings casi iguales."""
+        from src.elo_torneo import _calcular_elo_convergente
+        snaps = ["X", "Y"]
+        resultados = {("X", "Y"): (5, 5)}
+        ratings, _ = _calcular_elo_convergente(snaps, resultados)
+        assert abs(ratings["X"] - ratings["Y"]) < 1.0, \
+            f"Deben ser casi iguales: X={ratings['X']:.1f} Y={ratings['Y']:.1f}"
+
+    def test_convergente_immunidad_order_bias(self):
+        """El orden de las entradas en resultados no debe afectar el rating final."""
+        from src.elo_torneo import _calcular_elo_convergente
+        snaps = ["P1", "P2", "P3", "P4"]
+        resultados = {
+            ("P1", "P2"): (8, 2),
+            ("P1", "P3"): (9, 1),
+            ("P1", "P4"): (10, 0),
+            ("P2", "P3"): (6, 4),
+            ("P2", "P4"): (8, 2),
+            ("P3", "P4"): (7, 3),
+        }
+        ratings1, iters1 = _calcular_elo_convergente(snaps, resultados)
+        # Invertir orden del dict
+        resultados_inv = dict(reversed(list(resultados.items())))
+        ratings2, iters2 = _calcular_elo_convergente(snaps, resultados_inv)
+        for snap in snaps:
+            assert abs(ratings1[snap] - ratings2[snap]) < 0.01, \
+                f"Order bias en {snap}: {ratings1[snap]:.6f} vs {ratings2[snap]:.6f}"
+
+    def test_convergente_converge_rapido(self):
+        """Gauss-Seidel con permutación: converge en <50 iters."""
+        from src.elo_torneo import _calcular_elo_convergente
+        snaps = [f"P{i}" for i in range(6)]
+        resultados = {}
+        for i in range(6):
+            for j in range(i + 1, 6):
+                gap = j - i
+                wins_i = min(10, 5 + gap)  # 6-4, 7-3, 8-2, 9-1, 10-0
+                wins_j = 10 - wins_i
+                resultados[(snaps[i], snaps[j])] = (wins_i, wins_j)
+        _, iters = _calcular_elo_convergente(snaps, resultados)
+        assert iters < 50, f"Debe converger en <50 iters, usó {iters}"
+
+    def test_convergente_vacio_no_falla(self):
+        """Con 0 matches no debe fallar."""
+        from src.elo_torneo import _calcular_elo_convergente
+        snaps = ["A", "B"]
+        ratings, iters = _calcular_elo_convergente(snaps, {})
+        assert ratings["A"] == 1500
+        assert ratings["B"] == 1500
+        assert iters == 0
+
+    def test_convergente_un_solo_jugador(self):
+        """Edge case: un solo jugador sin matches."""
+        from src.elo_torneo import _calcular_elo_convergente
+        ratings, iters = _calcular_elo_convergente(["Solo"], {})
+        assert ratings["Solo"] == 1500
+        assert iters == 0

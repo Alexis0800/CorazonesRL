@@ -60,10 +60,10 @@ class CorazonesAEC:
             name: i for i, name in enumerate(self.possible_agents)
         }
 
-        # Espacios por agente
+        # Espacios por agente (v6: 194 dimensiones con all_void)
         self.observation_spaces: Dict[str, spaces.Box] = {
             agent: spaces.Box(low=0.0, high=1.0,
-                              shape=(190,), dtype=np.float32)
+                              shape=(194,), dtype=np.float32)
             for agent in self.possible_agents
         }
         self.action_spaces: Dict[str, spaces.Discrete] = {
@@ -381,9 +381,9 @@ class CorazonesAEC:
     def _construir_observacion(self, agente_idx: int) -> np.ndarray:
         """Construye el vector de observación desde la perspectiva del agente.
 
-        Misma estructura de 190 dimensiones que CorazonesEnv.
+        Misma estructura de 194 dimensiones que CorazonesEnv (v6).
         """
-        obs = np.zeros(190, dtype=np.float32)
+        obs = np.zeros(194, dtype=np.float32)
         a = agente_idx
 
         # [0:52] Mano del agente
@@ -434,6 +434,14 @@ class CorazonesAEC:
         obs[187] = 1.0 if self._pozo_viable(agente_idx) else 0.0
         obs[188] = 1.0 if self._debo_arriesgar(agente_idx) else 0.0
         obs[189] = 1.0 if self._puedo_alimentar(agente_idx) else 0.0
+
+        # [190:194] Features all_void v6
+        for palo in range(4):
+            todos_vacios = all(
+                palo in self._vacios[j]
+                for j in range(4) if j != agente_idx
+            )
+            obs[190 + palo] = 1.0 if todos_vacios else 0.0
 
         return obs
 

@@ -1,0 +1,18 @@
+# Torneo v5 vs v6 — 2026-06-12 (modo bots)
+# ⚠️ Resultados engañosos — el modo bots subestima a modelos fuertes
+
+Directorio: torneo_cruzado_v2/
+Partidas por enfrentamiento: 30
+Modo: bots (snapshots NO se enfrentan entre sí, solo vs bots)
+
+CLASIFICACION:
+1. v5_17.65M  1536 Elo  ← #1 falso, los bots no distinguen
+2. v5_16.15M  1521
+3. v5_15.95M  1507
+4. v6_14.4M   1501
+5. v5_18.4M   1493
+6. v6_14.0M   1492
+7. v6_10.0M   1487  ← GOLDEN, pero aparece #7 contra bots
+...
+
+Conclusión: El modo bots NO es fiable. Usar siempre --elo-puro.

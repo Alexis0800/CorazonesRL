@@ -131,13 +131,15 @@ def evaluar_con_metricas(
     ruta_modelo: str,
     num_partidas: int,
     vecnorm_path: Optional[str] = None,
+    oponentes: Optional[List] = None,
 ) -> Dict[str, float]:
-    """Evalúa el modelo contra 3 bots heurísticos con métricas multi-nivel.
+    """Evalúa el modelo contra oponentes especificados con métricas multi-nivel.
 
     Args:
         ruta_modelo: Ruta al modelo .zip (con o sin extensión).
         num_partidas: Número de partidas de evaluación.
         vecnorm_path: Ruta al .pkl de VecNormalize (opcional).
+        oponentes: Lista de 3 funciones de bot (default: conservador, agresivo, evasivo).
 
     Returns:
         Diccionario con métricas: pct_primero, pct_segundo, pct_tercero,
@@ -160,14 +162,25 @@ def evaluar_con_metricas(
         print("Intentando con device=None...")
         modelo = MaskablePPO.load(ruta_modelo, device=None, env=None)
 
-    bots = [bot_conservador, bot_agresivo, bot_evasivo]
+    if oponentes is None:
+        oponentes = [bot_conservador, bot_agresivo, bot_evasivo]
+
     posiciones: List[int] = []
     puntuaciones: List[float] = []
 
     for seed in range(num_partidas):
+        politicas_oponentes = {
+            1: oponentes[0], 2: oponentes[1], 3: oponentes[2]}
+        # Rotar oponentes para variabilidad entre partidas
+        if num_partidas > 1:
+            politicas_oponentes = {
+                1: oponentes[seed % len(oponentes)],
+                2: oponentes[(seed + 1) % len(oponentes)],
+                3: oponentes[(seed + 2) % len(oponentes)],
+            }
         env = CorazonesEnv(
             agente_idx=0,
-            politicas_oponentes={1: bots[0], 2: bots[1], 3: bots[2]},
+            politicas_oponentes=politicas_oponentes,
         )
         obs_raw, _ = env.reset(seed=seed)
         obs = normalizar_obs_si_hay_stats(obs_raw, vecnorm_path)
@@ -205,18 +218,20 @@ def evaluar(
     ruta_modelo: str,
     num_partidas: int,
     vecnorm_path: Optional[str] = None,
+    oponentes: Optional[List] = None,
 ) -> float:
-    """Evalúa el modelo contra 3 bots heurísticos (compatibilidad hacia atrás).
+    """Evalúa el modelo contra bots heurísticos (compatibilidad hacia atrás).
 
     Args:
         ruta_modelo: Ruta al modelo .zip (con o sin extensión).
         num_partidas: Número de partidas.
         vecnorm_path: Ruta al .pkl de VecNormalize (opcional).
+        oponentes: Lista de funciones de bot (opcional).
 
     Returns:
         Win rate (0.0 a 1.0).
     """
-    metricas = evaluar_con_metricas(ruta_modelo, num_partidas, vecnorm_path)
+    metricas = evaluar_con_metricas(ruta_modelo, num_partidas, vecnorm_path, oponentes)
     return metricas["pct_primero"]
 
 
@@ -231,7 +246,37 @@ if __name__ == "__main__":
         "--partidas", type=int, default=100,
         help="Número de partidas"
     )
+    parser.add_argument(
+        "--oponentes", type=str, nargs="+", default=None,
+        help="Bots oponentes: conservador, agresivo, evasivo (default: los 3)"
+    )
     args = parser.parse_args()
+
+    # Resolver oponentes
+    MAPA_BOTS = {
+        "conservador": bot_conservador,
+        "agresivo": bot_agresivo,
+        "evasivo": bot_evasivo,
+    }
+    if args.oponentes:
+        oponentes = []
+        for nombre in args.oponentes:
+            n = nombre.lower()
+            if n in MAPA_BOTS:
+                oponentes.append(MAPA_BOTS[n])
+            else:
+                print(f"ADVERTENCIA: Bot desconocido '{nombre}'. Opciones: conservador, agresivo, evasivo")
+        if len(oponentes) < 3:
+            # Rellenar con los bots por defecto
+            defaults = [bot_conservador, bot_agresivo, bot_evasivo]
+            for d in defaults:
+                if d not in oponentes:
+                    oponentes.append(d)
+                if len(oponentes) >= 3:
+                    break
+        oponentes = oponentes[:3]  # Solo 3 oponentes
+    else:
+        oponentes = None  # Usar defaults en la función
 
     # Detectar VecNormalize asociado
     # Orden de búsqueda:
@@ -254,14 +299,19 @@ if __name__ == "__main__":
             vecnorm_path = candidato
             break
 
+    if oponentes:
+        nombres_ops = [b.__name__.replace("bot_", "") for b in oponentes]
+    else:
+        nombres_ops = ["conservador", "agresivo", "evasivo"]
+
     print("=" * 55)
     print(f"Evaluando: {ruta_base}.zip")
     print(f"Partidas: {args.partidas}")
-    print(f"Oponentes: conservador, agresivo, evasivo")
+    print(f"Oponentes: {', '.join(nombres_ops)}")
     print(f"VecNormalize: {vecnorm_path or 'NO (usando obs crudas)'}")
     print("-" * 55)
 
-    metricas = evaluar_con_metricas(ruta_base, args.partidas, vecnorm_path)
+    metricas = evaluar_con_metricas(ruta_base, args.partidas, vecnorm_path, oponentes)
 
     print("-" * 55)
     print(f"Resultados ({metricas['total_partidas']} partidas):")
