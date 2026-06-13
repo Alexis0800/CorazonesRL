@@ -52,6 +52,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # ------------------------------------------------------------------
 # Soporte GPU Intel Arc / DirectML
 # ------------------------------------------------------------------
+
+
 def _configurar_dispositivo(device: str) -> str:
     """Configura el dispositivo de cómputo, con soporte para Intel Arc.
 
@@ -281,7 +283,8 @@ def _guardar_mejores_snapshots(
             print(f"  💾 Mejor snapshot guardado: {name}.zip → {best_dir}/")
             guardados += 1
         if os.path.exists(src_vec):
-            shutil.copy2(src_vec, os.path.join(best_dir, name + "_vecnorm.pkl"))
+            shutil.copy2(src_vec, os.path.join(
+                best_dir, name + "_vecnorm.pkl"))
 
     return guardados
 
@@ -566,14 +569,17 @@ def entrenar_auto(
             else:
                 # Torneo terminado → guardar los mejores snapshots
                 if proc.returncode == 0:
-                    print(f"\n  ✅ Torneo ELO completado → {os.path.basename(out_file)}")
+                    print(
+                        f"\n  ✅ Torneo ELO completado → {os.path.basename(out_file)}")
                     guardados = _guardar_mejores_snapshots(
                         out_file, dir_snapshots, best_dir, best_top,
                     )
                     if guardados > 0:
-                        print(f"  📁 {guardados} snapshots elite guardados en {best_dir}/")
+                        print(
+                            f"  📁 {guardados} snapshots elite guardados en {best_dir}/")
                 else:
-                    print(f"\n  ⚠️  Torneo ELO falló (exit code {proc.returncode})")
+                    print(
+                        f"\n  ⚠️  Torneo ELO falló (exit code {proc.returncode})")
         procesos_elo = pendientes
 
     # --- Fin del entrenamiento ---
@@ -595,7 +601,8 @@ def entrenar_auto(
             try:
                 proc.wait(timeout=300)
                 if proc.returncode == 0:
-                    print(f"  ✅ Torneo ELO finalizado → {os.path.basename(out_file)}")
+                    print(
+                        f"  ✅ Torneo ELO finalizado → {os.path.basename(out_file)}")
                     _guardar_mejores_snapshots(
                         out_file, dir_snapshots, best_dir, best_top,
                     )
