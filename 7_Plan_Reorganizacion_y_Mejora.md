@@ -79,6 +79,7 @@ python -m src.elo_torneo --directorios modelos_historicos/v6 --partidas 50 --elo
 ```
 
 Queremos responder:
+
 - ¿Cuál es el Elo relativo de cada bot?
 - ¿El bot evasivo realmente es mejor que el conservador?
 - ¿Hay un bot claramente dominante?
@@ -91,6 +92,7 @@ python -m src.evaluacion --ruta BOTS_ONLY --partidas 10 --verbose
 ```
 
 Para cada baza, anotar:
+
 - ¿El bot tenía una jugada obviamente mejor que no eligió?
 - ¿Cometió errores de "regalar puntos sin necesidad"?
 - ¿Tomó decisiones que un humano intermedio jamás tomaría?
@@ -109,6 +111,7 @@ Este test se ejecuta después de la Fase 2.
 ## 1.2 Documentar deficiencias encontradas
 
 Crear un archivo `observaciones_bots.md` con:
+
 - Errores sistemáticos detectados
 - Situaciones donde los bots son predecibles
 - Debilidades que el modelo RL está explotando (sin realmente aprender Corazones)
@@ -191,6 +194,7 @@ BotExperto(cartas_conocidas, voids, puntajes, baza_numero)
 ```
 
 Tests:
+
 - `test_cartas_restantes_por_palo_inicial` — al inicio, 13 por palo
 - `test_cartas_restantes_por_palo_despues_de_baza` — después de una baza, descuenta correctamente
 - `test_cartas_altas_restantes` — detecta J/Q/K/A restantes
@@ -252,6 +256,7 @@ class BotExperto:
 ## 2.3 Validación cruzada
 
 Comparar decisiones del Bot Experto contra:
+
 - Tus propias decisiones como jugador humano (en 20 manos)
 - Las decisiones del bot difícil de solitar.io (en 10 manos)
 
@@ -353,11 +358,13 @@ python -m src.elo_torneo --partidas 50 --elo-puro --incluir-bots --vs-experto
 ## 4.3 Matriz de decisión: ¿agregar o no cada feature?
 
 Para cada feature propuesto, responder:
+
 1. ¿Puede el modelo inferir esto de los datos existentes? Si es fácil → quizás no hace falta.
 2. ¿Es una combinación no lineal de features existentes? Si es difícil de aprender → agregarlo.
 3. ¿Aporta información que un humano usaría? Si un humano lo considera → el modelo también debería.
 
 **Ejemplo de decisión:**
+
 - `all_void_X`: el modelo TIENE los voids individuales, pero la combinación "todos son void" requiere aprender una regla combinatoria. **Se agregó en v6 y fue correcto.**
 - `número de baza / 13`: el modelo podría inferirlo del tamaño del cementerio, pero es una división trivial que consume capacidad de aprendizaje. **Vale la pena agregarlo.**
 - `cartas restantes por palo`: se puede inferir de `[0:52] + [104:156]`, pero requiere conteo. El modelo PUEDE aprenderlo pero desperdicia capacidad. **Vale la pena agregarlo.**
@@ -503,6 +510,7 @@ def _es_baza_temprana(self) -> bool:
 ```
 
 La intuición detrás de esto:
+
 - **Baza 1-4:** El juego está abierto. Es casi imposible predecir quién se comerá puntos. Cualquier recompensa densa aquí es ruido. Solo se aplican castigos por eventos consumados (te comiste Q♠ sin pozo viable).
 - **Baza 5-8:** Transición. Solo recompensas por descartes realmente seguros.
 - **Baza 9-13:** Fase crítica. Cada decisión importa. Las recompensas densas se activan.
