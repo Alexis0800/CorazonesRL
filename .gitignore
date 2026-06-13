@@ -58,6 +58,14 @@ Thumbs.db
 .DS_Store
 Thumbs.db
 
+# Transfer zip
+golden_checkpoints.zip
+
+# Torneos temporales (modelos copiados, no resultados)
+torneo_cruzado/
+torneo_cruzado_v2/
+torneo_v7/
+
 # Training / RL outputs
 checkpoints/
 models/
