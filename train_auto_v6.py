@@ -1,15 +1,25 @@
 """
-Entrenamiento autónomo v6 desde cero con evaluaciones y torneos ELO.
+Entrenamiento autónomo v6 con evaluaciones, torneos ELO y guardado elite.
 
 Ejecuta un ciclo completo de entrenamiento con:
-  - Decaimiento progresivo de prob_bot (0.50 → 0.10)
+  - Decaimiento progresivo de prob_bot (0.50 → 0.20, cosine decay)
   - LR schedule en 3 fases
-  - Evaluación de win rate cada N snapshots → v6/eval_log.jsonl
-  - Torneo ELO cada M snapshots (en proceso separado) → v6/elo_*.txt
-  - Snapshots + VecNormalize guardados en modelos_historicos/v6/
+  - Evaluación de win rate cada N snapshots → eval_log.jsonl
+  - Torneo ELO cada M snapshots (asíncrono) → elo_paso_*.txt
+  - Guardado automático de los N mejores snapshots tras cada torneo → best/
+  - Snapshots + VecNormalize guardados en el directorio de salida
+  - Soporte GPU: cpu, cuda, dml (DirectML/Intel Arc), xpu (Intel XPU)
 
 Uso:
-    python train_auto_v6.py --total-steps 20000000 --snapshot-every 100000
+    # Desde cero
+    python train_auto_v6.py --total-steps 20000000 --output-dir modelos_historicos/v8
+
+    # Reanudar desde golden
+    python train_auto_v6.py --resume golden/snapshot_0014900000 --total-steps 25000000 --output-dir modelos_historicos/v7_cont
+
+    # Con GPU Intel Arc
+    pip install torch-directml
+    python train_auto_v6.py --total-steps 20000000 --device dml --output-dir modelos_historicos/v8
 """
 
 from __future__ import annotations
@@ -39,6 +49,39 @@ import numpy as np
 # Asegurar que el directorio del proyecto está en el path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# ------------------------------------------------------------------
+# Soporte GPU Intel Arc / DirectML
+# ------------------------------------------------------------------
+def _configurar_dispositivo(device: str) -> str:
+    """Configura el dispositivo de cómputo, con soporte para Intel Arc.
+
+    Detecta si se solicita 'dml' (DirectML) o 'xpu' (Intel XPU) y
+    verifica que las dependencias estén instaladas.
+
+    Args:
+        device: String del dispositivo ('cpu', 'cuda', 'dml', 'xpu').
+
+    Returns:
+        String del dispositivo validado.
+    """
+    if device == "dml":
+        try:
+            import torch_directml  # noqa: F401
+            print("[GPU] DirectML habilitado para Intel Arc / AMD / NVIDIA")
+        except ImportError:
+            print("ERROR: torch-directml no instalado.")
+            print("  Instálalo con: pip install torch-directml")
+            sys.exit(1)
+    elif device == "xpu":
+        try:
+            import intel_extension_for_pytorch  # noqa: F401
+            print("[GPU] Intel XPU habilitado para Intel Arc")
+        except ImportError:
+            print("ERROR: intel-extension-for-pytorch no instalado.")
+            print("  Instálalo con: pip install intel-extension-for-pytorch")
+            sys.exit(1)
+    return device
+
 
 # ------------------------------------------------------------------
 # Constantes
@@ -48,6 +91,7 @@ PROB_BOT_END: float = 0.20
 EVAL_PARTIDAS: int = 100
 ELO_PARTIDAS: int = 30
 ELO_MAX_SNAPSHOTS: int = 12
+BEST_TOP: int = 2  # Cuántos mejores snapshots guardar tras cada torneo Elo
 
 
 # ------------------------------------------------------------------
@@ -166,6 +210,83 @@ def lanzar_torneo_elo(
 
 
 # ------------------------------------------------------------------
+# Guardado automático de mejores snapshots
+# ------------------------------------------------------------------
+
+def _guardar_mejores_snapshots(
+    output_file: str,
+    dir_snapshots: str,
+    best_dir: str,
+    top_n: int = BEST_TOP,
+) -> int:
+    """Parsea el resultado de un torneo Elo y copia los top N snapshots.
+
+    Lee el archivo de salida del torneo, extrae el ranking, filtra
+    los bots y copia los mejores N modelos + sus VecNormalize a un
+    directorio permanente de "mejores".
+
+    Args:
+        output_file: Ruta al archivo de salida del torneo Elo.
+        dir_snapshots: Directorio donde están los snapshots originales.
+        best_dir: Directorio destino para los mejores snapshots.
+        top_n: Número de mejores snapshots a guardar (default 2).
+
+    Returns:
+        Número de snapshots guardados.
+    """
+    import re
+
+    if not os.path.exists(output_file):
+        print(f"  ⚠️  Output de torneo no encontrado: {output_file}")
+        return 0
+
+    with open(output_file, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    # Encontrar sección del ranking
+    ranking_start = content.find("CLASIFICACION FINAL")
+    if ranking_start == -1:
+        print(f"  ⚠️  No se encontró ranking en {output_file}")
+        return 0
+
+    ranking_text = content[ranking_start:]
+
+    # Parsear líneas del ranking:  Pos   Snapshot                       Paso         Elo      Diff
+    top_snapshots: List[str] = []
+    for line in ranking_text.split("\n"):
+        # Ej: "1     snapshot_0012000000            12,000,000  1829     -82"
+        # Ej: "1     [BOT] evasivo                       (bot)  1911     "
+        match = re.match(r'\s*(\d+)\s+(\S+)', line)
+        if match:
+            name = match.group(2)
+            if name.startswith("[BOT]"):
+                continue  # Saltar bots
+            top_snapshots.append(name)
+            if len(top_snapshots) >= top_n:
+                break
+
+    if not top_snapshots:
+        print("  ⚠️  No se encontraron snapshots de modelo en el ranking")
+        return 0
+
+    os.makedirs(best_dir, exist_ok=True)
+    guardados = 0
+
+    for name in top_snapshots:
+        src_zip = os.path.join(dir_snapshots, name + ".zip")
+        src_vec = os.path.join(dir_snapshots, name + "_vecnorm.pkl")
+
+        if os.path.exists(src_zip):
+            shutil.copy2(src_zip, os.path.join(best_dir, name + ".zip"))
+            print(f"  💾 Mejor snapshot guardado: {name}.zip → {best_dir}/")
+            guardados += 1
+        if os.path.exists(src_vec):
+            shutil.copy2(src_vec, os.path.join(best_dir, name + "_vecnorm.pkl"))
+
+    return guardados
+
+
+# ------------------------------------------------------------------
 # Entrenamiento autónomo
 # ------------------------------------------------------------------
 
@@ -181,6 +302,7 @@ def entrenar_auto(
     device: str = "cpu",
     resume_from: Optional[str] = None,
     output_dir: Optional[str] = None,
+    best_top: int = BEST_TOP,
 ) -> int:
     """Ejecuta entrenamiento autónomo completo desde cero o reanudando.
 
@@ -193,9 +315,10 @@ def entrenar_auto(
         prob_bot_start: prob_bot inicial.
         prob_bot_end: prob_bot final.
         seed: Semilla aleatoria.
-        device: Dispositivo de cómputo.
+        device: Dispositivo de cómputo (cpu, cuda, dml, xpu).
         resume_from: Ruta a snapshot .zip para reanudar.
         output_dir: Directorio de salida (default: modelos_historicos/v6).
+        best_top: Cuántos mejores snapshots guardar tras cada torneo Elo (default 2).
 
     Returns:
         Paso final alcanzado.
@@ -217,6 +340,9 @@ def entrenar_auto(
     etiqueta = os.path.basename(output_dir) if output_dir else "v6"
 
     # --- Modo resume: cargar modelo existente ---
+    # Validar dispositivo (Intel Arc / DirectML)
+    device = _configurar_dispositivo(device)
+
     if resume_from:
         if not resume_from.endswith(".zip"):
             resume_from += ".zip"
@@ -245,7 +371,7 @@ def entrenar_auto(
         modelo.set_env(venv)
 
         vecnorm_path = os.path.join(dir_vecnorm,
-            f"{'v7' if output_dir and 'v7' in output_dir else 'v6'}_vecnorm.pkl")
+                                    f"{'v7' if output_dir and 'v7' in output_dir else 'v6'}_vecnorm.pkl")
         snapshot_count = paso_actual // snapshot_every
         print(f"  Paso actual: {paso_actual:,}")
         print(f"  Snapshots → {dir_snapshots}")
@@ -321,7 +447,12 @@ def entrenar_auto(
         paso_actual = 0
         snapshot_count = 0
         vecnorm_path = os.path.join(dir_vecnorm, f"{etiqueta}_vecnorm.pkl")
-    procesos_elo: List[subprocess.Popen] = []
+
+    # Directorio para guardar los mejores snapshots de cada torneo Elo
+    best_dir = os.path.join(os.path.dirname(dir_snapshots), "best")
+
+    # Lista de (proceso, output_file) para torneos Elo asíncronos
+    procesos_elo: List[tuple] = []
 
     t_start = time.time()
 
@@ -424,11 +555,26 @@ def entrenar_auto(
                 max_snapshots=ELO_MAX_SNAPSHOTS,
             )
             if proc:
-                procesos_elo.append(proc)
+                procesos_elo.append((proc, elo_out))
                 print(f"  [OK] Torneo ELO en segundo plano (PID {proc.pid})")
 
-        # Limpiar procesos ELO terminados
-        procesos_elo = [p for p in procesos_elo if p.poll() is None]
+        # Procesar torneos ELO terminados y guardar mejores snapshots
+        pendientes = []
+        for proc, out_file in procesos_elo:
+            if proc.poll() is None:
+                pendientes.append((proc, out_file))  # Sigue ejecutándose
+            else:
+                # Torneo terminado → guardar los mejores snapshots
+                if proc.returncode == 0:
+                    print(f"\n  ✅ Torneo ELO completado → {os.path.basename(out_file)}")
+                    guardados = _guardar_mejores_snapshots(
+                        out_file, dir_snapshots, best_dir, best_top,
+                    )
+                    if guardados > 0:
+                        print(f"  📁 {guardados} snapshots elite guardados en {best_dir}/")
+                else:
+                    print(f"\n  ⚠️  Torneo ELO falló (exit code {proc.returncode})")
+        procesos_elo = pendientes
 
     # --- Fin del entrenamiento ---
     elapsed = time.time() - t_start
@@ -445,9 +591,14 @@ def entrenar_auto(
     # Esperar procesos ELO pendientes (máx 5 min)
     if procesos_elo:
         print("⏳ Esperando torneos ELO pendientes...")
-        for proc in procesos_elo:
+        for proc, out_file in procesos_elo:
             try:
                 proc.wait(timeout=300)
+                if proc.returncode == 0:
+                    print(f"  ✅ Torneo ELO finalizado → {os.path.basename(out_file)}")
+                    _guardar_mejores_snapshots(
+                        out_file, dir_snapshots, best_dir, best_top,
+                    )
             except subprocess.TimeoutExpired:
                 proc.kill()
         print("[OK] Torneos ELO finalizados")
@@ -480,11 +631,14 @@ def main() -> None:
     parser.add_argument("--prob-bot-start", type=float, default=PROB_BOT_START)
     parser.add_argument("--prob-bot-end", type=float, default=PROB_BOT_END)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--device", type=str, default="cpu")
+    parser.add_argument("--device", type=str, default="cpu",
+                        help="Dispositivo: cpu, cuda, dml (Intel Arc/DirectML), xpu (Intel XPU)")
     parser.add_argument("--resume", type=str, default=None,
                         help="Reanudar desde snapshot .zip existente")
     parser.add_argument("--output-dir", type=str, default=None,
                         help="Directorio de salida para snapshots (default: modelos_historicos/v6)")
+    parser.add_argument("--best-top", type=int, default=BEST_TOP,
+                        help=f"Guardar los N mejores snapshots tras cada torneo Elo (default: {BEST_TOP})")
     args = parser.parse_args()
 
     paso_final = entrenar_auto(
@@ -499,6 +653,7 @@ def main() -> None:
         device=args.device,
         resume_from=args.resume,
         output_dir=args.output_dir,
+        best_top=args.best_top,
     )
     print(f"\nPaso final alcanzado: {paso_final:,}")
 

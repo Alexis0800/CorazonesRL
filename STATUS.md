@@ -37,6 +37,7 @@ tests/                # 24 tests Elo + tests de motor, entorno, etc.
 ## ✅ LO COMPLETADO
 
 ### Fase 1 — Motor del Juego
+
 - [x] Clases Carta, Baraja, Jugador
 - [x] Bucle de mano completo (repartir, 13 bazas, conteo)
 - [x] Shooting the Moon, corazones rotos, Dama de Picas
@@ -44,27 +45,32 @@ tests/                # 24 tests Elo + tests de motor, entorno, etc.
 - [x] Test de estrés: 10,000 manos < 3 segundos
 
 ### Fase 2 — Entorno Gymnasium
+
 - [x] `CorazonesEnv(gym.Env)` con action masking
 - [x] Vector de observación 194 dimensiones (all_void en v6+)
 - [x] Recompensa suma-cero con reward shaping
 - [x] `env_checker` pass
 
 ### Fase 3 — Agente RL
+
 - [x] MaskablePPO con red MLP [512,512,512]
 - [x] 3 bots heurísticos
 - [x] Fictitious Self-Play con VecNormalize
 - [x] Pipeline autónomo: snapshots, evals, pruning, torneos Elo
 
 ### Fase 5 — all_void (4 features extra)
+
 - [x] 190→194 dimensiones
 - [x] Feature: "todos los rivales vacíos en palo X"
 
 ### Fase 6 — Elo Convergente
+
 - [x] Eliminado order bias (least-squares directo)
 - [x] 24/24 tests pasando
 - [x] Modo `--elo-puro` (snapshots vs snapshots, no bots)
 
 ### Mejoras de infraestructura
+
 - [x] `--output-dir` en `train_auto_v6.py` (entrena en cualquier directorio)
 - [x] Cosine decay prob_bot 50%→20%
 - [x] Golden checkpoints congelados (v6_10M y v7_14.9M)
@@ -92,6 +98,7 @@ tests/                # 24 tests Elo + tests de motor, entorno, etc.
 ```
 10.8M: 1489 → 11.8M: 1608 → 14.0M: 1642 → 14.9M: 1723
 ```
+
 Mejora continua, sin signos de estancamiento.
 
 ### Golden Checkpoints
@@ -116,17 +123,20 @@ Mejora continua, sin signos de estancamiento.
 ## ⬜ PENDIENTE
 
 ### Corto plazo (hoy/mañana)
+
 - [ ] **A) Continuar v7**: 5M pasos más (→20M) desde golden_v7, cosine decay
 - [ ] **B) Nuevo v8**: Desde cero con cosine decay 50%→20%
 - [ ] Evaluar si v7 se estanca o sigue mejorando
 - [ ] Si v7 se estanca → implementar HLR o MCTS
 
 ### Mediano plazo (mejora estratégica)
+
 - [ ] Reward shaping intermedio (no solo terminal)
 - [ ] Sistema de 3 modos: MINIMIZAR / POZO / ALIMENTAR
 - [ ] Features de planificación multi-baza
 
 ### Largo plazo (cambio arquitectónico)
+
 - [ ] HLR: Nivel estratégico + táctico (ver `4_Plan_Mejora_Estrategica.md`)
 - [ ] MCTS offline para generar datasets expertos (ver `6_Arquitectura_MultiModelo_MCTS.md`)
 - [ ] Modelo especializado de pase de cartas
@@ -175,6 +185,7 @@ python -m pytest tests/ -v
 ## 🌿 PLAN GIT + ENTRENAMIENTO PARALELO
 
 ### Ramas propuestas
+
 ```
 main          ← commit actual (stable, documentado)
   ├── exp/v7_cont   ← Continuar v7 desde golden_v7 → 20M
@@ -182,11 +193,13 @@ main          ← commit actual (stable, documentado)
 ```
 
 ### No se requieren cambios de código
+
 Ambos experimentos usan `train_auto_v6.py` sin modificar, solo cambian los argumentos.
 
 ### Comandos por máquina
 
 **Máquina A (v7_cont → 20M):**
+
 ```bash
 git checkout exp/v7_cont
 mkdir modelos_historicos\v7_cont
@@ -194,6 +207,7 @@ python train_auto_v6.py --resume modelos_historicos/golden_v7/snapshot_001490000
 ```
 
 **Máquina B (v8 desde cero → 20M):**
+
 ```bash
 git checkout exp/v8_scratch
 mkdir modelos_historicos\v8
