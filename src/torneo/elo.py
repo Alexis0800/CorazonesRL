@@ -43,6 +43,7 @@ ELO_INICIAL: int = 1500
 # Prefijo para identificar participantes bot en el torneo
 BOT_PREFIX = "__BOT__"
 _BOT_NAMES = ["conservador", "agresivo", "evasivo"]
+_BOT_NAMES_EXPERTO = ["conservador", "agresivo", "evasivo", "experto"]
 __all__ = [
     "K_FACTOR", "ELO_INICIAL", "BOT_PREFIX",
     "_expected_score", "_update_elo", "_calcular_elo_convergente",
@@ -243,6 +244,7 @@ def _listar_snapshots_torneo(
     min_paso: int = 0,
     max_snapshots: int = 20,
     incluir_bots: bool = False,
+    nombres_bots: Optional[List[str]] = None,
 ) -> List[Tuple[str, str]]:
     """Lista snapshots disponibles para torneo, ordenados por paso.
 
@@ -278,9 +280,10 @@ def _listar_snapshots_torneo(
         if snaps:
             snaps_por_dir[label] = snaps
 
+    _lista_bots = nombres_bots if nombres_bots is not None else _BOT_NAMES
     if not snaps_por_dir:
         if incluir_bots:
-            return [(f"{BOT_PREFIX}{name}", "bots") for name in _BOT_NAMES]
+            return [(f"{BOT_PREFIX}{name}", "bots") for name in _lista_bots]
         return []
 
     num_dirs = len(snaps_por_dir)
@@ -314,7 +317,7 @@ def _listar_snapshots_torneo(
 
     # Agregar bots como participantes virtuales (no sujetos a dedup por paso)
     if incluir_bots:
-        for bot_name in _BOT_NAMES:
+        for bot_name in _lista_bots:
             bot_id = f"{BOT_PREFIX}{bot_name}"
             unique.append((bot_id, "bots"))
 
@@ -387,12 +390,16 @@ def _get_bot_func(bot_name: str):
     """Obtiene la función de bot por nombre.
 
     Args:
-        bot_name: Nombre del bot ('conservador', 'agresivo', 'evasivo').
+        bot_name: Nombre del bot ('conservador', 'agresivo', 'evasivo', 'experto').
 
     Returns:
-        Función del bot (motor, jugador_idx, legales) -> Carta.
+        Callable del bot (motor, jugador_idx, legales) -> Carta.
+        BotExperto devuelve una instancia fresca (tiene estado interno).
     """
     from src.agentes.heuristicos import bot_conservador, bot_agresivo, bot_evasivo
+    if bot_name == "experto":
+        from src.agentes.bot_experto import BotExperto
+        return BotExperto()
     mapa = {
         "conservador": bot_conservador,
         "agresivo": bot_agresivo,
@@ -595,6 +602,7 @@ def torneo_elo(
     verbose: bool = True,
     elo_puro: bool = False,
     incluir_bots: bool = False,
+    nombres_bots: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """Ejecuta un torneo round-robin entre snapshots históricos.
 
@@ -609,6 +617,8 @@ def torneo_elo(
         verbose: Imprimir progreso.
         elo_puro: Si True, usar snapshots adyacentes en vez de bots.
         incluir_bots: Si True, incluir bots heurísticos como participantes.
+        nombres_bots: Lista de nombres de bots a incluir. Default: los 3 heurísticos.
+                      Puede incluir 'experto' para añadir BotExperto.
 
     Returns:
         Diccionario con:
@@ -617,7 +627,8 @@ def torneo_elo(
             - resultados: {(a, b): (wins_a, wins_b)}
     """
     snaps = _listar_snapshots_torneo(
-        directorios, min_paso, max_snapshots, incluir_bots=incluir_bots)
+        directorios, min_paso, max_snapshots,
+        incluir_bots=incluir_bots, nombres_bots=nombres_bots)
     # snaps: List[(ruta, label)]
 
     if len(snaps) < 2:
@@ -725,7 +736,9 @@ if __name__ == "__main__":
     parser.add_argument("--incluir-v6", action="store_true", default=False,
                         help="Incluir snapshots de v6 en el torneo")
     parser.add_argument("--incluir-bots", action="store_true", default=False,
-                        help="Incluir bots heurísticos como participantes del torneo")
+                        help="Incluir bots heurísticos (conservador/agresivo/evasivo) como participantes")
+    parser.add_argument("--incluir-experto", action="store_true", default=False,
+                        help="Incluir BotExperto como participante adicional")
     args = parser.parse_args()
 
     # Resolver directorios
@@ -741,6 +754,15 @@ if __name__ == "__main__":
         if _MODELOS_V6_DIR not in directorios:
             directorios = list(directorios) + [_MODELOS_V6_DIR]
 
+    # Determinar qué bots participan
+    nombres_bots: Optional[List[str]] = None
+    if args.incluir_bots and args.incluir_experto:
+        nombres_bots = _BOT_NAMES_EXPERTO
+    elif args.incluir_experto:
+        nombres_bots = ["experto"]
+    elif args.incluir_bots:
+        nombres_bots = _BOT_NAMES
+
     resultado = torneo_elo(
         directorios=directorios,
         num_partidas=args.partidas,
@@ -748,7 +770,8 @@ if __name__ == "__main__":
         max_snapshots=args.max_snapshots,
         verbose=True,
         elo_puro=args.elo_puro,
-        incluir_bots=args.incluir_bots,
+        incluir_bots=(args.incluir_bots or args.incluir_experto),
+        nombres_bots=nombres_bots,
     )
 
     if not resultado["ranking"]:
