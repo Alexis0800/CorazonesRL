@@ -1,1 +1,1 @@
-# Tests del MÃ³dulo 1
+# Tests de Corazones — organizados por capa de arquitectura

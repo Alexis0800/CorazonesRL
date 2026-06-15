@@ -18,9 +18,9 @@ Uso:
 
 from __future__ import annotations
 from src.red import obtener_policy_kwargs
-from src.carta import Carta
-from src.bots import bot_conservador, bot_agresivo, bot_evasivo
-from src.entorno import CorazonesEnv
+from src.dominio.carta import Carta
+from src.agentes.heuristicos import bot_conservador, bot_agresivo, bot_evasivo
+from src.entorno.single_agent import CorazonesEnv
 
 import os
 import sys
@@ -37,11 +37,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # Configuración global
 # ------------------------------------------------------------------
 DIRECTORIO_MODELOS = os.path.join(os.path.dirname(
-    os.path.abspath(__file__)), "modelos_historicos")
+    os.path.abspath(__file__)), "modelos")
 DIRECTORIO_MODELOS_V2 = os.path.join(os.path.dirname(
-    os.path.abspath(__file__)), "modelos_historicos", "v2")
+    os.path.abspath(__file__)), "modelos", "v2")
 DIRECTORIO_MODELOS_V5 = os.path.join(os.path.dirname(
-    os.path.abspath(__file__)), "modelos_historicos", "v5")
+    os.path.abspath(__file__)), "modelos", "v5")
 DIRECTORIO_LOGS = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "logs")
 DIRECTORIO_VECNORM = os.path.join(os.path.dirname(
@@ -49,7 +49,7 @@ DIRECTORIO_VECNORM = os.path.join(os.path.dirname(
 DIRECTORIO_VECNORM_V5 = os.path.join(os.path.dirname(
     os.path.abspath(__file__)), "vecnormalize", "v5")
 DIRECTORIO_MODELOS_V6 = os.path.join(os.path.dirname(
-    os.path.abspath(__file__)), "modelos_historicos", "v6")
+    os.path.abspath(__file__)), "modelos", "v6")
 DIRECTORIO_VECNORM_V6 = os.path.join(os.path.dirname(
     os.path.abspath(__file__)), "vecnormalize", "v6")
 
@@ -811,7 +811,7 @@ def entrenar(
 
         # Auto-evaluación periódica
         if eval_every > 0 and snapshot_count % eval_every == 0:
-            from src.evaluacion import evaluar_snapshot_callback
+            from src.torneo.evaluacion import evaluar_snapshot_callback
             resultado = evaluar_snapshot_callback(
                 ruta_snapshot=ruta,
                 paso=paso_actual,
@@ -839,7 +839,7 @@ def main():
     parser.add_argument("--resume", type=str, default=None,
                         help="Reanudar desde snapshot específico (.zip)")
     parser.add_argument("--base-model", type=str, default=None,
-                        help="Modelo base .zip para iniciar (ej: modelos_historicos/v5/snapshot_*.zip)")
+                        help="Modelo base .zip para iniciar (ej: modelos/v5/snapshots/snapshot_*.zip)")
     parser.add_argument("--from-scratch", action="store_true",
                         help="Crear un modelo nuevo desde cero (sin cargar snapshots previos)")
     parser.add_argument("--transfer-from", type=str, default=None,

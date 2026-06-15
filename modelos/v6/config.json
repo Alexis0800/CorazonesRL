@@ -1,0 +1,14 @@
+{
+  "version": "v6",
+  "dim_observacion": 194,
+  "arquitectura": [256, 256, 128],
+  "descripcion": "Primera version con self-play real y features all_void",
+  "fecha_creacion": "2026-06-11",
+  "estado": "archivada",
+  "hiperparametros": {
+    "learning_rate": 3e-5,
+    "ent_coef": 0.08,
+    "n_steps": 4096,
+    "batch_size": 512
+  }
+}

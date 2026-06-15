@@ -1,0 +1,14 @@
+{
+  "version": "v7",
+  "dim_observacion": 194,
+  "arquitectura": [256, 256, 128],
+  "descripcion": "Self-play con decaimiento de bots 50%→20%",
+  "fecha_creacion": "2026-06-12",
+  "estado": "archivada",
+  "hiperparametros": {
+    "learning_rate": 3e-5,
+    "ent_coef": 0.08,
+    "n_steps": 4096,
+    "batch_size": 512
+  }
+}

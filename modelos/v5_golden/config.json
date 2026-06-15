@@ -1,0 +1,8 @@
+{
+  "version": "v5_golden",
+  "dim_observacion": 190,
+  "arquitectura": [256, 256, 128],
+  "descripcion": "Mejor modelo v5 — baseline dorado",
+  "fecha_creacion": "2026-06-10",
+  "estado": "baseline"
+}

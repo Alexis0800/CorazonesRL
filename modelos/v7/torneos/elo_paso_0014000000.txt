@@ -1,0 +1,132 @@
+============================================================
+=== Torneo Elo === 15 snapshots (bots, snapshots) | Modo: Puro (adyacentes)
+   Partidas por enfrentamiento: 30
+   Total de partidas: 3150
+============================================================
+  [1/105] snapshot_0012800000 vs snapshot_0012900000 ... 15-15
+  [2/105] snapshot_0012800000 vs snapshot_0013100000 ... 9-21
+  [3/105] snapshot_0012800000 vs snapshot_0013200000 ... 15-15
+  [4/105] snapshot_0012800000 vs snapshot_0013300000 ... 13-17
+  [5/105] snapshot_0012800000 vs snapshot_0013400000 ... 14-15
+  [6/105] snapshot_0012800000 vs snapshot_0013500000 ... 14-14
+  [7/105] snapshot_0012800000 vs snapshot_0013600000 ... 9-21
+  [8/105] snapshot_0012800000 vs snapshot_0013700000 ... 15-15
+  [9/105] snapshot_0012800000 vs snapshot_0013800000 ... 12-18
+  [10/105] snapshot_0012800000 vs snapshot_0013900000 ... 12-17
+  [11/105] snapshot_0012800000 vs snapshot_0014000000 ... 9-21
+  [12/105] snapshot_0012800000 vs [BOT] conservador ... 29-1
+  [13/105] snapshot_0012800000 vs [BOT] agresivo ... 25-5
+  [14/105] snapshot_0012800000 vs [BOT] evasivo ... 22-8
+  [15/105] snapshot_0012900000 vs snapshot_0013100000 ... 12-17
+  [16/105] snapshot_0012900000 vs snapshot_0013200000 ... 13-16
+  [17/105] snapshot_0012900000 vs snapshot_0013300000 ... 11-19
+  [18/105] snapshot_0012900000 vs snapshot_0013400000 ... 15-15
+  [19/105] snapshot_0012900000 vs snapshot_0013500000 ... 11-19
+  [20/105] snapshot_0012900000 vs snapshot_0013600000 ... 18-12
+  [21/105] snapshot_0012900000 vs snapshot_0013700000 ... 17-12
+  [22/105] snapshot_0012900000 vs snapshot_0013800000 ... 13-17
+  [23/105] snapshot_0012900000 vs snapshot_0013900000 ... 11-18
+  [24/105] snapshot_0012900000 vs snapshot_0014000000 ... 13-17
+  [25/105] snapshot_0012900000 vs [BOT] conservador ... 30-0
+  [26/105] snapshot_0012900000 vs [BOT] agresivo ... 25-5
+  [27/105] snapshot_0012900000 vs [BOT] evasivo ... 21-8
+  [28/105] snapshot_0013100000 vs snapshot_0013200000 ... 12-17
+  [29/105] snapshot_0013100000 vs snapshot_0013300000 ... 14-16
+  [30/105] snapshot_0013100000 vs snapshot_0013400000 ... 13-16
+  [31/105] snapshot_0013100000 vs snapshot_0013500000 ... 16-14
+  [32/105] snapshot_0013100000 vs snapshot_0013600000 ... 10-19
+  [33/105] snapshot_0013100000 vs snapshot_0013700000 ... 16-14
+  [34/105] snapshot_0013100000 vs snapshot_0013800000 ... 10-20
+  [35/105] snapshot_0013100000 vs snapshot_0013900000 ... 11-19
+  [36/105] snapshot_0013100000 vs snapshot_0014000000 ... 13-17
+  [37/105] snapshot_0013100000 vs [BOT] conservador ... 30-0
+  [38/105] snapshot_0013100000 vs [BOT] agresivo ... 29-1
+  [39/105] snapshot_0013100000 vs [BOT] evasivo ... 24-6
+  [40/105] snapshot_0013200000 vs snapshot_0013300000 ... 16-14
+  [41/105] snapshot_0013200000 vs snapshot_0013400000 ... 18-11
+  [42/105] snapshot_0013200000 vs snapshot_0013500000 ... 17-13
+  [43/105] snapshot_0013200000 vs snapshot_0013600000 ... 15-15
+  [44/105] snapshot_0013200000 vs snapshot_0013700000 ... 16-14
+  [45/105] snapshot_0013200000 vs snapshot_0013800000 ... 13-16
+  [46/105] snapshot_0013200000 vs snapshot_0013900000 ... 12-18
+  [47/105] snapshot_0013200000 vs snapshot_0014000000 ... 9-21
+  [48/105] snapshot_0013200000 vs [BOT] conservador ... 30-0
+  [49/105] snapshot_0013200000 vs [BOT] agresivo ... 26-3
+  [50/105] snapshot_0013200000 vs [BOT] evasivo ... 22-8
+  [51/105] snapshot_0013300000 vs snapshot_0013400000 ... 15-14
+  [52/105] snapshot_0013300000 vs snapshot_0013500000 ... 9-21
+  [53/105] snapshot_0013300000 vs snapshot_0013600000 ... 13-17
+  [54/105] snapshot_0013300000 vs snapshot_0013700000 ... 15-15
+  [55/105] snapshot_0013300000 vs snapshot_0013800000 ... 10-20
+  [56/105] snapshot_0013300000 vs snapshot_0013900000 ... 10-20
+  [57/105] snapshot_0013300000 vs snapshot_0014000000 ... 9-21
+  [58/105] snapshot_0013300000 vs [BOT] conservador ... 30-0
+  [59/105] snapshot_0013300000 vs [BOT] agresivo ... 26-4
+  [60/105] snapshot_0013300000 vs [BOT] evasivo ... 18-11
+  [61/105] snapshot_0013400000 vs snapshot_0013500000 ... 11-19
+  [62/105] snapshot_0013400000 vs snapshot_0013600000 ... 11-18
+  [63/105] snapshot_0013400000 vs snapshot_0013700000 ... 9-20
+  [64/105] snapshot_0013400000 vs snapshot_0013800000 ... 12-16
+  [65/105] snapshot_0013400000 vs snapshot_0013900000 ... 10-20
+  [66/105] snapshot_0013400000 vs snapshot_0014000000 ... 11-19
+  [67/105] snapshot_0013400000 vs [BOT] conservador ... 30-0
+  [68/105] snapshot_0013400000 vs [BOT] agresivo ... 24-6
+  [69/105] snapshot_0013400000 vs [BOT] evasivo ... 18-11
+  [70/105] snapshot_0013500000 vs snapshot_0013600000 ... 14-16
+  [71/105] snapshot_0013500000 vs snapshot_0013700000 ... 17-13
+  [72/105] snapshot_0013500000 vs snapshot_0013800000 ... 12-18
+  [73/105] snapshot_0013500000 vs snapshot_0013900000 ... 16-14
+  [74/105] snapshot_0013500000 vs snapshot_0014000000 ... 10-19
+  [75/105] snapshot_0013500000 vs [BOT] conservador ... 30-0
+  [76/105] snapshot_0013500000 vs [BOT] agresivo ... 26-4
+  [77/105] snapshot_0013500000 vs [BOT] evasivo ... 24-6
+  [78/105] snapshot_0013600000 vs snapshot_0013700000 ... 13-17
+  [79/105] snapshot_0013600000 vs snapshot_0013800000 ... 15-15
+  [80/105] snapshot_0013600000 vs snapshot_0013900000 ... 14-15
+  [81/105] snapshot_0013600000 vs snapshot_0014000000 ... 11-18
+  [82/105] snapshot_0013600000 vs [BOT] conservador ... 29-1
+  [83/105] snapshot_0013600000 vs [BOT] agresivo ... 25-4
+  [84/105] snapshot_0013600000 vs [BOT] evasivo ... 23-7
+  [85/105] snapshot_0013700000 vs snapshot_0013800000 ... 14-16
+  [86/105] snapshot_0013700000 vs snapshot_0013900000 ... 14-16
+  [87/105] snapshot_0013700000 vs snapshot_0014000000 ... 15-15
+  [88/105] snapshot_0013700000 vs [BOT] conservador ... 29-1
+  [89/105] snapshot_0013700000 vs [BOT] agresivo ... 29-1
+  [90/105] snapshot_0013700000 vs [BOT] evasivo ... 24-6
+  [91/105] snapshot_0013800000 vs snapshot_0013900000 ... 14-16
+  [92/105] snapshot_0013800000 vs snapshot_0014000000 ... 10-19
+  [93/105] snapshot_0013800000 vs [BOT] conservador ... 30-0
+  [94/105] snapshot_0013800000 vs [BOT] agresivo ... 27-3
+  [95/105] snapshot_0013800000 vs [BOT] evasivo ... 22-7
+  [96/105] snapshot_0013900000 vs snapshot_0014000000 ... 8-21
+  [97/105] snapshot_0013900000 vs [BOT] conservador ... 30-0
+  [98/105] snapshot_0013900000 vs [BOT] agresivo ... 29-1
+  [99/105] snapshot_0013900000 vs [BOT] evasivo ... 24-6
+  [100/105] snapshot_0014000000 vs [BOT] conservador ... 29-1
+  [101/105] snapshot_0014000000 vs [BOT] agresivo ... 27-3
+  [102/105] snapshot_0014000000 vs [BOT] evasivo ... 23-7
+  [103/105] [BOT] conservador vs [BOT] agresivo ... 10-20
+  [104/105] [BOT] conservador vs [BOT] evasivo ... 9-20
+  [105/105] [BOT] agresivo vs [BOT] evasivo ... 8-22
+   Elo convergente: 1 iteraciones
+
+============================================================
+=== CLASIFICACION FINAL ===
+============================================================
+Pos   Snapshot                       Paso         Elo      Diff
+------------------------------------------------------------
+1     snapshot_0014000000            14,000,000  1642     
+2     snapshot_0013900000            13,900,000  1625     -18
+3     snapshot_0013800000            13,800,000  1610     -14
+4     snapshot_0013500000            13,500,000  1592     -18
+5     snapshot_0013200000            13,200,000  1584     -9
+6     snapshot_0013700000            13,700,000  1583     -0
+7     snapshot_0013100000            13,100,000  1582     -1
+8     snapshot_0013600000            13,600,000  1581     -2
+9     snapshot_0012900000            12,900,000  1555     -26
+10    snapshot_0013300000            13,300,000  1546     -8
+11    snapshot_0013400000            13,400,000  1528     -19
+12    snapshot_0012800000            12,800,000  1523     -5
+13    [BOT] evasivo                       (bot)  1375     -147
+14    [BOT] agresivo                      (bot)  1210     -166
+15    [BOT] conservador                   (bot)  964      -245

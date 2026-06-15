@@ -12,19 +12,19 @@ Ejecuta un ciclo completo de entrenamiento con:
 
 Uso:
     # Desde cero
-    python train_auto_v6.py --total-steps 20000000 --output-dir modelos_historicos/v8
+    python train_auto_v6.py --total-steps 20000000 --output-dir modelos/v8
 
     # Reanudar desde golden
-    python train_auto_v6.py --resume golden/snapshot_0014900000 --total-steps 25000000 --output-dir modelos_historicos/v7_cont
+    python train_auto_v6.py --resume modelos/v7_golden/snapshots/snapshot_0014900000 --total-steps 25000000 --output-dir modelos/v7_cont
 
     # Con GPU Intel Arc
     pip install torch-directml
-    python train_auto_v6.py --total-steps 20000000 --device dml --output-dir modelos_historicos/v8
+    python train_auto_v6.py --total-steps 20000000 --device dml --output-dir modelos/v8
 """
 
 from __future__ import annotations
-from src.evaluacion import evaluar_snapshot_callback
-from src.entorno import CorazonesEnv
+from src.torneo.evaluacion import evaluar_snapshot_callback
+from src.entorno.single_agent import CorazonesEnv
 from train_self_play import (
     DIRECTORIO_MODELOS_V6, DIRECTORIO_VECNORM_V6, DIRECTORIO_LOGS,
     MIN_SNAPSHOT_STEPS, MAX_SNAPSHOTS_POOL,
@@ -321,7 +321,7 @@ def entrenar_auto(
         seed: Semilla aleatoria.
         device: Dispositivo de cómputo (cpu, cuda, dml, xpu).
         resume_from: Ruta a snapshot .zip para reanudar.
-        output_dir: Directorio de salida (default: modelos_historicos/v6).
+        output_dir: Directorio de salida (default: modelos/v6).
         best_top: Cuántos mejores snapshots guardar tras cada torneo Elo (default 2).
 
     Returns:
@@ -644,7 +644,7 @@ def main() -> None:
     parser.add_argument("--resume", type=str, default=None,
                         help="Reanudar desde snapshot .zip existente")
     parser.add_argument("--output-dir", type=str, default=None,
-                        help="Directorio de salida para snapshots (default: modelos_historicos/v6)")
+                        help="Directorio de salida para snapshots (default: modelos/v6)")
     parser.add_argument("--best-top", type=int, default=BEST_TOP,
                         help=f"Guardar los N mejores snapshots tras cada torneo Elo (default: {BEST_TOP})")
     args = parser.parse_args()

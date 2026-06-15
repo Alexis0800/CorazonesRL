@@ -30,9 +30,9 @@ htmlcov/
 .hypothesis/
 
 # Modelos entrenados y logs (archivos binarios grandes)
-modelos_historicos/
 logs/
 vecnormalize/
+# modelos/ es versionado (contiene modelos entrenados)
 
 # TensorBoard
 *.tfevents.*
@@ -59,7 +59,7 @@ Thumbs.db
 Thumbs.db
 
 # Transfer zip
-golden_checkpoints.zip
+# golden_checkpoints.zip — ya no existe, eliminado
 
 # Torneos temporales (modelos copiados, no resultados)
 torneo_cruzado/
@@ -76,9 +76,6 @@ wandb/
 results/
 artifacts/
 vecnormalize/
-modelos_historicos/snapshot_*/
-modelos_historicos/modelo_final*
-modelos_historicos/snapshot_*_vecnorm.pkl
 
 # Local config / secrets
 .env

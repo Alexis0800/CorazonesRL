@@ -1,0 +1,132 @@
+============================================================
+=== Torneo Elo === 15 snapshots (bots, v6) | Modo: Puro (adyacentes)
+   Partidas por enfrentamiento: 30
+   Total de partidas: 3150
+============================================================
+  [1/105] snapshot_0012800000 vs snapshot_0012900000 ... 12-18
+  [2/105] snapshot_0012800000 vs snapshot_0013100000 ... 16-13
+  [3/105] snapshot_0012800000 vs snapshot_0013200000 ... 17-13
+  [4/105] snapshot_0012800000 vs snapshot_0013300000 ... 13-17
+  [5/105] snapshot_0012800000 vs snapshot_0013400000 ... 14-16
+  [6/105] snapshot_0012800000 vs snapshot_0013500000 ... 14-16
+  [7/105] snapshot_0012800000 vs snapshot_0013600000 ... 14-16
+  [8/105] snapshot_0012800000 vs snapshot_0013700000 ... 13-17
+  [9/105] snapshot_0012800000 vs snapshot_0013800000 ... 16-13
+  [10/105] snapshot_0012800000 vs snapshot_0013900000 ... 13-17
+  [11/105] snapshot_0012800000 vs snapshot_0014000000 ... 12-18
+  [12/105] snapshot_0012800000 vs [BOT] conservador ... 30-0
+  [13/105] snapshot_0012800000 vs [BOT] agresivo ... 23-6
+  [14/105] snapshot_0012800000 vs [BOT] evasivo ... 21-9
+  [15/105] snapshot_0012900000 vs snapshot_0013100000 ... 15-15
+  [16/105] snapshot_0012900000 vs snapshot_0013200000 ... 15-15
+  [17/105] snapshot_0012900000 vs snapshot_0013300000 ... 14-16
+  [18/105] snapshot_0012900000 vs snapshot_0013400000 ... 14-16
+  [19/105] snapshot_0012900000 vs snapshot_0013500000 ... 14-16
+  [20/105] snapshot_0012900000 vs snapshot_0013600000 ... 13-17
+  [21/105] snapshot_0012900000 vs snapshot_0013700000 ... 10-20
+  [22/105] snapshot_0012900000 vs snapshot_0013800000 ... 16-12
+  [23/105] snapshot_0012900000 vs snapshot_0013900000 ... 18-12
+  [24/105] snapshot_0012900000 vs snapshot_0014000000 ... 13-16
+  [25/105] snapshot_0012900000 vs [BOT] conservador ... 29-1
+  [26/105] snapshot_0012900000 vs [BOT] agresivo ... 20-10
+  [27/105] snapshot_0012900000 vs [BOT] evasivo ... 18-12
+  [28/105] snapshot_0013100000 vs snapshot_0013200000 ... 15-15
+  [29/105] snapshot_0013100000 vs snapshot_0013300000 ... 13-17
+  [30/105] snapshot_0013100000 vs snapshot_0013400000 ... 14-16
+  [31/105] snapshot_0013100000 vs snapshot_0013500000 ... 12-18
+  [32/105] snapshot_0013100000 vs snapshot_0013600000 ... 13-16
+  [33/105] snapshot_0013100000 vs snapshot_0013700000 ... 12-18
+  [34/105] snapshot_0013100000 vs snapshot_0013800000 ... 11-19
+  [35/105] snapshot_0013100000 vs snapshot_0013900000 ... 17-12
+  [36/105] snapshot_0013100000 vs snapshot_0014000000 ... 14-16
+  [37/105] snapshot_0013100000 vs [BOT] conservador ... 30-0
+  [38/105] snapshot_0013100000 vs [BOT] agresivo ... 22-8
+  [39/105] snapshot_0013100000 vs [BOT] evasivo ... 18-10
+  [40/105] snapshot_0013200000 vs snapshot_0013300000 ... 13-17
+  [41/105] snapshot_0013200000 vs snapshot_0013400000 ... 14-16
+  [42/105] snapshot_0013200000 vs snapshot_0013500000 ... 14-15
+  [43/105] snapshot_0013200000 vs snapshot_0013600000 ... 14-16
+  [44/105] snapshot_0013200000 vs snapshot_0013700000 ... 10-19
+  [45/105] snapshot_0013200000 vs snapshot_0013800000 ... 12-17
+  [46/105] snapshot_0013200000 vs snapshot_0013900000 ... 14-16
+  [47/105] snapshot_0013200000 vs snapshot_0014000000 ... 12-18
+  [48/105] snapshot_0013200000 vs [BOT] conservador ... 30-0
+  [49/105] snapshot_0013200000 vs [BOT] agresivo ... 24-6
+  [50/105] snapshot_0013200000 vs [BOT] evasivo ... 18-12
+  [51/105] snapshot_0013300000 vs snapshot_0013400000 ... 13-17
+  [52/105] snapshot_0013300000 vs snapshot_0013500000 ... 11-19
+  [53/105] snapshot_0013300000 vs snapshot_0013600000 ... 13-17
+  [54/105] snapshot_0013300000 vs snapshot_0013700000 ... 15-15
+  [55/105] snapshot_0013300000 vs snapshot_0013800000 ... 10-20
+  [56/105] snapshot_0013300000 vs snapshot_0013900000 ... 11-19
+  [57/105] snapshot_0013300000 vs snapshot_0014000000 ... 12-17
+  [58/105] snapshot_0013300000 vs [BOT] conservador ... 28-2
+  [59/105] snapshot_0013300000 vs [BOT] agresivo ... 21-9
+  [60/105] snapshot_0013300000 vs [BOT] evasivo ... 20-10
+  [61/105] snapshot_0013400000 vs snapshot_0013500000 ... 15-15
+  [62/105] snapshot_0013400000 vs snapshot_0013600000 ... 13-17
+  [63/105] snapshot_0013400000 vs snapshot_0013700000 ... 12-18
+  [64/105] snapshot_0013400000 vs snapshot_0013800000 ... Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "D:\Python\corazones-neuralnetwork\src\elo_torneo.py", line 641, in <module>
+    resultado = torneo_elo(
+        directorios=directorios,
+    ...<5 lines>...
+        incluir_bots=args.incluir_bots,
+    )
+  File "D:\Python\corazones-neuralnetwork\src\elo_torneo.py", line 568, in torneo_elo
+    wins_a, wins_b = _jugar_match_snapshots(
+                     ~~~~~~~~~~~~~~~~~~~~~~^
+        a, b, num_partidas,
+        ^^^^^^^^^^^^^^^^^^^
+        elo_puro=elo_puro,
+        ^^^^^^^^^^^^^^^^^^
+        adyacentes_b=adyacentes,
+        ^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "D:\Python\corazones-neuralnetwork\src\elo_torneo.py", line 463, in _jugar_match_snapshots
+    obs_raw, _reward, terminated, truncated, _ = env.step(action)
+                                                 ~~~~~~~~^^^^^^^^
+  File "D:\Python\corazones-neuralnetwork\src\entorno.py", line 187, in step
+    self._autoplay_hasta_turno_agente()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "D:\Python\corazones-neuralnetwork\src\entorno.py", line 294, in _autoplay_hasta_turno_agente
+    carta = self._politicas_oponentes[actual](
+        self.motor, actual, legales
+    )
+  File "D:\Python\corazones-neuralnetwork\src\evaluacion.py", line 299, in __call__
+    action, _ = self.model.predict(
+                ~~~~~~~~~~~~~~~~~~^
+        obs, action_masks=mask, deterministic=True)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Python\corazones-neuralnetwork\.venv\Lib\site-packages\sb3_contrib\ppo_mask\ppo_mask.py", line 307, in predict
+    return self.policy.predict(observation, state, episode_start, deterministic, action_masks=action_masks)
+           ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Python\corazones-neuralnetwork\.venv\Lib\site-packages\sb3_contrib\common\maskable\policies.py", line 306, in predict
+    actions = self._predict(obs_tensor, deterministic=deterministic, action_masks=action_masks)
+  File "D:\Python\corazones-neuralnetwork\.venv\Lib\site-packages\sb3_contrib\common\maskable\policies.py", line 267, in _predict
+    return self.get_distribution(observation, action_masks).get_actions(deterministic=deterministic)
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Python\corazones-neuralnetwork\.venv\Lib\site-packages\sb3_contrib\common\maskable\policies.py", line 364, in get_distribution
+    latent_pi = self.mlp_extractor.forward_actor(features)
+  File "D:\Python\corazones-neuralnetwork\.venv\Lib\site-packages\stable_baselines3\common\torch_layers.py", line 258, in forward_actor
+    return self.policy_net(features)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^
+  File "D:\Python\corazones-neuralnetwork\.venv\Lib\site-packages\torch\nn\modules\module.py", line 1778, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "D:\Python\corazones-neuralnetwork\.venv\Lib\site-packages\torch\nn\modules\module.py", line 1789, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "D:\Python\corazones-neuralnetwork\.venv\Lib\site-packages\torch\nn\modules\container.py", line 253, in forward
+    input = module(input)
+  File "D:\Python\corazones-neuralnetwork\.venv\Lib\site-packages\torch\nn\modules\module.py", line 1778, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "D:\Python\corazones-neuralnetwork\.venv\Lib\site-packages\torch\nn\modules\module.py", line 1789, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "D:\Python\corazones-neuralnetwork\.venv\Lib\site-packages\torch\nn\modules\linear.py", line 134, in forward
+    return F.linear(input, self.weight, self.bias)
+           ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+KeyboardInterrupt
