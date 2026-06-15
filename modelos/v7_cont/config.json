@@ -1,9 +1,0 @@
-{
-  "version": "v7_cont",
-  "dim_observacion": 194,
-  "arquitectura": [256, 256, 128],
-  "descripcion": "Continuacion de v7 con LR schedule decaido",
-  "fecha_creacion": "2026-06-13",
-  "estado": "archivada",
-  "modelo_base": "v7/snapshot_0014900000"
-}

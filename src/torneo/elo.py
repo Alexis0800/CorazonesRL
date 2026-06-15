@@ -279,6 +279,8 @@ def _listar_snapshots_torneo(
             snaps_por_dir[label] = snaps
 
     if not snaps_por_dir:
+        if incluir_bots:
+            return [(f"{BOT_PREFIX}{name}", "bots") for name in _BOT_NAMES]
         return []
 
     num_dirs = len(snaps_por_dir)
