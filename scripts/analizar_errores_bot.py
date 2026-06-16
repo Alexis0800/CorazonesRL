@@ -29,6 +29,7 @@ if _ROOT not in sys.path:
 from src.dominio.motor import MotorCorazones
 from src.agentes.bot_experto import BotExperto
 from src.mcts.pimc import _puntaje_esperado_por_carta
+from src.mcts.analisis import pimc_exacto
 from src.agentes.heuristicos import bot_evasivo
 
 
@@ -47,6 +48,7 @@ class Divergencia:
     score_pimc: float
     coste: float            # score_bot - score_pimc (>0 = bot eligió peor)
     num_opciones: int
+    exacto: bool = False    # True si se usó enumeración completa
 
 
 # ──────────────────────────────────────────────────────────────
@@ -123,12 +125,13 @@ def analizar_mano(
                     if bots[0]._vacios[i]
                 }
                 # PIMC evalúa el motor en su estado ACTUAL (antes de jugar carta_bot)
-                scores = _puntaje_esperado_por_carta(
+                # Usar pimc_exacto: enumeración completa cuando viable, sampling cuando no
+                _, scores, exacto = pimc_exacto(
                     motor, 0, legales,
                     vacios=vacios,
-                    num_mundos=num_mundos,
                     rng=rng,
                     crear_bots=_crear_bots_rollout,
+                    fallback_mundos=num_mundos,
                 )
                 carta_optima = min(legales, key=lambda c: scores[c.id])
                 score_bot = scores[carta_bot.id]
@@ -146,6 +149,7 @@ def analizar_mano(
                         score_pimc=round(score_opt, 2),
                         coste=round(coste, 2),
                         num_opciones=len(legales),
+                        exacto=exacto,
                     ))
 
             motor.jugar_carta(0, carta_bot)
@@ -182,6 +186,11 @@ def imprimir_reporte(
     print(f"  Coste promedio por error : {coste_medio:.2f} pts esperados extra")
     print(f"  Coste total acumulado    : {coste_total:.1f} pts extra")
     print(f"  Coste medio por mano     : {coste_total/total_partidas:.2f} pts/mano")
+
+    n_exactas = sum(1 for d in todas if d.exacto)
+    if n_exactas > 0:
+        coste_exacto = sum(d.coste for d in todas if d.exacto)
+        print(f"  Decisiones exactas (enum): {n_exactas} | coste exacto: {coste_exacto:.1f} pts")
 
     # Por baza
     print(f"\n--- Por número de baza ---")
