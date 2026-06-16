@@ -20,6 +20,13 @@ Uso:
 """
 
 from __future__ import annotations
+from src.entorno.recompensas import RewardConfig
+from src.entorno.observacion import ObservacionBuilder
+from src.mcts.analisis import pimc_exacto, _num_mundos_posibles
+from src.agentes.heuristicos import bot_evasivo
+from src.agentes.bot_experto import BotExperto
+from src.dominio.carta import Carta
+from src.dominio.motor import MotorCorazones
 
 import argparse
 import json
@@ -36,13 +43,6 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from src.dominio.motor import MotorCorazones
-from src.dominio.carta import Carta
-from src.agentes.bot_experto import BotExperto
-from src.agentes.heuristicos import bot_evasivo
-from src.mcts.analisis import pimc_exacto, _num_mundos_posibles
-from src.entorno.observacion import ObservacionBuilder
-from src.entorno.recompensas import RewardConfig
 
 # ──────────────────────────────────────────────────────────────
 # Constantes

@@ -65,7 +65,8 @@ class CorazonesEnv(gym.Env):
 
     # --- NUEVAS RECOMPENSAS v9: correcciones tácticas ---
     # Penalización: liderar pica (no Q♠) con Q♠ activa, sin ser última posición
-    PENALTY_LIDERAR_PICA_CON_Q_ACTIVA: float = -1.0    # Recompensa: liderar la máxima de palo seguro (♣/♦)
+    # Recompensa: liderar la máxima de palo seguro (♣/♦)
+    PENALTY_LIDERAR_PICA_CON_Q_ACTIVA: float = -1.0
     REWARD_QUEMAR_MAXIMA_PALO_SEGURO: float = 0.5
     # Penalización: liderar Q♠ en mal momento (temprano o siendo máxima en picas)
     PENALTY_LIDERAR_Q_EQUIVOCADO: float = -3.0
@@ -200,7 +201,8 @@ class CorazonesEnv(gym.Env):
         carta = Carta._TODAS[action]
 
         # Capturar estado PRE-jugada para correcciones tácticas
-        posicion_en_baza = len(self.motor.mesa)  # 0=first, 1=second, 2=third, 3=last
+        # 0=first, 1=second, 2=third, 3=last
+        posicion_en_baza = len(self.motor.mesa)
 
         # Ejecutar la jugada del agente
         self._ejecutar_jugada(self.agente_idx, carta)
@@ -377,7 +379,8 @@ class CorazonesEnv(gym.Env):
         mesa = self.motor.mesa
         if palo is None or not mesa:
             return False
-        max_en_mesa = max((c.valor for _, c in mesa if c.palo == palo), default=0)
+        max_en_mesa = max(
+            (c.valor for _, c in mesa if c.palo == palo), default=0)
         for c in self.motor.jugadores[jugador_idx].mano:
             if c.palo == palo and c.valor <= max_en_mesa:
                 return False
@@ -672,7 +675,8 @@ class CorazonesEnv(gym.Env):
         ) else 0.0
 
         # [198] mano terminal posible (algún jugador ≥74 → esta mano puede acabar)
-        obs[198] = 1.0 if any(p >= 74 for p in self._puntuacion_historica) else 0.0
+        obs[198] = 1.0 if any(
+            p >= 74 for p in self._puntuacion_historica) else 0.0
 
         # [199:203] cartas restantes por palo (no en cementerio) / 13.0
         cementerio_por_palo = [0, 0, 0, 0]

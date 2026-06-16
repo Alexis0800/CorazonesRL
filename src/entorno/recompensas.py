@@ -72,7 +72,8 @@ class RewardConfig:
     # --- Umbral de phase-gating ---
     BAZA_TARDIA: int = 9           # baza ≥9 activa dense rewards
     SCORE_RIVAL_CERCA: int = 85    # umbral para "rival cerca de 100"
-    CORAZONES_ALERTA_POZO: int = 10  # corazones capturados para detectar intento de moon
+    # corazones capturados para detectar intento de moon
+    CORAZONES_ALERTA_POZO: int = 10
 
 
 class CalculadoraRecompensas:
@@ -153,7 +154,8 @@ class CalculadoraRecompensas:
 
         # Recompensa por evitar puntos (solo bazas tardías)
         if puntos_baza > 0 and es_baza_tardia:
-            reward += self.cfg.REWARD_NO_GANAR_BAZA_CON_PUNTOS * min(puntos_baza, 3)
+            reward += self.cfg.REWARD_NO_GANAR_BAZA_CON_PUNTOS * \
+                min(puntos_baza, 3)
 
         # Recompensa por descartes estratégicos (siempre activa para Q♠)
         if idx_agente_en_mesa is not None:
