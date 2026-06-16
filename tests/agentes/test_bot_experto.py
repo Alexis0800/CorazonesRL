@@ -103,7 +103,8 @@ class TestConteoCartas:
         bot = BotExperto()
         mi_mano = [_2_PICAS, _3_PICAS, _2_COR]
         resto = [c for c in Carta._TODAS if c not in mi_mano]
-        motor = _motor_con_mano(mi_mano, resto[:13], resto[13:26], resto[26:39])
+        motor = _motor_con_mano(
+            mi_mano, resto[:13], resto[13:26], resto[26:39])
 
         restantes = bot._cartas_restantes_por_palo(motor, mi_mano)
         # Q♠ no está en mi mano ni fue jugada → debe aparecer en restantes
@@ -126,12 +127,14 @@ class TestConteoCartas:
         # J0 tiene A♠ y K♠
         mi_mano = [_A_PICAS, _K_PICAS, _2D, _3D, _2C, _3C, _2_COR]
         resto = [c for c in Carta._TODAS if c not in mi_mano]
-        motor = _motor_con_mano(mi_mano, resto[:15], resto[15:30], resto[30:45])
+        motor = _motor_con_mano(
+            mi_mano, resto[:15], resto[15:30], resto[30:45])
 
         altas = bot._cartas_altas_restantes(motor, mi_mano)
         # A♠ y K♠ están en mi mano → no deben estar en restantes de rivales
         # Q♠ (valor=12) sí puede estar en restantes si no la tengo
-        assert _A_PICAS not in mi_mano or altas[PICA] < 4  # al menos una alta mía excluida
+        # al menos una alta mía excluida
+        assert _A_PICAS not in mi_mano or altas[PICA] < 4
 
 
 # ────────────────────────────────────────────────────────────────────────────────
@@ -161,7 +164,8 @@ class TestRastreoQEspadas:
         bot = BotExperto()
         mi_mano = [_Q_PICAS, _2_COR, _3_COR, _2D]
         resto = [c for c in Carta._TODAS if c not in mi_mano]
-        motor = _motor_con_mano(mi_mano, resto[:16], resto[16:32], resto[32:48])
+        motor = _motor_con_mano(
+            mi_mano, resto[:16], resto[16:32], resto[32:48])
         assert bot._q_activa(motor) is True
 
     def test_q_activa_si_esta_en_la_mesa(self):
@@ -193,7 +197,8 @@ class TestModoJuego:
         motor = MotorCorazones()
         motor.corazones_rotos = False
         # Forzar mano con muchos corazones altos
-        corazones_altos = [_carta(v, CORAZON) for v in [14, 13, 12, 11, 10, 9]]  # A/K/Q/J/10/9♥
+        corazones_altos = [_carta(v, CORAZON)
+                           for v in [14, 13, 12, 11, 10, 9]]  # A/K/Q/J/10/9♥
         resto = [c for c in Carta._TODAS if c not in corazones_altos]
         motor.jugadores[0].mano = corazones_altos + [resto[0]]
         assert bot._pozo_viable(motor, 0) is True
@@ -299,7 +304,8 @@ class TestSeguirPalo:
         bot = BotExperto()
         _J_PICAS = _carta(11, PICA)
         motor = _motor_con_mano([_J_PICAS, _3_PICAS], [_2D], [_3D], [_2C])
-        motor.mesa = [(2, _carta(4, PICA)), (3, _Q_PICAS)]  # J2 lidera, J3 juega Q♠
+        # J2 lidera, J3 juega Q♠
+        motor.mesa = [(2, _carta(4, PICA)), (3, _Q_PICAS)]
         motor.palo_de_salida = PICA
         motor.corazones_rotos = True
 
@@ -363,17 +369,20 @@ class TestDescarte:
     def test_descarta_q_espadas_cuando_hay_puntos_en_mesa(self):
         """Cuando void y hay puntos en mesa, descartar Q♠ primero."""
         bot = BotExperto()
-        motor = _motor_con_mano([_Q_PICAS, _A_COR, _K_COR], [_2D], [_3D], [_2C])
+        motor = _motor_con_mano(
+            [_Q_PICAS, _A_COR, _K_COR], [_2D], [_3D], [_2C])
         motor.mesa = [(1, _2_COR), (2, _3_COR)]  # puntos en mesa: 2♥
         motor.palo_de_salida = CORAZON  # J0 es void en corazones → puede descartar
         motor.corazones_rotos = True
 
-        legales = [_Q_PICAS, _A_COR, _K_COR]  # void en ♥ → puede jugar lo que sea
+        # void en ♥ → puede jugar lo que sea
+        legales = [_Q_PICAS, _A_COR, _K_COR]
         # Corrección: si el palo de salida es CORAZON y J0 no tiene corazones,
         # legales serían todas sus cartas. Pero aquí J0 SÍ tiene corazones.
         # Reformulamos: J0 es void en DIAMANTE.
         motor.palo_de_salida = DIAMANTE
-        motor.mesa = [(1, _2D), (2, _K_DIA)]  # Mesa: K♦ gana, hay 0 pts corazones
+        # Mesa: K♦ gana, hay 0 pts corazones
+        motor.mesa = [(1, _2D), (2, _K_DIA)]
         # Esto no tiene puntos. Reformulamos para que haya puntos:
         motor.mesa = [(1, _2_COR), (2, _3_COR)]  # J1 lidera ♥, J2 sigue
         # Pero motor.palo_de_salida = DIAMANTE → inconsistente.
@@ -403,7 +412,8 @@ class TestDescarte:
         motor3.palo_de_salida = DIAMANTE
         motor3.corazones_rotos = False
 
-        legales3 = [_Q_PICAS, _K_TRE]  # J0 void en ♦, puede descartar cualquiera
+        # J0 void en ♦, puede descartar cualquiera
+        legales3 = [_Q_PICAS, _K_TRE]
         carta = bot(motor3, 0, legales3)
         # Mesa sin puntos → no urge descartar Q♠. Debería descartar K♣ (sin puntos)
         assert carta != _Q_PICAS, "No debe descartar Q♠ si la baza no tiene puntos"
@@ -518,8 +528,10 @@ class TestLiderazgo:
                             if c not in corazones_altos and c.puntos == 0][:7]
         motor.jugadores[0].mano = corazones_altos + resto_sin_puntos[:1]
         motor.jugadores[1].mano = resto_sin_puntos[1:14]
-        motor.jugadores[2].mano = resto_sin_puntos[14:27] if len(resto_sin_puntos) >= 27 else []
-        motor.jugadores[3].mano = resto_sin_puntos[27:40] if len(resto_sin_puntos) >= 40 else []
+        motor.jugadores[2].mano = resto_sin_puntos[14:27] if len(
+            resto_sin_puntos) >= 27 else []
+        motor.jugadores[3].mano = resto_sin_puntos[27:40] if len(
+            resto_sin_puntos) >= 40 else []
         motor.mesa = []
         motor._mano_activa = True
 
@@ -543,9 +555,11 @@ class TestInferenciaVoids:
         motor = MotorCorazones()
         motor.repartir()
         # Simular que J1 no siguió el palo de espadas (jugó un corazón)
-        motor.mesa = [(0, _2_PICAS), (1, _2_COR)]  # J1 jugó ♥ cuando el palo es ♠
+        # J1 jugó ♥ cuando el palo es ♠
+        motor.mesa = [(0, _2_PICAS), (1, _2_COR)]
         motor.palo_de_salida = PICA
-        bot._actualizar_estado(motor, 2)  # actualizo desde la perspectiva de J2
+        # actualizo desde la perspectiva de J2
+        bot._actualizar_estado(motor, 2)
 
         assert PICA in bot._vacios[1], "J1 debería ser detectado como void en ♠"
 
@@ -597,7 +611,8 @@ class TestIntegracionEntorno:
                 if idx == 0:
                     carta = bot(motor, idx, legales)
                 else:
-                    carta = legales[0]  # otros jugadores juegan la primera legal
+                    # otros jugadores juegan la primera legal
+                    carta = legales[0]
                 assert carta in legales, f"Carta {carta} no es legal"
                 motor.jugar_carta(idx, carta)
             motor.resolver_baza()
@@ -631,7 +646,8 @@ class TestIntegracionEntorno:
         n_manos = 20
         bot = BotExperto()
         q_experto = sum(contar_q_espadas(bot, s) for s in range(n_manos))
-        q_agresivo = sum(contar_q_espadas(bot_agresivo, s) for s in range(n_manos))
+        q_agresivo = sum(contar_q_espadas(bot_agresivo, s)
+                         for s in range(n_manos))
 
         assert q_experto <= q_agresivo, (
             f"BotExperto capturó Q♠ {q_experto}x, agresivo {q_agresivo}x. "

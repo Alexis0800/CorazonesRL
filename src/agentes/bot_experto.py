@@ -84,7 +84,8 @@ class BotExperto:
         # Inferir voids desde los jugadores que ya jugaron en ESTA baza
         palo = motor.palo_de_salida
         if palo is not None and motor.mesa:
-            starter_baza = motor.mesa[0][0]  # el primero en la mesa es el líder
+            # el primero en la mesa es el líder
+            starter_baza = motor.mesa[0][0]
             for jug_idx, carta in motor.mesa:
                 if jug_idx != starter_baza and carta.palo != palo:
                     self._vacios[jug_idx].add(palo)
@@ -104,7 +105,8 @@ class BotExperto:
             return  # sin baza anterior
         palo = self._palo_salida_anterior
         if palo is None:
-            return  # no conocemos el palo de salida (no debería ocurrir normalmente)
+            # no conocemos el palo de salida (no debería ocurrir normalmente)
+            return
 
         ganador = motor.indice_jugador_inicial  # ganador de la baza anterior
         bazas = motor.jugadores[ganador].bazas_ganadas
@@ -460,7 +462,8 @@ class BotExperto:
             [c for c in legales if c.es_corazon],
             key=lambda c: -c.valor,
         )
-        sin_puntos = [c for c in legales if c.puntos == 0 and not c.es_dama_de_picas]
+        sin_puntos = [c for c in legales if c.puntos ==
+                      0 and not c.es_dama_de_picas]
 
         # ── Modo bloquear pozo ────────────────────────────────────────────
         if modo == "BLOQUEAR_POZO" and ganador_baza == self._sospecha_pozo:

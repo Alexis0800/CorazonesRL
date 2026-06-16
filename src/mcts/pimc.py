@@ -106,7 +106,8 @@ def determinizar(
             vistas.add(c.id)
     for _, c in motor.mesa:
         vistas.add(c.id)
-    mano_agente_ids: Set[int] = {c.id for c in motor.jugadores[agente_idx].mano}
+    mano_agente_ids: Set[int] = {
+        c.id for c in motor.jugadores[agente_idx].mano}
 
     # Pool de cartas desconocidas = están en manos de oponentes
     pool: List[Carta] = [
@@ -461,7 +462,7 @@ def mcts_mejor_jugada(
     if crear_bots is None:
         # Pre-compilar la factory para no recrear BotExperto en cada simulación
         bots_base = crear_bots_rollout(tipo=rollout_tipo, rng=rng)
-        crear_bots = lambda: bots_base  # noqa: E731
+        def crear_bots(): return bots_base  # noqa: E731
 
     # Raíz del árbol
     raiz = _NodoMCTS()
@@ -485,7 +486,8 @@ def mcts_mejor_jugada(
 
         # 3. Simular (rollout) desde el mundo con esa carta
         clon = _clonar_motor(mundo)
-        puntos = simular_resto_mano(clon, agente_idx, carta_elegida, bots_rollout)
+        puntos = simular_resto_mano(
+            clon, agente_idx, carta_elegida, bots_rollout)
 
         # 4. Backpropagar: actualizar el valor como COSTE (menos = mejor)
         # Puntuación de Hearts: 0 es perfecto, 26 es lo peor.
