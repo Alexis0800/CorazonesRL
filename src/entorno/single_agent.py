@@ -50,7 +50,7 @@ class CorazonesEnv(gym.Env):
     # Recompensas densas (reward shaping): señales sutiles, no dominantes
     REWARD_NO_GANAR_BAZA_CON_PUNTOS: float = 0.5
     REWARD_DESCARTAR_CORAZON_SEGURO: float = 0.3
-    REWARD_DESCARTAR_DAMA_SEGURO: float = 3.0
+    REWARD_DESCARTAR_DAMA_SEGURO: float = 8.0
     REWARD_GANAR_BAZA_SIN_PUNTOS: float = -0.15
     REWARD_PERDER_MANO: float = -2.0
     REWARD_GANAR_MANO: float = 2.0
@@ -63,6 +63,22 @@ class CorazonesEnv(gym.Env):
     # Penalización suave por punto acumulado en la mano
     REWARD_POR_PUNTO_EN_MANO: float = -0.2
 
+    # --- NUEVAS RECOMPENSAS v9: correcciones tácticas ---
+    # Penalización: liderar pica (no Q♠) con Q♠ activa, sin ser última posición
+    PENALTY_LIDERAR_PICA_CON_Q_ACTIVA: float = -1.0    # Recompensa: liderar la máxima de palo seguro (♣/♦)
+    REWARD_QUEMAR_MAXIMA_PALO_SEGURO: float = 0.5
+    # Penalización: liderar Q♠ en mal momento (temprano o siendo máxima en picas)
+    PENALTY_LIDERAR_Q_EQUIVOCADO: float = -3.0
+    # Recompensa: soltar Q♠ siguiendo picas (dump seguro)
+    REWARD_DUMP_Q_SIGUIENDO_PICAS: float = 2.0
+    # Penalización: ganar baza con puntos teniendo alternativa perdedora
+    PENALTY_GANAR_BAZA_CON_PUNTOS_EVITABLE: float = -3.0
+    # Recompensa: descartar K♠/A♠ en baza limpia con Q♠ activa
+    REWARD_DESCARTAR_K_A_PICAS_CON_Q_ACTIVA: float = 2.0
+    # Recompensa: quemar la máxima cuando forzado a ganar siguiendo palo
+    REWARD_QUEMAR_MAXIMA_FORZADA: float = 0.3
+    # Recompensa: quemar alta (A/K) siguiendo palo en baza limpia
+    REWARD_QUEMAR_ALTA_SIGUIENDO_PALO: float = 0.5
     PUNTUACION_MAXIMA: float = 100.0  # Umbral de fin de partida
 
     def __init__(
@@ -183,8 +199,50 @@ class CorazonesEnv(gym.Env):
         # Convertir acción (int) a Carta
         carta = Carta._TODAS[action]
 
+        # Capturar estado PRE-jugada para correcciones tácticas
+        posicion_en_baza = len(self.motor.mesa)  # 0=first, 1=second, 2=third, 3=last
+
         # Ejecutar la jugada del agente
         self._ejecutar_jugada(self.agente_idx, carta)
+
+        # --- PENALTY: liderar pica no-máxima con Q♠ activa ---
+        # Solo si el agente lideró (posición 0), Q♠ sigue en juego,
+        # la carta es pica (no Q♠), y no era la máxima pica del agente.
+        if (posicion_en_baza == 0
+                and self._dama_picas_en is None
+                and carta.palo == 2
+                and not carta.es_dama_de_picas):
+            picas_en_mano = [
+                c for c in self.motor.jugadores[self.agente_idx].mano
+                if c.palo == 2
+            ]
+            if picas_en_mano and carta.valor < max(c.valor for c in picas_en_mano):
+                self._recompensa_pendiente += self.PENALTY_LIDERAR_PICA_CON_Q_ACTIVA
+
+        # --- REWARD: liderar máxima de palo seguro (♣/♦) ---
+        if (posicion_en_baza == 0
+                and carta.palo in (0, 1)
+                and self._es_maxima_en_mano(carta, self.agente_idx)):
+            self._recompensa_pendiente += self.REWARD_QUEMAR_MAXIMA_PALO_SEGURO
+
+        # --- PENALTY: liderar Q♠ en mal momento ---
+        if posicion_en_baza == 0 and carta.es_dama_de_picas:
+            baza_temprana = self.motor.numero_baza < 7
+            soy_maxima_picas = self._es_maxima_en_mano(carta, self.agente_idx)
+            if baza_temprana or soy_maxima_picas:
+                self._recompensa_pendiente += self.PENALTY_LIDERAR_Q_EQUIVOCADO
+
+        # --- REWARD: quemar máxima forzada (siguiendo palo) ---
+        if (posicion_en_baza > 0
+                and self.motor.palo_de_salida is not None
+                and carta.palo == self.motor.palo_de_salida
+                and self._forzado_a_ganar(self.agente_idx)):
+            cartas_palo = [
+                c for c in self.motor.jugadores[self.agente_idx].mano
+                if c.palo == self.motor.palo_de_salida
+            ]
+            if not cartas_palo or carta.valor >= max(c.valor for c in cartas_palo):
+                self._recompensa_pendiente += self.REWARD_QUEMAR_MAXIMA_FORZADA
 
         # Auto-jugar hasta que sea el turno del agente de nuevo
         self._autoplay_hasta_turno_agente()
@@ -301,6 +359,34 @@ class CorazonesEnv(gym.Env):
                 carta = self._rng.choice(legales)
             self._ejecutar_jugada(actual, carta)
 
+    # ------------------------------------------------------------------
+    # Helpers tácticos (v9)
+    # ------------------------------------------------------------------
+
+    def _es_maxima_en_mano(self, carta: Carta, jugador_idx: int) -> bool:
+        """True si no hay carta más alta del mismo palo en la mano del jugador."""
+        for c in self.motor.jugadores[jugador_idx].mano:
+            if c.palo == carta.palo and c.valor > carta.valor:
+                return False
+        return True
+
+    def _forzado_a_ganar(self, jugador_idx: int) -> bool:
+        """True si el jugador está forzado a ganar la baza actual:
+        TODAS sus cartas del palo de salida superan la máxima actual en mesa."""
+        palo = self.motor.palo_de_salida
+        mesa = self.motor.mesa
+        if palo is None or not mesa:
+            return False
+        max_en_mesa = max((c.valor for _, c in mesa if c.palo == palo), default=0)
+        for c in self.motor.jugadores[jugador_idx].mano:
+            if c.palo == palo and c.valor <= max_en_mesa:
+                return False
+        return True
+
+    # ------------------------------------------------------------------
+    # Resolución de bazas
+    # ------------------------------------------------------------------
+
     def _resolver_baza_actual(self) -> None:
         """Resuelve la baza, asigna recompensas densas al agente y actualiza
         el tracking de la Dama de Picas."""
@@ -311,6 +397,9 @@ class CorazonesEnv(gym.Env):
             if j == self.agente_idx:
                 idx_agente_en_mesa = i
                 break
+
+        # Capturar palo de salida ANTES de resolver (resolver_baza lo limpia)
+        palo_salida = self.motor.palo_de_salida
 
         ganador = self.motor.resolver_baza()
 
@@ -364,6 +453,40 @@ class CorazonesEnv(gym.Env):
                     self._recompensa_pendiente += self.REWARD_DESCARTAR_CORAZON_SEGURO
                 if carta_agente.es_dama_de_picas:
                     self._recompensa_pendiente += self.REWARD_DESCARTAR_DAMA_SEGURO
+
+        # --- NUEVO v9: recompensas tácticas por baza ---
+        if idx_agente_en_mesa is not None:
+            carta_agente = cartas_en_mesa[idx_agente_en_mesa]
+
+            # REWARD: quemar alta (A/K) siguiendo palo en baza limpia
+            if (puntos_baza == 0
+                    and palo_salida is not None
+                    and carta_agente.palo == palo_salida
+                    and carta_agente.valor >= 13):
+                self._recompensa_pendiente += self.REWARD_QUEMAR_ALTA_SIGUIENDO_PALO
+
+            # REWARD: soltar Q♠ siguiendo picas (dump seguro)
+            if (carta_agente.es_dama_de_picas
+                    and ganador != self.agente_idx
+                    and palo_salida == 2):
+                self._recompensa_pendiente += self.REWARD_DUMP_Q_SIGUIENDO_PICAS
+
+            # REWARD: descartar K♠/A♠ en baza limpia con Q♠ activa
+            if (puntos_baza == 0
+                    and self._dama_picas_en is None
+                    and carta_agente.palo == 2
+                    and carta_agente.valor >= 13
+                    and palo_salida is not None
+                    and carta_agente.palo != palo_salida):
+                self._recompensa_pendiente += self.REWARD_DESCARTAR_K_A_PICAS_CON_Q_ACTIVA
+
+            # PENALTY: ganar baza con puntos teniendo cartas perdedoras
+            if (ganador == self.agente_idx
+                    and puntos_baza > 0
+                    and palo_salida is not None
+                    and carta_agente.palo == palo_salida
+                    and not self._pozo_viable()):
+                self._recompensa_pendiente += self.PENALTY_GANAR_BAZA_CON_PUNTOS_EVITABLE
 
     def _finalizar_mano(self) -> None:
         """Finaliza la mano actual: aplica puntuación, verifica pleno,

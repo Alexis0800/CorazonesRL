@@ -56,6 +56,16 @@ class RewardConfig:
     REWARD_BLOQUEAR_POZO: float = 15.0
     REWARD_ALIMENTAR_EXITOSO: float = 10.0
 
+    # --- Correcciones tácticas (v9, Fase 6) ---
+    PENALTY_LIDERAR_PICA_CON_Q_ACTIVA: float = -1.0
+    REWARD_QUEMAR_MAXIMA_PALO_SEGURO: float = 0.5
+    PENALTY_LIDERAR_Q_EQUIVOCADO: float = -3.0
+    REWARD_DUMP_Q_SIGUIENDO_PICAS: float = 2.0
+    PENALTY_GANAR_BAZA_CON_PUNTOS_EVITABLE: float = -3.0
+    REWARD_DESCARTAR_K_A_PICAS_CON_Q_ACTIVA: float = 2.0
+    REWARD_QUEMAR_MAXIMA_FORZADA: float = 0.3
+    REWARD_QUEMAR_ALTA_SIGUIENDO_PALO: float = 0.5
+
     # --- Umbral de fin de partida ---
     PUNTUACION_MAXIMA: float = 100.0
 
@@ -239,6 +249,38 @@ class CalculadoraRecompensas:
                 return self.cfg.REWARD_ALIMENTAR_EXITOSO
 
         return 0.0
+
+    def recompensa_liderar_pica(
+        self,
+        agente_idx: int,
+        carta_jugada,  # Carta
+        mano_agente: list,  # List[Carta] después de jugar
+        posicion_en_baza: int,  # 0=first, ..., 3=last (ANTES de jugar)
+        dama_picas_activa: bool,
+    ) -> float:
+        """Penaliza liderar pica no-máxima con Q♠ aún activa.
+
+        Solo aplica si el agente lideró (posición 0) una pica que no es
+        su máxima pica, y Q♠ sigue en juego. Si el agente es último en
+        jugar (posición 3), liderar cualquier cosa es seguro.
+        """
+        if posicion_en_baza != 0:
+            return 0.0
+        if not dama_picas_activa:
+            return 0.0
+        if carta_jugada.palo != 2:  # no es pica
+            return 0.0
+        if carta_jugada.es_dama_de_picas:  # es Q♠, se maneja aparte
+            return 0.0
+
+        # ¿Era la máxima pica del agente?
+        picas_en_mano = [c for c in mano_agente if c.palo == 2]
+        if not picas_en_mano:
+            return 0.0  # ya no tiene picas, era la última
+        if carta_jugada.valor >= max(c.valor for c in picas_en_mano):
+            return 0.0  # era su máxima pica → liderar es correcto
+
+        return self.cfg.PENALTY_LIDERAR_PICA_CON_Q_ACTIVA
 
     def recompensa_fin_partida(
         self, agente_idx: int, puntuacion_historica: List[int]

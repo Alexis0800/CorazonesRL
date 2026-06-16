@@ -1,0 +1,140 @@
+{
+  "meta": {
+    "manos": 200,
+    "mundos_fallback": 30,
+    "umbral": 0.3,
+    "seed": 42,
+    "total_ejemplos": 537,
+    "elapsed_s": 285.9
+  },
+  "patrones": {
+    "liderar_otro": {
+      "count": 143,
+      "coste_total": 308.4,
+      "coste_medio": 2.16,
+      "coste_max": 9.8,
+      "situacion": "liderar",
+      "descripcion": "Error al liderar no clasificado en categorías específicas."
+    },
+    "seguir_otro": {
+      "count": 127,
+      "coste_total": 185.5,
+      "coste_medio": 1.46,
+      "coste_max": 8.47,
+      "situacion": "seguir",
+      "descripcion": "Error al seguir palo no clasificado en categorías específicas."
+    },
+    "seguir_no_quema_alta_en_baza_limpia": {
+      "count": 78,
+      "coste_total": 114.3,
+      "coste_medio": 1.47,
+      "coste_max": 4.87,
+      "situacion": "seguir",
+      "descripcion": "En baza sin puntos, jugó carta baja/media en vez de A/K del palo. Debía quemar la carta alta en baza limpia para eliminar liability futura."
+    },
+    "liderar_pica_innecesaria": {
+      "count": 41,
+      "coste_total": 85.7,
+      "coste_medio": 2.09,
+      "coste_max": 7.53,
+      "situacion": "liderar",
+      "descripcion": "Lideró pica (no Q♠) cuando había mejores opciones. Las picas son peligrosas mientras Q♠ está activa."
+    },
+    "descarte_no_suelta_q_espadas": {
+      "count": 9,
+      "coste_total": 69.9,
+      "coste_medio": 7.76,
+      "coste_max": 13.0,
+      "situacion": "descartar",
+      "descripcion": "Pudiendo descartar Q♠ en baza con puntos, no lo hizo. Perdió oportunidad de endosar 13 pts a un rival."
+    },
+    "descarte_otro": {
+      "count": 56,
+      "coste_total": 55.8,
+      "coste_medio": 1.0,
+      "coste_max": 2.73,
+      "situacion": "descartar",
+      "descripcion": "Error al descartar no clasificado en categorías específicas."
+    },
+    "liderar_no_quema_maxima": {
+      "count": 28,
+      "coste_total": 39.8,
+      "coste_medio": 1.42,
+      "coste_max": 4.87,
+      "situacion": "liderar",
+      "descripcion": "Tenía la máxima de un palo seguro y no la lideró. Perdió oportunidad de ganar baza limpia y quemar liability."
+    },
+    "seguir_q_espadas_mal_momento": {
+      "count": 6,
+      "coste_total": 26.2,
+      "coste_medio": 4.36,
+      "coste_max": 8.47,
+      "situacion": "seguir",
+      "descripcion": "Jugó Q♠ siguiendo picas cuando no era óptimo."
+    },
+    "liderar_q_espadas_mal_momento": {
+      "count": 4,
+      "coste_total": 24.8,
+      "coste_medio": 6.19,
+      "coste_max": 9.57,
+      "situacion": "liderar",
+      "descripcion": "Lideró Q♠ en momento inadecuado (demasiado pronto o cuando era máxima en picas)."
+    },
+    "seguir_gana_baza_con_puntos": {
+      "count": 12,
+      "coste_total": 16.5,
+      "coste_medio": 1.38,
+      "coste_max": 5.15,
+      "situacion": "seguir",
+      "descripcion": "Jugó carta que gana la baza cuando había puntos en mesa, pudiendo jugar una perdedora. Capturó puntos innecesariamente."
+    },
+    "seguir_no_quema_maxima_forzada": {
+      "count": 18,
+      "coste_total": 14.4,
+      "coste_medio": 0.8,
+      "coste_max": 1.7,
+      "situacion": "seguir",
+      "descripcion": "Forzado a ganar la baza (todas sus cartas > ganadora actual), pero jugó la más baja en vez de la más alta. Debía quemar la máxima."
+    },
+    "descarte_no_suelta_corazon_bajo": {
+      "count": 7,
+      "coste_total": 14.0,
+      "coste_medio": 2.0,
+      "coste_max": 5.2,
+      "situacion": "descartar",
+      "descripcion": "Con corazones rotos, no descartó corazón bajo en baza limpia. Los corazones bajos pueden forzar ganar bazas de ♥ con puntos."
+    },
+    "seguir_no_suelta_q_con_altas": {
+      "count": 1,
+      "coste_total": 13.1,
+      "coste_medio": 13.13,
+      "coste_max": 13.13,
+      "situacion": "seguir",
+      "descripcion": "Tenía Q♠ y A♠/K♠, y jugó A♠/K♠ en vez de Q♠. PIMC dice que era mejor soltar Q♠ para que otro la capture."
+    },
+    "descarte_ases_en_vez_de_corazones": {
+      "count": 1,
+      "coste_total": 6.9,
+      "coste_medio": 6.93,
+      "coste_max": 6.93,
+      "situacion": "descartar",
+      "descripcion": "Descartó A♣/A♦ en vez de corazón alto. Los ases de palos seguros ganan bazas y atraen corazones descartados."
+    },
+    "descarte_no_suelta_picas_altas": {
+      "count": 3,
+      "coste_total": 4.6,
+      "coste_medio": 1.52,
+      "coste_max": 1.97,
+      "situacion": "descartar",
+      "descripcion": "Con Q♠ activa, no descartó K♠/A♠ en baza limpia. Estas cartas son peligrosas: ganan bazas de ♠ donde Q♠ puede caer encima."
+    },
+    "liderar_quemar_cuando_debe_ceder": {
+      "count": 3,
+      "coste_total": 4.5,
+      "coste_medio": 1.5,
+      "coste_max": 2.0,
+      "situacion": "liderar",
+      "descripcion": "En baza ≥9, lideró carta alta de palo seguro (gana la baza) cuando debía liderar baja (ceder el lead). Ganar fuerza a liderar de nuevo."
+    }
+  }
+}
