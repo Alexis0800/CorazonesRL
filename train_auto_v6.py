@@ -30,8 +30,7 @@ from train_self_play import (
     MIN_SNAPSHOT_STEPS, MAX_SNAPSHOTS_POOL,
     obtener_policy_kwargs, obtener_hiperparametros_v3,
     _aplicar_snapshot_pruning, _extraer_paso_de_ruta,
-    PoliticaSB3,
-    crear_entorno_self_play_v6,
+    crear_entorno_self_play,
 )
 
 import os
@@ -302,11 +301,14 @@ def entrenar_auto(
     eval_partidas: int = EVAL_PARTIDAS,
     prob_bot_start: float = PROB_BOT_START,
     prob_bot_end: float = PROB_BOT_END,
+    prob_experto: float = 0.0,
     seed: int = 42,
     device: str = "cpu",
     resume_from: Optional[str] = None,
     output_dir: Optional[str] = None,
     best_top: int = BEST_TOP,
+    obs_dim: int = 194,
+    bc_pretrain: Optional[str] = None,
 ) -> int:
     """Ejecuta entrenamiento autónomo completo desde cero o reanudando.
 
@@ -318,11 +320,14 @@ def entrenar_auto(
         eval_partidas: Partidas por evaluación.
         prob_bot_start: prob_bot inicial.
         prob_bot_end: prob_bot final.
+        prob_experto: Prob. de usar BotExperto como oponente (default 0.0).
         seed: Semilla aleatoria.
         device: Dispositivo de cómputo (cpu, cuda, dml, xpu).
         resume_from: Ruta a snapshot .zip para reanudar.
         output_dir: Directorio de salida (default: modelos/v6).
         best_top: Cuántos mejores snapshots guardar tras cada torneo Elo (default 2).
+        obs_dim: Dimensión del vector de observación (194 o 220).
+        bc_pretrain: Ruta a modelo BC preentrenado .zip para inicializar pesos.
 
     Returns:
         Paso final alcanzado.
@@ -365,11 +370,11 @@ def entrenar_auto(
         modelo = MaskablePPO.load(ruta_resume, device=device)
         # Cargar VecNormalize
         vn_path = ruta_resume.replace(".zip", "_vecnorm.pkl")
+        _make_env = lambda: CorazonesEnv(agente_idx=0, obs_dim=obs_dim)  # noqa: E731
         if os.path.exists(vn_path):
-            venv = VecNormalize.load(vn_path, DummyVecEnv(
-                [lambda: CorazonesEnv(agente_idx=0)]))
+            venv = VecNormalize.load(vn_path, DummyVecEnv([_make_env]))
         else:
-            venv = DummyVecEnv([lambda: CorazonesEnv(agente_idx=0)])
+            venv = DummyVecEnv([_make_env])
             venv = VecNormalize(venv, norm_obs=True, norm_reward=True,
                                 clip_obs=10.0, clip_reward=10.0, gamma=0.995, epsilon=1e-8)
         modelo.set_env(venv)
@@ -391,7 +396,7 @@ def entrenar_auto(
         os.makedirs(DIRECTORIO_LOGS, exist_ok=True)
 
         print("=" * 60)
-        print(f"🤖 ENTRENAMIENTO AUTÓNOMO {etiqueta} (194 dims, desde cero)")
+        print(f"ENTRENAMIENTO AUTONOMO {etiqueta} ({obs_dim} dims, desde cero)")
         print("=" * 60)
         print(f"  Pasos totales: {total_steps:,}")
         print(f"  Snapshot cada: {snapshot_every:,}")
@@ -408,17 +413,18 @@ def entrenar_auto(
         np.random.seed(seed)
 
         # Crear entorno base
-        env_base = CorazonesEnv(agente_idx=0)
+        _make_env = lambda: CorazonesEnv(agente_idx=0, obs_dim=obs_dim)  # noqa: E731
+        env_base = _make_env()
         env_base.reset(seed=seed)
 
         # VecNormalize desde cero
-        venv = DummyVecEnv([lambda: CorazonesEnv(agente_idx=0)])
+        venv = DummyVecEnv([_make_env])
         venv = VecNormalize(
             venv, norm_obs=True, norm_reward=True,
             clip_obs=10.0, clip_reward=10.0, gamma=0.995, epsilon=1e-8,
         )
 
-        # Crear modelo desde cero
+        # Crear modelo desde cero (o inicializar desde BC preentrenado)
         hp = obtener_hiperparametros_v3(DIRECTORIO_LOGS, device, 0)
         policy_kwargs = hp.pop(
             "policy_kwargs", None) or obtener_policy_kwargs()
@@ -446,6 +452,17 @@ def entrenar_auto(
             tensorboard_log=DIRECTORIO_LOGS,
         )
         print(f"  [OK] Modelo creado desde cero ({fase_label})")
+
+        # Cargar pesos del modelo BC preentrenado (solo actor)
+        if bc_pretrain:
+            _ruta_bc = bc_pretrain if bc_pretrain.endswith(".zip") else bc_pretrain + ".zip"
+            if os.path.exists(_ruta_bc):
+                _bc_model = MaskablePPO.load(_ruta_bc, device=device)
+                modelo.policy.load_state_dict(_bc_model.policy.state_dict())
+                del _bc_model
+                print(f"  [BC] Pesos del actor cargados desde {_ruta_bc}")
+            else:
+                print(f"  [WARN] bc_pretrain no encontrado: {_ruta_bc} — ignorado")
 
         # Variables de estado
         paso_actual = 0
@@ -486,10 +503,17 @@ def entrenar_auto(
             for param_group in modelo.policy.optimizer.param_groups:
                 param_group["lr"] = hp_actual["learning_rate"]
 
-        # Recrear entorno con el prob_bot actual
-        env_nuevo = CorazonesEnv(agente_idx=0)
-        env_nuevo.reset(seed=seed + paso_actual)
-        venv = DummyVecEnv([lambda: env_nuevo])
+        # Recrear entorno self-play con prob_bot y prob_experto actuales
+        env_nuevo = crear_entorno_self_play(
+            directorio=dir_snapshots,
+            agente_idx=0,
+            seed=seed + paso_actual,
+            prob_bot=pb,
+            prob_experto=prob_experto,
+            obs_dim=obs_dim,
+        )
+        _env_ref = env_nuevo
+        venv = DummyVecEnv([lambda: _env_ref])
         if os.path.exists(vecnorm_path):
             venv = VecNormalize.load(vecnorm_path, venv)
         else:
@@ -647,6 +671,12 @@ def main() -> None:
                         help="Directorio de salida para snapshots (default: modelos/v6)")
     parser.add_argument("--best-top", type=int, default=BEST_TOP,
                         help=f"Guardar los N mejores snapshots tras cada torneo Elo (default: {BEST_TOP})")
+    parser.add_argument("--obs-dim", type=int, default=194, choices=[194, 220],
+                        help="Dimensión del vector de observación (default: 194)")
+    parser.add_argument("--prob-experto", type=float, default=0.0,
+                        help="Probabilidad de usar BotExperto como oponente (default: 0.0)")
+    parser.add_argument("--bc-pretrain", type=str, default=None,
+                        help="Ruta al modelo BC preentrenado .zip para inicializar pesos")
     args = parser.parse_args()
 
     paso_final = entrenar_auto(
@@ -657,11 +687,14 @@ def main() -> None:
         eval_partidas=args.eval_partidas,
         prob_bot_start=args.prob_bot_start,
         prob_bot_end=args.prob_bot_end,
+        prob_experto=args.prob_experto,
         seed=args.seed,
         device=args.device,
         resume_from=args.resume,
         output_dir=args.output_dir,
         best_top=args.best_top,
+        obs_dim=args.obs_dim,
+        bc_pretrain=args.bc_pretrain,
     )
     print(f"\nPaso final alcanzado: {paso_final:,}")
 

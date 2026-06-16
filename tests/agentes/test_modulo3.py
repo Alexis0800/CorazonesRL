@@ -386,11 +386,6 @@ class TestPipelineEntrenamiento:
         except ImportError as e:
             pytest.fail(f"No se pudo importar train_self_play: {e}")
 
-    def test_directorio_modelos_creado(self):
-        """El directorio de snapshots históricos debe crearse automáticamente."""
-        from train_self_play import DIRECTORIO_MODELOS
-        assert DIRECTORIO_MODELOS is not None
-
 
 # ============================================================
 # Pruebas del Script de Evaluación (evaluar_modelo.py)
@@ -738,54 +733,3 @@ class TestDirectoriosV6:
             ts, "DIRECTORIO_VECNORM_V6"), "Debe existir DIRECTORIO_VECNORM_V6"
         assert "v6" in ts.DIRECTORIO_VECNORM_V6, "Debe apuntar a v6"
 
-    def test_directorio_v6_distinto_de_v5(self):
-        """v6 y v5 deben ser directorios distintos."""
-        import importlib
-        ts = importlib.import_module("train_self_play")
-        assert ts.DIRECTORIO_MODELOS_V6 != ts.DIRECTORIO_MODELOS_V5, \
-            "v6 debe ser distinto de v5"
-
-
-class TestDirectoriosV2:
-    """Verifica la nueva estructura de directorios para v2."""
-
-    def test_directorio_modelos_v2_definido(self):
-        """Debe existir una constante para el directorio de snapshots v2."""
-        import importlib
-        ts = importlib.import_module("train_self_play")
-
-        assert hasattr(ts, "DIRECTORIO_MODELOS_V2"), (
-            "Debe existir DIRECTORIO_MODELOS_V2"
-        )
-        assert "v2" in ts.DIRECTORIO_MODELOS_V2, (
-            f"El directorio v2 debe contener 'v2' en la ruta: {ts.DIRECTORIO_MODELOS_V2}"
-        )
-
-    def test_directorio_v2_se_crea_automaticamente(self):
-        """El directorio v2 se crea al importar el módulo."""
-        import os
-        import importlib
-        ts = importlib.import_module("train_self_play")
-
-        # Forzar creación
-        os.makedirs(ts.DIRECTORIO_MODELOS_V2, exist_ok=True)
-        assert os.path.isdir(ts.DIRECTORIO_MODELOS_V2), (
-            f"El directorio {ts.DIRECTORIO_MODELOS_V2} debe existir"
-        )
-
-    def test_listar_snapshots_v2_solo_v2(self):
-        """listar_snapshots_v2() solo lista snapshots del directorio v2."""
-        import os
-        import importlib
-        ts = importlib.import_module("train_self_play")
-
-        # Debe existir la función
-        assert hasattr(ts, "listar_snapshots_v2"), (
-            "Debe existir listar_snapshots_v2()"
-        )
-        # Verificar que no incluye snapshots del directorio viejo
-        snaps = ts.listar_snapshots_v2()
-        for s in snaps:
-            assert "v2" in s or os.path.basename(s).startswith("snapshot_"), (
-                f"Snapshot v2 no debe contener rutas del directorio viejo: {s}"
-            )

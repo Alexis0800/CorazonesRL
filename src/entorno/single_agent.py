@@ -69,23 +69,26 @@ class CorazonesEnv(gym.Env):
         self,
         agente_idx: int = 0,
         politicas_oponentes: Optional[Dict[int, object]] = None,
+        obs_dim: int = 194,
     ) -> None:
         super().__init__()
 
         if not (0 <= agente_idx <= 3):
             raise ValueError(
                 f"agente_idx debe estar entre 0 y 3, recibido {agente_idx}")
+        if obs_dim not in (194, 220):
+            raise ValueError(f"obs_dim debe ser 194 o 220, recibido {obs_dim}")
 
         self.agente_idx: int = agente_idx
+        self._obs_dim: int = obs_dim
 
         # Políticas de oponentes: dict jugador_idx → callable(motor, idx, legales) → Carta
         # Si no se especifica, se usa selección aleatoria
         self._politicas_oponentes: Dict[int,
                                         object] = politicas_oponentes or {}
 
-        # Espacios Gymnasium (v6: 194 dimensiones con features all_void)
         self.observation_space = spaces.Box(
-            low=0.0, high=1.0, shape=(194,), dtype=np.float32
+            low=0.0, high=1.0, shape=(obs_dim,), dtype=np.float32
         )
         self.action_space = spaces.Discrete(52)
 
@@ -428,9 +431,9 @@ class CorazonesEnv(gym.Env):
     # ------------------------------------------------------------------
 
     def _construir_observacion(self) -> np.ndarray:
-        """Construye el vector de observación de 194 dimensiones.
+        """Construye el vector de observación de obs_dim dimensiones (194 o 220).
 
-        Bloques:
+        Bloques v6 [0:194]:
             [0:52]    Mano del agente (one-hot)
             [52:104]  Mesa actual / baza en curso (one-hot)
             [104:156] Cementerio / cartas jugadas en bazas anteriores (one-hot)
@@ -440,15 +443,28 @@ class CorazonesEnv(gym.Env):
             [180]     Corazones rotos (0.0 o 1.0)
             [181]     Posición en la baza actual (0.0, 0.33, 0.66, 1.0)
             [182:187] Rastreador de la Dama de Picas (one-hot, 5 estados)
-            [187]     pozo_viable — ¿es viable intentar shooting the moon?
-            [188]     debo_arriesgar — ¿estoy tan atrás que debo arriesgarme?
-            [189]     puedo_alimentar — ¿puedo darle puntos a un rival?
-            [190:194] all_void_X — ¿los 3 rivales son void en el palo X?
+            [187]     pozo_viable
+            [188]     debo_arriesgar
+            [189]     puedo_alimentar
+            [190:194] all_void_X
+
+        Bloques v9 [194:220] (solo si obs_dim == 220):
+            [194]      baza_numero / 13.0
+            [195]      jugadores_cerca_de_100 / 3.0
+            [196]      Q♠ ya capturada
+            [197]      soy lider en puntaje
+            [198]      mano terminal posible (algún jugador ≥74)
+            [199:203]  cartas restantes por palo / 13.0
+            [203:207]  cartas altas (J/Q/K/A) restantes por palo / 4.0
+            [207:211]  probabilidad Q♠ por jugador relativo
+            [211:215]  corazones capturados esta mano / 13.0
+            [215:219]  alerta pozo por jugador (≥6 corazones)
+            [219]      RESERVADO (siempre 0.0)
 
         Returns:
-            Array np.float32 de shape (194,).
+            Array np.float32 de shape (obs_dim,).
         """
-        obs = np.zeros(194, dtype=np.float32)
+        obs = np.zeros(self._obs_dim, dtype=np.float32)
         a = self.agente_idx
 
         # --- [0:52] Mano del agente ---
@@ -501,9 +517,6 @@ class CorazonesEnv(gym.Env):
         obs[189] = 1.0 if self._puedo_alimentar() else 0.0
 
         # --- [190:194] Features all_void v6 ---
-        # Indica si los 3 rivales (idx 1,2,3 relativos al agente) son void
-        # en un palo específico. Esto previene que el modelo lidere un palo
-        # donde todos son void (se comería la baza sin querer).
         for palo in range(4):
             todos_vacios = all(
                 palo in self._vacios[j]
@@ -511,7 +524,108 @@ class CorazonesEnv(gym.Env):
             )
             obs[190 + palo] = 1.0 if todos_vacios else 0.0
 
+        # --- Bloque v9 [194:220] (solo si obs_dim == 220) ---
+        if self._obs_dim >= 220:
+            self._construir_bloque_v9(obs, a)
+
         return obs
+
+    def _construir_bloque_v9(self, obs: np.ndarray, a: int) -> None:
+        """Añade los 26 features v9 al vector obs en los índices [194:220]."""
+        # [194] baza_numero / 13.0
+        obs[194] = min(self.motor.numero_baza / 13.0, 1.0)
+
+        # [195] jugadores_cerca_de_100 / 3.0
+        cerca = sum(1 for p in self._puntuacion_historica if p >= 85)
+        obs[195] = cerca / 3.0
+
+        # [196] Q♠ ya fue capturada (dama_picas_en conocido → fue jugada)
+        obs[196] = 1.0 if self._dama_picas_en is not None else 0.0
+
+        # [197] soy líder en puntaje (tengo el puntaje más bajo)
+        mi_pts = self._puntuacion_historica[a]
+        obs[197] = 1.0 if all(
+            mi_pts <= self._puntuacion_historica[j] for j in range(4)
+        ) else 0.0
+
+        # [198] mano terminal posible (algún jugador ≥74 → esta mano puede acabar)
+        obs[198] = 1.0 if any(p >= 74 for p in self._puntuacion_historica) else 0.0
+
+        # [199:203] cartas restantes por palo (no en cementerio) / 13.0
+        cementerio_por_palo = [0, 0, 0, 0]
+        for j in range(4):
+            for c in self.motor.jugadores[j].bazas_ganadas:
+                cementerio_por_palo[c.palo] += 1
+        for palo in range(4):
+            obs[199 + palo] = max(0.0, (13 - cementerio_por_palo[palo]) / 13.0)
+
+        # [203:207] cartas altas (J/Q/K/A) restantes por palo / 4.0
+        altas_cementerio = [0, 0, 0, 0]
+        for j in range(4):
+            for c in self.motor.jugadores[j].bazas_ganadas:
+                if c.valor >= 11:
+                    altas_cementerio[c.palo] += 1
+        for palo in range(4):
+            obs[203 + palo] = max(0.0, (4 - altas_cementerio[palo]) / 4.0)
+
+        # [207:211] probabilidad Q♠ por jugador relativo
+        q_prob = self._calcular_prob_q_picas(a)
+        for r in range(4):
+            obs[207 + r] = q_prob[r]
+
+        # [211:215] corazones capturados ESTA MANO por jugador relativo / 13.0
+        for j in range(4):
+            rel = (j - a) % 4
+            corazones = sum(
+                1 for c in self.motor.jugadores[j].bazas_ganadas
+                if c.es_corazon
+            )
+            obs[211 + rel] = min(corazones / 13.0, 1.0)
+
+        # [215:219] alerta pozo: jugador capturó ≥6 corazones esta mano
+        for j in range(4):
+            rel = (j - a) % 4
+            corazones = sum(
+                1 for c in self.motor.jugadores[j].bazas_ganadas
+                if c.es_corazon
+            )
+            obs[215 + rel] = 1.0 if corazones >= 6 else 0.0
+
+        # [219] RESERVADO — siempre 0.0 (ya está inicializado)
+
+    def _calcular_prob_q_picas(self, a: int) -> list:
+        """Distribuye probabilidad de Q♠ entre jugadores por eliminación de voids."""
+        _PICA = 2
+
+        # Q♠ ya capturada: nadie la tiene en la mano
+        if self._dama_picas_en is not None:
+            return [0.0, 0.0, 0.0, 0.0]
+
+        # Q♠ está en mi mano
+        mi_mano = self.motor.jugadores[a].mano
+        if any(c.es_dama_de_picas for c in mi_mano):
+            return [1.0, 0.0, 0.0, 0.0]  # posición relativa 0 = yo
+
+        # Q♠ está en la mesa (alguien la acaba de jugar)
+        for jug_idx, carta in self.motor.mesa:
+            if carta.es_dama_de_picas:
+                rel = (jug_idx - a) % 4
+                result = [0.0, 0.0, 0.0, 0.0]
+                result[rel] = 1.0
+                return result
+
+        # Q♠ podría estar en cualquier rival que no sea void en picas
+        candidatos = [
+            r for r in range(1, 4)
+            if _PICA not in self._vacios[(a + r) % 4]
+        ]
+        if not candidatos:
+            return [0.0, 0.0, 0.0, 0.0]
+        prob = 1.0 / len(candidatos)
+        result = [0.0, 0.0, 0.0, 0.0]
+        for r in candidatos:
+            result[r] = prob
+        return result
 
     # ------------------------------------------------------------------
     # Features estratégicas v5

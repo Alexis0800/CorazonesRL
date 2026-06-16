@@ -305,14 +305,26 @@ class BotExperto:
             if corazones:
                 return min(corazones, key=lambda c: c.valor)
 
-        # Nunca liderar con Q♠ si hay alternativa
+        # ── Liderar Q♠ como dump cuando hay picas más altas en circulación ──────
+        # En bazas tardías (≥7): si K♠/A♠ siguen en manos rivales, liderar Q♠
+        # fuerza al poseedor a ganar la baza llevándose los 13 pts.
+        # Solo si algún rival no es void confirmado en ♠.
+        mi_q_en_mano = [c for c in legales if c.es_dama_de_picas]
+        if mi_q_en_mano and baza >= 7 and not self._tengo_maxima_del_palo(motor, idx, _PICA):
+            alguno_puede_seguir_picas = any(
+                _PICA not in self._vacios[i] for i in range(4) if i != idx
+            )
+            if alguno_puede_seguir_picas:
+                return mi_q_en_mano[0]
+
+        # Nunca liderar con Q♠ si hay alternativa (fuera del caso anterior)
         sin_q = [c for c in legales if not c.es_dama_de_picas]
         candidatos = sin_q if sin_q else legales
 
-        # ── Quemar palos (etapa final: baza >= 10) ────────────────────────
+        # ── Quemar palos (desde baza 6) ──────────────────────────────────────
         # Si tengo la máxima de un palo seguro (♣/♦), liderarla garantiza ganar
         # una baza limpia ahora, mejor que ser forzado a ganar una con puntos después.
-        if baza >= 10:
+        if baza >= 6:
             for palo in (_TREBOL, _DIAMANTE):
                 mis_del_palo = [c for c in candidatos if c.palo == palo]
                 if mis_del_palo and self._tengo_maxima_del_palo(motor, idx, palo):
@@ -363,7 +375,14 @@ class BotExperto:
                 return max(no_gana, key=lambda c: c.valor)
             return min(mismo_palo, key=lambda c: c.valor)
 
-        # Sin puntos en mesa: conservar (la más baja)
+        # Sin puntos en mesa: quemar la carta alta de forma segura.
+        # Si no puedo ganar la baza, el ganador ya está determinado → jugar la
+        # más alta que pierda (elimina liability futura sin riesgo).
+        # Si todas mis cartas ganan, ganar con la mínima (daño controlado).
+        if ganadora is not None:
+            no_gana = [c for c in mismo_palo if c.valor <= ganadora.valor]
+            if no_gana:
+                return max(no_gana, key=lambda c: c.valor)
         return min(mismo_palo, key=lambda c: c.valor)
 
     def _descartar(
@@ -415,16 +434,41 @@ class BotExperto:
             return max(sin_puntos or legales, key=lambda c: c.valor)
 
         # ── Baza sin puntos: deshacerse de cartas peligrosas ─────────────
+        baza = motor.numero_baza
+
+        # Desde la mitad de la mano (baza ≥6), Q♠ vale 13 pts y cada baza adicional
+        # reduce las oportunidades de descargarla estratégicamente.
+        if q and baza >= 6 and modo != "POZO":
+            return q[0]
+
         # Corazones J/Q/K/A♥ son peligrosos (pueden ganar bazas futuras con puntos)
         if corazones_altos:
             return corazones_altos[0]
 
-        # Sin corazones altos: carta sin puntos más alta (liberar mano)
+        # K♠/A♠ con Q♠ activa: si alguien lidera ♠, podemos ganar la baza y
+        # recibir Q♠ descartada encima (13 pts). Mejor descargarlos en baza limpia.
+        if self._q_activa(motor):
+            picas_altas = [c for c in legales
+                           if c.palo == _PICA and c.valor > 12 and not c.es_dama_de_picas]
+            if picas_altas:
+                return max(picas_altas, key=lambda c: c.valor)
+
+        # Ases de palos seguros (A♣/A♦): siempre ganan su palo, lo que atrae
+        # descartados de corazones de rivales void. Mejor liberarlos ahora.
+        ases_seguros = [c for c in sin_puntos if c.valor == 14]
+        if ases_seguros:
+            return ases_seguros[0]
+
+        # Con corazones rotos, los corazones bajos también son peligrosos:
+        # los rivales pueden liderarlos y forzarnos a ganar bazas con puntos después.
+        if corazones_todos and motor.corazones_rotos:
+            return corazones_todos[0]
+
+        # Sin corazones altos ni urgencia: carta sin puntos más alta (liberar mano)
         if sin_puntos:
             return max(sin_puntos, key=lambda c: c.valor)
 
-        # Solo corazones bajos o Q♠: preferir corazones sobre Q♠
-        # (guardar Q♠ para baza con puntos)
+        # Solo corazones bajos (sin puntos en mesa y sin rotos) o Q♠ sin umbral
         if corazones_todos:
             return corazones_todos[0]
         return q[0] if q else min(legales, key=lambda c: c.puntos)
