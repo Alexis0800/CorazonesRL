@@ -39,12 +39,14 @@ from src.mcts.pimc import (
 # ──────────────────────────────────────────────────────────────
 
 _MAX_MUNDOS_EXACTO = 100_000    # máximo de mundos a enumerar (~1s en baza 10)
-_BAZA_MINIMA_EXACTA = 10        # baza mínima para intentar enumeración (35K mundos)
+# baza mínima para intentar enumeración (35K mundos)
+_BAZA_MINIMA_EXACTA = 10
 
 
 def _num_mundos_posibles(motor: MotorCorazones, agente_idx: int) -> int:
     """Calcula el número de distribuciones posibles de cartas desconocidas."""
-    n_cartas = [len(motor.jugadores[i].mano) for i in range(4) if i != agente_idx]
+    n_cartas = [len(motor.jugadores[i].mano)
+                for i in range(4) if i != agente_idx]
     total = sum(n_cartas)
     result = 1
     remaining = total
@@ -156,7 +158,8 @@ def enumerar_mundos(
                     break
 
         if valido:
-            clon = _aplicar_mundo(motor, agente_idx, oponentes, (mano1, mano2, mano3))
+            clon = _aplicar_mundo(
+                motor, agente_idx, oponentes, (mano1, mano2, mano3))
             mundos.append(clon)
 
     return mundos
@@ -202,7 +205,7 @@ def pimc_exacto(
     if rng is None:
         rng = np.random.default_rng()
     if crear_bots is None:
-        crear_bots = lambda: crear_bots_rollout(tipo=rollout_tipo, rng=rng)  # noqa: E731
+        def crear_bots(): return crear_bots_rollout(tipo=rollout_tipo, rng=rng)  # noqa: E731
 
     # Intentar enumeración completa (solo si estamos en baza avanzada)
     n_mundos_posibles = _num_mundos_posibles(motor, agente_idx)
@@ -493,7 +496,8 @@ def perfil_mano(
         print(f"\n  ── Resultado final ──")
         print(f"  Puntuación: {perfil.puntuacion_final}")
         if perfil.pozo:
-            print(f"  🌕 SHOOTING THE MOON (J{perfil.puntuacion_final.index(0)})")
+            print(
+                f"  🌕 SHOOTING THE MOON (J{perfil.puntuacion_final.index(0)})")
         elif perfil.q_capturador >= 0:
             print(f"  ♠ Q♠ capturada por J{perfil.q_capturador}")
 

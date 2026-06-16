@@ -11,6 +11,11 @@ Uso:
 """
 
 from __future__ import annotations
+from src.agentes.heuristicos import bot_evasivo
+from src.mcts.analisis import pimc_exacto
+from src.mcts.pimc import _puntaje_esperado_por_carta
+from src.agentes.bot_experto import BotExperto
+from src.dominio.motor import MotorCorazones
 
 import argparse
 import os
@@ -25,12 +30,6 @@ import numpy as np
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
-
-from src.dominio.motor import MotorCorazones
-from src.agentes.bot_experto import BotExperto
-from src.mcts.pimc import _puntaje_esperado_por_carta
-from src.mcts.analisis import pimc_exacto
-from src.agentes.heuristicos import bot_evasivo
 
 
 # ──────────────────────────────────────────────────────────────
@@ -172,7 +171,8 @@ def imprimir_reporte(
 ) -> None:
     n = len(todas)
     print(f"\n{'='*62}")
-    print(f"RESUMEN  ({total_partidas} manos | {total_decisiones} decisiones no triviales)")
+    print(
+        f"RESUMEN  ({total_partidas} manos | {total_decisiones} decisiones no triviales)")
     print(f"{'='*62}")
 
     if not todas:
@@ -182,15 +182,19 @@ def imprimir_reporte(
     coste_total = sum(d.coste for d in todas)
     coste_medio = coste_total / n
 
-    print(f"  Divergencias encontradas : {n:,} ({100*n/total_decisiones:.1f}% de decisiones)")
-    print(f"  Coste promedio por error : {coste_medio:.2f} pts esperados extra")
+    print(
+        f"  Divergencias encontradas : {n:,} ({100*n/total_decisiones:.1f}% de decisiones)")
+    print(
+        f"  Coste promedio por error : {coste_medio:.2f} pts esperados extra")
     print(f"  Coste total acumulado    : {coste_total:.1f} pts extra")
-    print(f"  Coste medio por mano     : {coste_total/total_partidas:.2f} pts/mano")
+    print(
+        f"  Coste medio por mano     : {coste_total/total_partidas:.2f} pts/mano")
 
     n_exactas = sum(1 for d in todas if d.exacto)
     if n_exactas > 0:
         coste_exacto = sum(d.coste for d in todas if d.exacto)
-        print(f"  Decisiones exactas (enum): {n_exactas} | coste exacto: {coste_exacto:.1f} pts")
+        print(
+            f"  Decisiones exactas (enum): {n_exactas} | coste exacto: {coste_exacto:.1f} pts")
 
     # Por baza
     print(f"\n--- Por número de baza ---")

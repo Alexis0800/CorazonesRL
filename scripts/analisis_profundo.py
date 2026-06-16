@@ -19,6 +19,13 @@ Uso:
 """
 
 from __future__ import annotations
+from src.agentes.bot_experto import BotExperto
+from src.mcts.analisis import (
+    perfil_mano,
+    evaluar_mano,
+    comparar_politicas,
+    estadisticas_manos,
+)
 
 import argparse
 import os
@@ -28,14 +35,6 @@ import time
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
-
-from src.mcts.analisis import (
-    perfil_mano,
-    evaluar_mano,
-    comparar_politicas,
-    estadisticas_manos,
-)
-from src.agentes.bot_experto import BotExperto
 
 
 def _cargar_politica(nombre: str):
@@ -103,7 +102,8 @@ def cmd_evaluar(args):
     if args.politica != "bot_experto":
         pol, nombre_pol = _cargar_politica(args.politica)
 
-    print(f"Evaluando {args.manos} manos con {nombre_pol} como J{args.jugador}")
+    print(
+        f"Evaluando {args.manos} manos con {nombre_pol} como J{args.jugador}")
     print(f"Rollout: {args.rollout} | Seed inicial: {args.seed}")
 
     t0 = time.time()
@@ -119,8 +119,10 @@ def cmd_evaluar(args):
     print(f"\n{'='*55}")
     print(f"ESTADÍSTICAS ({args.manos} manos en {elapsed:.1f}s)")
     print(f"{'='*55}")
-    print(f"  Puntuación media : {stats.puntuacion_media:.2f} ± {stats.puntuacion_std:.2f}")
-    print(f"  Manos con 0 pts  : {stats.tasa_cero*100:.1f}% ({int(stats.tasa_cero*args.manos)})")
+    print(
+        f"  Puntuación media : {stats.puntuacion_media:.2f} ± {stats.puntuacion_std:.2f}")
+    print(
+        f"  Manos con 0 pts  : {stats.tasa_cero*100:.1f}% ({int(stats.tasa_cero*args.manos)})")
     print(f"  Tasa de pozo     : {stats.tasa_pozo*100:.1f}%")
     print(f"  Tasa captura Q♠  : {stats.tasa_q_capturada*100:.1f}%")
     print(f"\n  Distribución de puntuaciones:")
@@ -176,7 +178,8 @@ def main():
     sub = parser.add_subparsers(dest="cmd")
 
     # ── perfil ──
-    p_perfil = sub.add_parser("perfil", help="Análisis ultra-detallado de UNA mano")
+    p_perfil = sub.add_parser(
+        "perfil", help="Análisis ultra-detallado de UNA mano")
     p_perfil.add_argument("--seed", type=int, default=42)
     p_perfil.add_argument("--jugador", type=int, default=0)
     p_perfil.add_argument("--politica", default="bot_experto")
