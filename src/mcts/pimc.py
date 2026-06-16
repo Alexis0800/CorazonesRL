@@ -21,7 +21,7 @@ import numpy as np
 from src.dominio.carta import Carta
 from src.dominio.jugador import Jugador
 from src.dominio.motor import MotorCorazones
-from src.agentes.heuristicos import bot_evasivo
+from src.agentes.heuristicos import bot_evasivo, bot_conservador, bot_agresivo
 
 
 # ──────────────────────────────────────────────────────────────
@@ -323,3 +323,176 @@ def pimc_mejor_jugada(
         rng=rng, crear_bots=crear_bots,
     )
     return min(legales, key=lambda c: scores[c.id])
+
+
+# ──────────────────────────────────────────────────────────────
+# Rollout factories mejoradas
+# ──────────────────────────────────────────────────────────────
+
+def _crear_bots_experto() -> Dict[int, Callable]:
+    """Rollout con BotExperto para todos los oponentes (más realista)."""
+    from src.agentes.bot_experto import BotExperto
+    bots = [BotExperto() for _ in range(4)]
+    return {i: bots[i] for i in range(4)}
+
+
+def _crear_bots_mixto(rng: np.random.Generator) -> Dict[int, Callable]:
+    """Rollout con mezcla de políticas: BotExperto + heurísticas.
+
+    Cada oponente usa una política distinta, simulando la diversidad
+    de estilos de juego en oponentes reales.
+    """
+    from src.agentes.bot_experto import BotExperto
+    experto = BotExperto()
+    return {
+        0: experto,
+        1: bot_conservador,
+        2: bot_agresivo,
+        3: bot_evasivo,
+    }
+
+
+def crear_bots_rollout(
+    tipo: str = "evasivo",
+    rng: Optional[np.random.Generator] = None,
+) -> Dict[int, Callable]:
+    """Factory de políticas de rollout parametrizable.
+
+    Args:
+        tipo: "evasivo" (default), "experto", "mixto", "conservador", "agresivo"
+        rng: Generador aleatorio (para mixto).
+
+    Returns:
+        Dict[jugador_idx → callable(motor, idx, legales) → Carta]
+    """
+    if tipo == "experto":
+        return _crear_bots_experto()
+    if tipo == "mixto":
+        return _crear_bots_mixto(rng or np.random.default_rng())
+    if tipo == "conservador":
+        return {i: bot_conservador for i in range(4)}
+    if tipo == "agresivo":
+        return {i: bot_agresivo for i in range(4)}
+    return {i: bot_evasivo for i in range(4)}
+
+
+# ──────────────────────────────────────────────────────────────
+# MCTS — Monte Carlo Tree Search (con árbol)
+# ──────────────────────────────────────────────────────────────
+
+class _NodoMCTS:
+    """Nodo del árbol MCTS para Corazones (minimización de puntos)."""
+
+    __slots__ = (
+        "visitas", "valor_total", "carta", "hijos",
+        "idx_jugador", "legales",
+    )
+
+    def __init__(self, carta: Optional[Carta] = None) -> None:
+        self.visitas: int = 0
+        self.valor_total: float = 0.0
+        self.carta: Optional[Carta] = carta  # carta que llevó a este nodo
+        self.hijos: Dict[int, '_NodoMCTS'] = {}  # carta.id → _NodoMCTS
+        self.idx_jugador: int = 0
+        self.legales: List[Carta] = []
+
+    @property
+    def valor_medio(self) -> float:
+        """Puntuación media (0=perfecto, 26=peor)."""
+        if self.visitas == 0:
+            return 0.0  # optimista: asumimos 0 pts para nodos no explorados
+        return self.valor_total / self.visitas
+
+    def ucb(self, c: float = np.sqrt(2.0)) -> float:
+        """UCB para minimización: menor = mejor.
+
+        Nodos no visitados reciben -inf para ser explorados primero.
+        """
+        if self.visitas == 0:
+            return -float("inf")
+        # valor_medio bajo es bueno; restamos exploración → más negativo = más atractivo
+        return self.valor_medio - c * np.sqrt(np.log(self.visitas) / self.visitas)
+
+
+def _seleccionar_mejor_hijo(
+    nodo: _NodoMCTS,
+    c: float = np.sqrt(2.0),
+) -> _NodoMCTS:
+    """Selecciona el hijo con menor UCB (minimización de puntos)."""
+    return min(nodo.hijos.values(), key=lambda h: h.ucb(c))
+
+
+def mcts_mejor_jugada(
+    motor: MotorCorazones,
+    agente_idx: int,
+    legales: List[Carta],
+    vacios: Optional[Dict[int, Set[int]]] = None,
+    num_simulaciones: int = 500,
+    rng: Optional[np.random.Generator] = None,
+    crear_bots: Optional[Callable[[], Dict[int, Callable]]] = None,
+    rollout_tipo: str = "experto",
+) -> Carta:
+    """MCTS con árbol: búsqueda más profunda que PIMC plano.
+
+    A diferencia de PIMC (que evalúa cada carta independientemente en
+    mundos separados), MCTS construye un árbol de decisiones compartido,
+    concentrando simulaciones en las ramas más prometedoras.
+
+    Args:
+        motor: Estado actual (NO se modifica).
+        agente_idx: Índice del agente.
+        legales: Cartas legales.
+        vacios: Voids conocidos.
+        num_simulaciones: Total de simulaciones MCTS (default 500).
+        rng: Generador aleatorio.
+        crear_bots: Factory de políticas (si None, usa rollout_tipo).
+        rollout_tipo: "evasivo", "experto", "mixto" (default "experto").
+
+    Returns:
+        La carta legal con menor puntuación esperada según MCTS.
+    """
+    if not legales:
+        raise ValueError("La lista de cartas legales no puede estar vacía")
+    if len(legales) == 1:
+        return legales[0]
+
+    if rng is None:
+        rng = np.random.default_rng()
+    if crear_bots is None:
+        # Pre-compilar la factory para no recrear BotExperto en cada simulación
+        bots_base = crear_bots_rollout(tipo=rollout_tipo, rng=rng)
+        crear_bots = lambda: bots_base  # noqa: E731
+
+    # Raíz del árbol
+    raiz = _NodoMCTS()
+    raiz.idx_jugador = agente_idx
+    raiz.legales = list(legales)
+
+    # Inicializar hijos para todas las cartas legales
+    for carta in legales:
+        hijo = _NodoMCTS(carta=carta)
+        raiz.hijos[carta.id] = hijo
+
+    # Bots de rollout (compartidos entre simulaciones para eficiencia)
+    bots_rollout = crear_bots()
+
+    for _ in range(num_simulaciones):
+        # 1. Determinizar: crear un mundo
+        mundo = determinizar(motor, agente_idx, vacios=vacios, rng=rng)
+
+        # 2. Seleccionar carta desde la raíz (exploración con UCB)
+        carta_elegida = _seleccionar_mejor_hijo(raiz).carta
+
+        # 3. Simular (rollout) desde el mundo con esa carta
+        clon = _clonar_motor(mundo)
+        puntos = simular_resto_mano(clon, agente_idx, carta_elegida, bots_rollout)
+
+        # 4. Backpropagar: actualizar el valor como COSTE (menos = mejor)
+        # Puntuación de Hearts: 0 es perfecto, 26 es lo peor.
+        # Queremos MINIMIZAR, así que el valor es la puntuación directamente.
+        hijo_nodo = raiz.hijos[carta_elegida.id]
+        hijo_nodo.visitas += 1
+        hijo_nodo.valor_total += puntos  # acumulamos coste (menor = mejor)
+
+    # Seleccionar la carta con menor valor medio (menor puntuación esperada)
+    return min(legales, key=lambda c: raiz.hijos[c.id].valor_medio)

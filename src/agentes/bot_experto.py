@@ -321,6 +321,34 @@ class BotExperto:
         sin_q = [c for c in legales if not c.es_dama_de_picas]
         candidatos = sin_q if sin_q else legales
 
+        # ── Final de mano (baza ≥ 9): dar el lead, dump de corazones/picas ─
+        # Con pocas cartas restantes, ganar una baza con A♣/A♦ fuerza a liderar
+        # de nuevo, quedando atrapado con corazones/picas. Mejor ceder el lead.
+        if baza >= 9:
+            # Liderar corazón para dump: alguien más lo ganará (1 pt para él)
+            if motor.corazones_rotos:
+                corazones_legales = [c for c in candidatos if c.es_corazon]
+                if corazones_legales:
+                    # Liderar corazón medio: bajo enough para no ganar, alto enough para dump
+                    # Preferir corazones ≤10 (no J/Q/K/A que son más controlables)
+                    medios = [c for c in corazones_legales if c.valor <= 10]
+                    if medios:
+                        return max(medios, key=lambda c: c.valor)
+                    return min(corazones_legales, key=lambda c: c.valor)
+
+            # Liderar pica (no Q♠) para dump si Q♠ ya fue capturada
+            if not self._q_activa(motor):
+                picas_legales = [c for c in candidatos if c.palo == _PICA]
+                if picas_legales:
+                    return max(picas_legales, key=lambda c: c.valor)
+
+            # En bazas 11+: evitar ganar la baza a toda costa
+            if baza >= 11:
+                sin_puntos_tardios = [c for c in candidatos if c.puntos == 0]
+                if sin_puntos_tardios:
+                    return min(sin_puntos_tardios, key=lambda c: c.valor)
+                return min(candidatos, key=lambda c: c.puntos * 100 + c.valor)
+
         # ── Quemar palos (desde baza 6) ──────────────────────────────────────
         # Si tengo la máxima de un palo seguro (♣/♦), liderarla garantiza ganar
         # una baza limpia ahora, mejor que ser forzado a ganar una con puntos después.
@@ -360,6 +388,19 @@ class BotExperto:
             if gana:
                 return min(gana, key=lambda c: c.valor)  # ganar con el mínimo
 
+        # ── Dump Q♠ siguiendo picas (baza ≥5): si todas mis otras picas
+        # ganan la baza, jugar Q♠ da la oportunidad de que K♠/A♠ la cubran.
+        # Solo cuando no soy la máxima y no tengo picas perdedoras.
+        if (motor.palo_de_salida == _PICA and not q_en_mesa and modo != "POZO"
+                and motor.numero_baza >= 5):
+            mi_q = [c for c in mismo_palo if c.es_dama_de_picas]
+            if mi_q and not self._tengo_maxima_del_palo(motor, idx, _PICA):
+                otras = [c for c in mismo_palo if not c.es_dama_de_picas]
+                if otras and ganadora is not None:
+                    # Solo si TODAS mis otras picas ganan la baza
+                    if all(c.valor > ganadora.valor for c in otras):
+                        return mi_q[0]
+
         # Evitar capturar Q♠: jugar la carta más alta que no gane la baza
         if q_en_mesa and ganadora is not None:
             no_gana = [c for c in mismo_palo if c.valor <= ganadora.valor]
@@ -378,11 +419,25 @@ class BotExperto:
         # Sin puntos en mesa: quemar la carta alta de forma segura.
         # Si no puedo ganar la baza, el ganador ya está determinado → jugar la
         # más alta que pierda (elimina liability futura sin riesgo).
-        # Si todas mis cartas ganan, ganar con la mínima (daño controlado).
+        # Si todas mis cartas ganan, ganar con la MÁXIMA: quemar la carta alta
+        # ahora (0 pts) es mejor que arriesgarse a ganar con ella después (con puntos).
         if ganadora is not None:
             no_gana = [c for c in mismo_palo if c.valor <= ganadora.valor]
             if no_gana:
+                # ── Quemar A♠/K♠ con Q♠ activa aunque pueda perder ──────
+                # Si Q♠ sigue en circulación, A♠/K♠ son liability: en una
+                # futura baza de ♠ forzarán ganar y Q♠ puede caer encima.
+                # Quemarlas ahora en baza limpia elimina ese riesgo.
+                if self._q_activa(motor):
+                    picas_altas_quemables = [
+                        c for c in mismo_palo
+                        if c.palo == _PICA and c.valor >= 13 and not c.es_dama_de_picas
+                    ]
+                    if picas_altas_quemables:
+                        return picas_altas_quemables[0]  # A♠ o K♠
                 return max(no_gana, key=lambda c: c.valor)
+            # Todas mis cartas ganan la baza → quemar la más alta
+            return max(mismo_palo, key=lambda c: c.valor)
         return min(mismo_palo, key=lambda c: c.valor)
 
     def _descartar(

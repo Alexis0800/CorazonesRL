@@ -233,7 +233,13 @@ class TestModoJuego:
         """Sin condiciones especiales, el modo es MINIMIZAR."""
         bot = BotExperto()
         motor = MotorCorazones()
-        motor.repartir()
+        # Usar mano controlada sin muchos corazones para garantizar MINIMIZAR
+        sin_corazones = [c for c in Carta._TODAS
+                         if not c.es_corazon and not c.es_dama_de_picas][:13]
+        motor.jugadores[0].mano = sin_corazones
+        motor.corazones_rotos = True
+        motor.numero_baza = 2
+        motor._mano_activa = True
         assert bot._modo(motor, 0) == "MINIMIZAR"
 
     def test_modo_pozo_con_mano_correcta(self):
@@ -332,7 +338,7 @@ class TestSeguirPalo:
         assert carta == _K_PICAS, f"Esperaba K♠ (mínimo daño), obtuvo {carta}"
 
     def test_sin_puntos_en_mesa_juega_normal(self):
-        """Si no hay puntos en la mesa, puede jugar libremente (sin urgencia)."""
+        """Sin puntos en mesa: si todas ganan, quema la más alta; si alguna pierde, la más alta que pierda."""
         bot = BotExperto()
         _5D = _carta(5, DIAMANTE)
         _9D = _carta(9, DIAMANTE)
@@ -343,8 +349,9 @@ class TestSeguirPalo:
 
         legales = [_5D, _9D]
         carta = bot(motor, 0, legales)
-        # Sin puntos: jugar la más baja para no ganar innecesariamente
-        assert carta == _5D, f"Esperaba 5♦ (conservar), obtuvo {carta}"
+        # Ambas ganan (5♦>3♦, 9♦>3♦): quema la más alta (9♦)
+        # para eliminar la carta más peligrosa en baza limpia
+        assert carta == _9D, f"Esperaba 9♦ (quemar alta), obtuvo {carta}"
 
 
 # ────────────────────────────────────────────────────────────────────────────────
