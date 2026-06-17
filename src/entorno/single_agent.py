@@ -80,6 +80,14 @@ class CorazonesEnv(gym.Env):
     REWARD_QUEMAR_MAXIMA_FORZADA: float = 0.3
     # Recompensa: quemar alta (A/K) siguiendo palo en baza limpia
     REWARD_QUEMAR_ALTA_SIGUIENDO_PALO: float = 0.5
+
+    # --- NUEVAS RECOMPENSAS v10 (Fase B): correcciones tácticas adicionales ---
+    # Penalización: ganar baza tardía (≥9) sin puntos con máxima de palo seguro
+    PENALTY_GANAR_BAZA_TARDIA_SIN_NECESIDAD: float = -2.0
+    # Recompensa: liderar Q♠ como dump seguro (baza ≥7, K♠/A♠ en circulación)
+    REWARD_LIDERAR_Q_DUMP_SEGURO: float = 3.0
+    # Recompensa: descartar corazón en baza limpia con corazones rotos
+    REWARD_DESCARTAR_CORAZON_BAJO_ROTO: float = 0.5
     PUNTUACION_MAXIMA: float = 100.0  # Umbral de fin de partida
 
     def __init__(
@@ -233,6 +241,25 @@ class CorazonesEnv(gym.Env):
             soy_maxima_picas = self._es_maxima_en_mano(carta, self.agente_idx)
             if baza_temprana or soy_maxima_picas:
                 self._recompensa_pendiente += self.PENALTY_LIDERAR_Q_EQUIVOCADO
+
+        # --- REWARD: liderar Q♠ como dump seguro (baza ≥7, K♠/A♠ en circ.) ---
+        if posicion_en_baza == 0 and carta.es_dama_de_picas:
+            baza_tardia = self.motor.numero_baza >= 7
+            soy_maxima_picas = self._es_maxima_en_mano(carta, self.agente_idx)
+            if baza_tardia and not soy_maxima_picas:
+                # Verificar si K♠/A♠ están en circulación (no en cementerio ni en mano)
+                cementerio_ids = set()
+                for j in range(4):
+                    for c in self.motor.jugadores[j].bazas_ganadas:
+                        cementerio_ids.add(c.id)
+                k_spades = next(
+                    (c for c in Carta._TODAS if c.palo == 2 and c.valor == 13), None)
+                a_spades = next(
+                    (c for c in Carta._TODAS if c.palo == 2 and c.valor == 14), None)
+                k_en_circulacion = k_spades and k_spades.id not in cementerio_ids
+                a_en_circulacion = a_spades and a_spades.id not in cementerio_ids
+                if k_en_circulacion or a_en_circulacion:
+                    self._recompensa_pendiente += self.REWARD_LIDERAR_Q_DUMP_SEGURO
 
         # --- REWARD: quemar máxima forzada (siguiendo palo) ---
         if (posicion_en_baza > 0
@@ -491,6 +518,25 @@ class CorazonesEnv(gym.Env):
                     and not self._pozo_viable()):
                 self._recompensa_pendiente += self.PENALTY_GANAR_BAZA_CON_PUNTOS_EVITABLE
 
+            # --- NUEVO v10 (Fase B): recompensas tácticas adicionales ---
+
+            # PENALTY: ganar baza tardía sin puntos con máxima de palo seguro
+            if (ganador == self.agente_idx
+                    and puntos_baza == 0
+                    and palo_salida in (0, 1)  # ♣/♦ = palos seguros
+                    and carta_agente.palo == palo_salida
+                    and self._es_maxima_en_mano(carta_agente, self.agente_idx)
+                    and carta_agente.valor >= 13):  # A o K
+                self._recompensa_pendiente += self.PENALTY_GANAR_BAZA_TARDIA_SIN_NECESIDAD
+
+            # REWARD: descartar corazón en baza limpia con corazones rotos
+            if (self.motor.corazones_rotos
+                    and palo_salida is not None
+                    and carta_agente.palo != palo_salida  # es descarte (void)
+                    and carta_agente.es_corazon
+                    and puntos_baza == 0):
+                self._recompensa_pendiente += self.REWARD_DESCARTAR_CORAZON_BAJO_ROTO
+
     def _finalizar_mano(self) -> None:
         """Finaliza la mano actual: aplica puntuación, verifica pleno,
         y actualiza puntuaciones históricas."""
@@ -718,7 +764,11 @@ class CorazonesEnv(gym.Env):
             )
             obs[215 + rel] = 1.0 if corazones >= 6 else 0.0
 
-        # [219] RESERVADO — siempre 0.0 (ya está inicializado)
+        # [219] palo_salida: -1.0 si no hay palo de salida, else palo/3.0
+        obs[219] = (
+            -1.0 if self.motor.palo_de_salida is None
+            else self.motor.palo_de_salida / 3.0
+        )
 
     def _calcular_prob_q_picas(self, a: int) -> list:
         """Distribuye probabilidad de Q♠ entre jugadores por eliminación de voids."""

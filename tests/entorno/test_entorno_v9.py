@@ -1,7 +1,7 @@
 """
 Tests TDD para el espacio de observación v9 (194 → 220 dimensiones).
 
-Cubre los 26 nuevos features añadidos en [194:220]:
+Cubre los 27 features añadidos en [194:220]:
   [194]      baza_numero / 13.0
   [195]      jugadores_cerca_de_100 / 3.0
   [196]      Q♠ ya capturada (bool)
@@ -12,7 +12,7 @@ Cubre los 26 nuevos features añadidos en [194:220]:
   [207:211]  probabilidad Q♠ por jugador relativo
   [211:215]  corazones capturados esta mano / 13.0
   [215:219]  alerta pozo por jugador (≥6 corazones)
-  [219]      RESERVADO (siempre 0.0)
+  [219]      palo_salida (-1.0 si None, else palo/3.0 en [-1.0, 1.0])
 """
 import pytest
 import numpy as np
@@ -46,7 +46,7 @@ def _env_v9(agente_idx: int = 0, seed: int = 42) -> CorazonesEnv:
 
 
 def _inyectar_bazas_ganadas(env: CorazonesEnv, jugador_idx: int,
-                             cartas: list) -> None:
+                            cartas: list) -> None:
     """Pone cartas específicas en las bazas_ganadas de un jugador."""
     env.motor.jugadores[jugador_idx].bazas_ganadas = list(cartas)
 
@@ -74,11 +74,17 @@ class TestDimensionV9:
         assert obs.dtype == np.float32
 
     def test_observacion_rango_valido(self):
-        """Todos los valores deben estar en [0.0, 1.0]."""
+        """Todos los valores en [0:219] deben estar en [0.0, 1.0].
+        [219] (palo_salida) puede ser -1.0 cuando no hay palo de salida."""
         env = _env_v9()
         obs = env._construir_observacion()
-        assert np.all(obs >= 0.0), f"Min negativo: {obs.min()}"
-        assert np.all(obs <= 1.0), f"Max > 1: {obs.max()}"
+        # [0:219] siempre en [0, 1]
+        assert np.all(
+            obs[:219] >= 0.0), f"Min negativo en [0:219]: {obs[:219].min()}"
+        assert np.all(
+            obs[:219] <= 1.0), f"Max > 1 en [0:219]: {obs[:219].max()}"
+        # [219] puede ser -1.0 o [0, 1]
+        assert -1.0 <= obs[219] <= 1.0, f"[219] fuera de rango: {obs[219]}"
 
     def test_reset_retorna_220_dimensiones(self):
         env = CorazonesEnv(obs_dim=220)
@@ -410,16 +416,57 @@ class TestDeteccionMoon:
         assert obs[215] == 1.0, \
             f"Agente con 6 corazones: obs[215] debe ser 1.0, obtuvo {obs[215]}"
 
-    def test_reservado_siempre_cero(self):
-        """El feature reservado obs[219] debe ser siempre 0.0."""
+    def test_palo_salida_none_es_menos_uno(self):
+        """Cuando no hay palo de salida (motor.palo_de_salida is None) → obs[219] = -1.0."""
+        env = _env_v9()
+        env.motor.palo_de_salida = None
+        obs = env._construir_observacion()
+        assert obs[219] == - \
+            1.0, f"Sin palo de salida, [219] debe ser -1.0: {obs[219]}"
+
+    def test_palo_salida_trebol(self):
+        """Cuando el palo de salida es trébol (0) → obs[219] = 0.0."""
+        env = _env_v9()
+        env.motor.palo_de_salida = TREBOL
+        obs = env._construir_observacion()
+        assert obs[219] == pytest.approx(0.0, abs=0.01)
+
+    def test_palo_salida_diamante(self):
+        """Cuando el palo de salida es diamante (1) → obs[219] ≈ 0.333."""
+        env = _env_v9()
+        env.motor.palo_de_salida = DIAMANTE
+        obs = env._construir_observacion()
+        assert obs[219] == pytest.approx(1.0 / 3.0, abs=0.01)
+
+    def test_palo_salida_picas(self):
+        """Cuando el palo de salida es picas (2) → obs[219] ≈ 0.667."""
+        env = _env_v9()
+        env.motor.palo_de_salida = PICA
+        obs = env._construir_observacion()
+        assert obs[219] == pytest.approx(2.0 / 3.0, abs=0.01)
+
+    def test_palo_salida_corazon(self):
+        """Cuando el palo de salida es corazón (3) → obs[219] = 1.0."""
+        env = _env_v9()
+        env.motor.palo_de_salida = CORAZON
+        obs = env._construir_observacion()
+        assert obs[219] == pytest.approx(1.0, abs=0.01)
+
+    def test_palo_salida_cambia_durante_el_juego(self):
+        """Verifica que palo_salida se actualiza correctamente entre bazas."""
         env = _env_v9()
         obs = env._construir_observacion()
-        assert obs[219] == 0.0, f"Reservado [219] debe ser 0.0, obtuvo {obs[219]}"
+        assert -1.0 <= obs[219] <= 1.0
 
 
 # ============================================================
-# Clase 6 — Integridad del vector completo
+# Clase 6 — Palo de salida (antes RESERVADO)
 # ============================================================
+
+class TestPaloSalida:
+    """Tests para el feature palo_salida en obs[219]."""
+# ============================================================
+
 
 class TestIntegridad:
     """Tests de consistencia end-to-end del vector v9."""

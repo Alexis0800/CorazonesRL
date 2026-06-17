@@ -28,6 +28,12 @@ def _carta(valor: int, palo: int) -> Carta:
     raise ValueError(f"No encontrada: valor={valor}, palo={palo}")
 
 
+TREBOL = 0
+DIAMANTE = 1
+PICA = 2
+CORAZON = 3
+
+
 _Q_ESPADAS = _carta(12, 2)   # Q♠
 _A_CORAZON = _carta(14, 3)   # A♥
 _2_CORAZON = _carta(2, 3)    # 2♥
@@ -218,7 +224,8 @@ class TestBloquearPozo:
     def test_bloquear_pozo_agente_captura_q_cuando_rival_tiene_muchos_corazones(self):
         """Si un rival acumuló ≥10 corazones y el agente capturó Q♠ → reward."""
         calc = _calc_v9()
-        corazones_por_jugador = [0, 13, 0, 0]  # rival 1 tiene todos los corazones
+        # rival 1 tiene todos los corazones
+        corazones_por_jugador = [0, 13, 0, 0]
         reward = calc.recompensa_bloquear_pozo(
             agente_idx=0,
             ganador_q_espadas=0,  # agente capturó Q♠
@@ -360,3 +367,165 @@ class TestPuntoPorMano:
         # -2.0 (perder mano) + 10 * -0.1 = -3.0
         assert reward == pytest.approx(-3.0, abs=0.1), \
             f"Penalización reducida: esperaba -3.0 aprox., obtuvo {reward}"
+
+
+# ============================================================
+# Clase 8 — Nuevas recompensas tácticas (Fase B, v10)
+# ============================================================
+
+class TestRecompensasTacticasV10:
+    """Tests para las 3 nuevas recompensas tácticas basadas en errores del BotExperto."""
+
+    def test_config_tiene_penalty_ganar_baza_tardia(self):
+        """RewardConfig debe tener PENALTY_GANAR_BAZA_TARDIA_SIN_NECESIDAD."""
+        cfg = RewardConfig()
+        assert hasattr(cfg, "PENALTY_GANAR_BAZA_TARDIA_SIN_NECESIDAD")
+        assert cfg.PENALTY_GANAR_BAZA_TARDIA_SIN_NECESIDAD == -2.0
+
+    def test_config_tiene_reward_liderar_q_dump_seguro(self):
+        """RewardConfig debe tener REWARD_LIDERAR_Q_DUMP_SEGURO."""
+        cfg = RewardConfig()
+        assert hasattr(cfg, "REWARD_LIDERAR_Q_DUMP_SEGURO")
+        assert cfg.REWARD_LIDERAR_Q_DUMP_SEGURO == 3.0
+
+    def test_config_tiene_reward_descartar_corazon_bajo_roto(self):
+        """RewardConfig debe tener REWARD_DESCARTAR_CORAZON_BAJO_ROTO."""
+        cfg = RewardConfig()
+        assert hasattr(cfg, "REWARD_DESCARTAR_CORAZON_BAJO_ROTO")
+        assert cfg.REWARD_DESCARTAR_CORAZON_BAJO_ROTO == 0.5
+
+    def test_penalty_ganar_baza_tardia_aplica(self):
+        """Penalización -2.0 cuando baza ≥9 y se gana baza sin puntos con carta alta de palo seguro."""
+        calc = _calc_v9()
+        reward = calc.recompensa_ganar_baza_tardia(
+            numero_baza=10,
+            puntos_baza=0,
+            palo_salida=TREBOL,
+            carta_jugada=_carta(14, TREBOL),  # A♣ = máxima de palo seguro
+            es_maxima_en_mano=True,
+        )
+        assert reward == pytest.approx(-2.0, abs=0.01)
+
+    def test_penalty_ganar_baza_tardia_no_aplica_baza_temprana(self):
+        """No aplica en baza < 9."""
+        calc = _calc_v9()
+        reward = calc.recompensa_ganar_baza_tardia(
+            numero_baza=5,
+            puntos_baza=0,
+            palo_salida=TREBOL,
+            carta_jugada=_carta(14, TREBOL),
+            es_maxima_en_mano=True,
+        )
+        assert reward == 0.0
+
+    def test_penalty_ganar_baza_tardia_no_aplica_con_puntos(self):
+        """No aplica si la baza tiene puntos (ya hay otras penalizaciones)."""
+        calc = _calc_v9()
+        reward = calc.recompensa_ganar_baza_tardia(
+            numero_baza=10,
+            puntos_baza=5,
+            palo_salida=TREBOL,
+            carta_jugada=_carta(14, TREBOL),
+            es_maxima_en_mano=True,
+        )
+        assert reward == 0.0
+
+    def test_penalty_ganar_baza_tardia_no_aplica_no_maxima(self):
+        """No aplica si la carta no es la máxima del palo."""
+        calc = _calc_v9()
+        reward = calc.recompensa_ganar_baza_tardia(
+            numero_baza=10,
+            puntos_baza=0,
+            palo_salida=TREBOL,
+            carta_jugada=_carta(5, TREBOL),
+            es_maxima_en_mano=False,
+        )
+        assert reward == 0.0
+
+    def test_reward_liderar_q_dump_seguro_aplica(self):
+        """+3.0 cuando baza ≥7, K♠/A♠ en circulación, se lidera Q♠."""
+        calc = _calc_v9()
+        reward = calc.recompensa_liderar_q_dump(
+            numero_baza=8,
+            carta_jugada=_carta(12, PICA),  # Q♠
+            es_maxima_en_picas=False,         # no soy máxima en picas
+            hay_altas_en_circulacion=True,    # K♠/A♠ aún en juego
+        )
+        assert reward == pytest.approx(3.0, abs=0.01)
+
+    def test_reward_liderar_q_dump_no_aplica_baza_temprana(self):
+        """No aplica en baza < 7."""
+        calc = _calc_v9()
+        reward = calc.recompensa_liderar_q_dump(
+            numero_baza=5,
+            carta_jugada=_carta(12, PICA),
+            es_maxima_en_picas=False,
+            hay_altas_en_circulacion=True,
+        )
+        assert reward == 0.0
+
+    def test_reward_liderar_q_dump_no_aplica_siendo_maxima(self):
+        """No aplica si soy máxima en picas (sería auto-13pts)."""
+        calc = _calc_v9()
+        reward = calc.recompensa_liderar_q_dump(
+            numero_baza=9,
+            carta_jugada=_carta(12, PICA),
+            es_maxima_en_picas=True,
+            hay_altas_en_circulacion=True,
+        )
+        assert reward == 0.0
+
+    def test_reward_liderar_q_dump_no_aplica_sin_cobertura(self):
+        """No aplica si no hay K♠/A♠ en circulación."""
+        calc = _calc_v9()
+        reward = calc.recompensa_liderar_q_dump(
+            numero_baza=9,
+            carta_jugada=_carta(12, PICA),
+            es_maxima_en_picas=False,
+            hay_altas_en_circulacion=False,
+        )
+        assert reward == 0.0
+
+    def test_reward_descartar_corazon_bajo_roto_aplica(self):
+        """+0.5 cuando corazones rotos y se descarta corazón en baza limpia."""
+        calc = _calc_v9()
+        reward = calc.recompensa_descartar_corazon_bajo(
+            corazones_rotos=True,
+            carta_descartada=_carta(5, CORAZON),
+            es_descarte=True,   # void en palo de salida
+            puntos_baza=0,
+        )
+        assert reward == pytest.approx(0.5, abs=0.01)
+
+    def test_reward_descartar_corazon_bajo_no_aplica_sin_rotos(self):
+        """No aplica si corazones no están rotos."""
+        calc = _calc_v9()
+        reward = calc.recompensa_descartar_corazon_bajo(
+            corazones_rotos=False,
+            carta_descartada=_carta(5, CORAZON),
+            es_descarte=True,
+            puntos_baza=0,
+        )
+        assert reward == 0.0
+
+    def test_reward_descartar_corazon_bajo_no_aplica_siguiendo_palo(self):
+        """No aplica si el agente está siguiendo palo (no descartando)."""
+        calc = _calc_v9()
+        reward = calc.recompensa_descartar_corazon_bajo(
+            corazones_rotos=True,
+            carta_descartada=_carta(5, CORAZON),
+            es_descarte=False,
+            puntos_baza=0,
+        )
+        assert reward == 0.0
+
+    def test_reward_descartar_corazon_bajo_no_aplica_con_puntos(self):
+        """No aplica si la baza tiene puntos."""
+        calc = _calc_v9()
+        reward = calc.recompensa_descartar_corazon_bajo(
+            corazones_rotos=True,
+            carta_descartada=_carta(5, CORAZON),
+            es_descarte=True,
+            puntos_baza=3,
+        )
+        assert reward == 0.0

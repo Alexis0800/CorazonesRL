@@ -2,7 +2,7 @@
 Helpers de entrenamiento para el agente Corazones.
 
 Provee constantes, factorías de entorno y utilidades de snapshots
-para el pipeline de entrenamiento autónomo (train_auto_v6.py).
+para el pipeline de entrenamiento autónomo (train.py).
 """
 
 from __future__ import annotations
@@ -158,7 +158,8 @@ def crear_entorno_self_play(
         Entorno CorazonesEnv configurado con oponentes mixtos.
     """
     todos_snapshots = listar_snapshots(directorio)
-    snapshots = _filtrar_snapshots_por_calidad(todos_snapshots, min_snapshot_steps)
+    snapshots = _filtrar_snapshots_por_calidad(
+        todos_snapshots, min_snapshot_steps)
 
     bots_simples = [bot_evasivo, bot_evasivo, bot_conservador, bot_agresivo]
     random.shuffle(bots_simples)
@@ -249,42 +250,44 @@ def obtener_hiperparametros_v3(
     logdir: str,
     device: str,
     paso_actual: int = 0,
+    total_pasos: int = 20_000_000,
 ) -> Dict:
-    """Hiperparámetros PPO con learning rate schedule en 3 fases.
+    """Hiperparámetros PPO con learning rate schedule lineal.
 
-    Schedule de 3 fases:
-        Fase 1 (0 – 2M pasos):   lr=1e-4, ent=0.08, clip=0.15, epochs=8
-        Fase 2 (2M – 5M pasos):  lr=5e-5, ent=0.05, clip=0.12, epochs=6
-        Fase 3 (5M+ pasos):      lr=2e-5, ent=0.03, clip=0.10, epochs=4
+    Linear LR decay:
+        Inicio (0%):  lr=3e-4, ent=0.08, clip=0.15
+        Mitad (50%):  lr=1.5e-4, ent=0.05, clip=0.12
+        Final (100%): lr=1e-5, ent=0.02, clip=0.08
+
+    La decadencia lineal permite exploración agresiva al inicio y refinamiento
+    quirúrgico al final, sin los saltos bruscos del step decay.
 
     Args:
         logdir: Directorio para logs de TensorBoard.
         device: Dispositivo de cómputo ('cpu' o 'cuda').
-        paso_actual: Paso global actual para seleccionar la fase.
+        paso_actual: Paso global actual para calcular el progreso.
+        total_pasos: Pasos totales planeados (default: 20M).
 
     Returns:
         Diccionario con hiperparámetros para MaskablePPO.
     """
-    if paso_actual < 2_000_000:
-        lr = 1e-4
-        ent = 0.08
-        clip = 0.15
-        epochs = 8
-        grad_norm = 1.0
+    progreso = min(paso_actual / total_pasos, 1.0)
+
+    # Linear decay: lr_start → lr_end
+    lr = 3e-4 + (1e-5 - 3e-4) * progreso
+    # Entropy: high at start (exploration), low at end (exploitation)
+    ent = 0.08 + (0.02 - 0.08) * progreso
+    # Clip range: wider at start, tighter at end
+    clip = 0.15 + (0.08 - 0.15) * progreso
+    # Epochs: more at start (learning), fewer at end (stability)
+    epochs = int(8 + (4 - 8) * progreso)
+    grad_norm = 1.0 + (0.3 - 1.0) * progreso
+
+    if progreso < 0.25:
         fase = "1 (exploración)"
-    elif paso_actual < 5_000_000:
-        lr = 5e-5
-        ent = 0.05
-        clip = 0.12
-        epochs = 6
-        grad_norm = 0.8
+    elif progreso < 0.75:
         fase = "2 (consolidación)"
     else:
-        lr = 2e-5
-        ent = 0.03
-        clip = 0.10
-        epochs = 4
-        grad_norm = 0.5
         fase = "3 (fine-tuning)"
 
     policy_kwargs = obtener_policy_kwargs()

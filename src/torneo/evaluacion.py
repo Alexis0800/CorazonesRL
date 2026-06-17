@@ -42,6 +42,7 @@ __all__ = [
     "_crear_escenario_q_spades_sin_pozo", "_crear_escenario_pozo_viable",
     "evaluar_escenario", "evaluacion_rapida",
     "_guardar_log_evaluacion", "evaluar_snapshot_callback",
+    "evaluar_vs_experto",
 ]
 
 # ------------------------------------------------------------------
@@ -160,6 +161,21 @@ def _detectar_vecnorm(
     return None
 
 
+def _detectar_obs_dim(modelo: Any) -> int:
+    """Detecta la dimensión de observación esperada por el modelo.
+
+    Args:
+        modelo: Instancia de MaskablePPO.
+
+    Returns:
+        Dimensión (194 o 220).
+    """
+    try:
+        return modelo.observation_space.shape[0]
+    except Exception:
+        return 194  # fallback seguro
+
+
 # ------------------------------------------------------------------
 # Nivel 1: Evaluación contra bots
 # ------------------------------------------------------------------
@@ -186,6 +202,9 @@ def evaluar_contra_bots(
     from src.agentes.heuristicos import bot_conservador, bot_agresivo, bot_evasivo
     from src.entorno.single_agent import CorazonesEnv
 
+    # Detectar obs_dim del modelo para crear el entorno correcto
+    obs_dim = _detectar_obs_dim(modelo)
+
     bots_pool = [bot_conservador, bot_agresivo, bot_evasivo]
     posiciones: List[int] = []
     puntuaciones: List[float] = []
@@ -201,6 +220,7 @@ def evaluar_contra_bots(
         env = CorazonesEnv(
             agente_idx=0,
             politicas_oponentes={1: bots[0], 2: bots[1], 3: bots[2]},
+            obs_dim=obs_dim,
         )
         obs_raw, _ = env.reset(seed=seed)
         obs = normalizar_obs_si_hay_stats(obs_raw, vecnorm_path)
@@ -664,6 +684,72 @@ def evaluar_snapshot_callback(
             f"  ⚠️  [Eval] Win rate {wr:.1%} < umbral {min_win_rate:.1%} — early stopping")
 
     return resultado
+
+
+def evaluar_vs_experto(
+    ruta_snapshot: str,
+    num_partidas: int = 50,
+    seed: int = 42,
+) -> Dict[str, Any]:
+    """Evalúa un snapshot contra 3 copias independientes de BotExperto.
+
+    Args:
+        ruta_snapshot: Ruta al snapshot .zip.
+        num_partidas: Número de partidas a jugar.
+        seed: Semilla base para reproducibilidad.
+
+    Returns:
+        Diccionario con win_rate, top2, punt_promedio, pct_cuarto.
+    """
+    from sb3_contrib import MaskablePPO
+    from src.entorno.single_agent import CorazonesEnv
+    from src.agentes.bot_experto import BotExperto
+
+    if not ruta_snapshot.endswith(".zip"):
+        ruta_snapshot += ".zip"
+
+    modelo = MaskablePPO.load(ruta_snapshot, device="cpu")
+    vecnorm_path = _detectar_vecnorm(ruta_snapshot)
+    obs_dim = _detectar_obs_dim(modelo)
+
+    posiciones: List[int] = []
+    puntuaciones: List[float] = []
+
+    for partida in range(num_partidas):
+        bot1, bot2, bot3 = BotExperto(), BotExperto(), BotExperto()
+        politicas = {1: bot1, 2: bot2, 3: bot3}
+        env = CorazonesEnv(
+            agente_idx=0, politicas_oponentes=politicas, obs_dim=obs_dim)
+        obs_raw, _ = env.reset(seed=seed + partida)
+        obs = normalizar_obs_si_hay_stats(obs_raw, vecnorm_path)
+        done = False
+
+        while not done:
+            mask = env.action_masks()
+            action, _ = modelo.predict(
+                obs, action_masks=mask, deterministic=True)
+            obs_raw, _reward, terminated, truncated, _ = env.step(int(action))
+            obs = normalizar_obs_si_hay_stats(obs_raw, vecnorm_path)
+            done = terminated or truncated
+
+        punt_agente = env._puntuacion_historica[0]
+        punt_rivales = [env._puntuacion_historica[i] for i in range(1, 4)]
+        posicion = _calcular_posicion(punt_agente, punt_rivales)
+        posiciones.append(posicion)
+        puntuaciones.append(float(punt_agente))
+        env.close()
+
+    total = num_partidas
+    return {
+        "total": total,
+        "pct_primero": sum(1 for p in posiciones if p == 0) / total,
+        "pct_segundo": sum(1 for p in posiciones if p == 1) / total,
+        "pct_tercero": sum(1 for p in posiciones if p == 2) / total,
+        "pct_cuarto": sum(1 for p in posiciones if p == 3) / total,
+        "pct_top2": sum(1 for p in posiciones if p in (0, 1)) / total,
+        "punt_promedio": float(np.mean(puntuaciones)),
+        "punt_mediana": float(np.median(puntuaciones)),
+    }
 
 
 # ------------------------------------------------------------------

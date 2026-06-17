@@ -526,6 +526,19 @@ def _jugar_match_snapshots(
             seats_extra.append(cand)
             idx_offset += 1
 
+    # --- Detectar obs_dim de los modelos para crear el entorno correcto ---
+    obs_dim = 194  # fallback
+    if not es_bot_a:
+        try:
+            obs_dim = modelo_a.observation_space.shape[0]
+        except Exception:
+            pass
+    elif not es_bot_b:
+        try:
+            obs_dim = modelo_b.observation_space.shape[0]
+        except Exception:
+            pass
+
     # --- Jugar partidas ---
     wins_a = 0
     wins_b = 0
@@ -554,7 +567,8 @@ def _jugar_match_snapshots(
             3: seats_extra[1],
         }
 
-        env = CorazonesEnv(agente_idx=0, politicas_oponentes=politicas)
+        env = CorazonesEnv(
+            agente_idx=0, politicas_oponentes=politicas, obs_dim=obs_dim)
         obs_raw, _ = env.reset(seed=seed)
         obs = normalizar_obs_si_hay_stats(
             obs_raw, vecnorm_a) if not es_bot_a else obs_raw

@@ -6,7 +6,7 @@ Uso:
     python scripts/entrenar.py --total-steps 20000000 --output-dir modelos/v9
     python scripts/entrenar.py --resume modelos/v8/elite/snapshot_XXX --total-steps 25000000
 """
-from train_auto_v6 import main
+from train import main
 import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

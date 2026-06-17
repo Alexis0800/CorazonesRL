@@ -25,6 +25,9 @@ class PoliticaSB3:
     El modelo se carga con MaskablePPO.load() que restaura sus stats de
     VecNormalize. Al llamar predict(), las observaciones se normalizan
     automáticamente usando esas stats.
+
+    Auto-detects obs_dim from the model's observation_space para
+    compatibilidad entre generaciones (194 ↔ 220).
     """
 
     def __init__(
@@ -36,7 +39,13 @@ class PoliticaSB3:
         self.model = model
         self.agente_idx = agente_idx
         self._obs_rms = None
-        self._obs_builder = ObservacionBuilder(dim=194)
+
+        # Auto-detectar dimensión de observación del modelo cargado
+        try:
+            obs_dim = model.observation_space.shape[0]
+        except Exception:
+            obs_dim = 194
+        self._obs_builder = ObservacionBuilder(dim=obs_dim)
 
         if vecnorm_path and os.path.exists(vecnorm_path):
             try:

@@ -66,6 +66,11 @@ class RewardConfig:
     REWARD_QUEMAR_MAXIMA_FORZADA: float = 0.3
     REWARD_QUEMAR_ALTA_SIGUIENDO_PALO: float = 0.5
 
+    # --- Correcciones tácticas (v10, Fase B) ---
+    PENALTY_GANAR_BAZA_TARDIA_SIN_NECESIDAD: float = -2.0
+    REWARD_LIDERAR_Q_DUMP_SEGURO: float = 3.0
+    REWARD_DESCARTAR_CORAZON_BAJO_ROTO: float = 0.5
+
     # --- Umbral de fin de partida ---
     PUNTUACION_MAXIMA: float = 100.0
 
@@ -283,6 +288,90 @@ class CalculadoraRecompensas:
             return 0.0  # era su máxima pica → liderar es correcto
 
         return self.cfg.PENALTY_LIDERAR_PICA_CON_Q_ACTIVA
+
+    def recompensa_ganar_baza_tardia(
+        self,
+        numero_baza: int,
+        puntos_baza: int,
+        palo_salida: int,
+        carta_jugada,  # Carta
+        es_maxima_en_mano: bool,
+    ) -> float:
+        """Penaliza ganar una baza sin puntos en fase tardía con carta alta de palo seguro.
+
+        En bazas ≥9, ganar una baza te fuerza a liderar la siguiente. Si ganas
+        con la máxima de un palo seguro (♣/♦) sin puntos en juego, pierdes la
+        oportunidad de ceder el lead y quedas expuesto a recibir puntos después.
+
+        Returns:
+            PENALTY_GANAR_BAZA_TARDIA_SIN_NECESIDAD si aplica, 0.0 si no.
+        """
+        if numero_baza < 9:
+            return 0.0
+        if puntos_baza != 0:
+            return 0.0  # ya hay otras penalizaciones por ganar con puntos
+        if palo_salida not in (0, 1):  # solo ♣/♦ son palos seguros
+            return 0.0
+        if not es_maxima_en_mano:
+            return 0.0
+        if carta_jugada.valor < 13:  # debe ser A o K
+            return 0.0
+        return self.cfg.PENALTY_GANAR_BAZA_TARDIA_SIN_NECESIDAD
+
+    def recompensa_liderar_q_dump(
+        self,
+        numero_baza: int,
+        carta_jugada,  # Carta
+        es_maxima_en_picas: bool,
+        hay_altas_en_circulacion: bool,
+    ) -> float:
+        """Recompensa liderar Q♠ como dump estratégico en bazas tardías.
+
+        Condiciones:
+        - Baza ≥7 (fase media-tardía)
+        - La carta es Q♠
+        - NO soy máxima en picas (si lo soy, liderar Q♠ = auto-13pts)
+        - K♠/A♠ aún en circulación (alguien las tiene y cubrirá Q♠)
+
+        Returns:
+            REWARD_LIDERAR_Q_DUMP_SEGURO si aplica, 0.0 si no.
+        """
+        if numero_baza < 7:
+            return 0.0
+        if not carta_jugada.es_dama_de_picas:
+            return 0.0
+        if es_maxima_en_picas:
+            return 0.0  # auto-13pts, no es seguro
+        if not hay_altas_en_circulacion:
+            return 0.0  # sin cobertura, Q♠ queda expuesta
+        return self.cfg.REWARD_LIDERAR_Q_DUMP_SEGURO
+
+    def recompensa_descartar_corazon_bajo(
+        self,
+        corazones_rotos: bool,
+        carta_descartada,  # Carta
+        es_descarte: bool,
+        puntos_baza: int,
+    ) -> float:
+        """Recompensa descartar un corazón en baza limpia cuando los corazones están rotos.
+
+        Con corazones rotos, cualquier corazón es un liability: un rival puede
+        liderar corazones y forzarte a ganar una baza con puntos. Descartarlos
+        en bazas limpias (sin puntos) elimina ese riesgo.
+
+        Returns:
+            REWARD_DESCARTAR_CORAZON_BAJO_ROTO si aplica, 0.0 si no.
+        """
+        if not corazones_rotos:
+            return 0.0
+        if not es_descarte:
+            # solo aplica cuando es descarte (void en palo de salida)
+            return 0.0
+        if puntos_baza != 0:
+            return 0.0  # no descartar corazones en bazas con puntos
+        if not carta_descartada.es_corazon:
+            return 0.0
+        return self.cfg.REWARD_DESCARTAR_CORAZON_BAJO_ROTO
 
     def recompensa_fin_partida(
         self, agente_idx: int, puntuacion_historica: List[int]

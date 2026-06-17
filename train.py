@@ -12,14 +12,14 @@ Ejecuta un ciclo completo de entrenamiento con:
 
 Uso:
     # Desde cero
-    python train_auto_v6.py --total-steps 20000000 --output-dir modelos/v8
+    python train.py --total-steps 20000000 --output-dir modelos/v8
 
     # Reanudar desde golden
-    python train_auto_v6.py --resume modelos/v7_golden/snapshots/snapshot_0014900000 --total-steps 25000000 --output-dir modelos/v7_cont
+    python train.py --resume modelos/v7_golden/snapshots/snapshot_0014900000 --total-steps 25000000 --output-dir modelos/v7_cont
 
     # Con GPU Intel Arc
     pip install torch-directml
-    python train_auto_v6.py --total-steps 20000000 --device dml --output-dir modelos/v8
+    python train.py --total-steps 20000000 --device dml --output-dir modelos/v8
 """
 
 from __future__ import annotations
@@ -189,7 +189,7 @@ def lanzar_torneo_elo(
         Objeto Popen del proceso, o None si falló.
     """
     cmd = [
-        sys.executable, "-m", "src.elo_torneo",
+        sys.executable, "-m", "src.torneo.elo",
         "--directorio", directorio,
         "--partidas", str(partidas),
         "--min-paso", str(min_paso),
@@ -309,6 +309,8 @@ def entrenar_auto(
     best_top: int = BEST_TOP,
     obs_dim: int = 220,
     bc_pretrain: Optional[str] = None,
+    eval_experto: bool = False,
+    eval_experto_partidas: int = 30,
 ) -> int:
     """Ejecuta entrenamiento autónomo completo desde cero o reanudando.
 
@@ -426,7 +428,7 @@ def entrenar_auto(
         )
 
         # Crear modelo desde cero (o inicializar desde BC preentrenado)
-        hp = obtener_hiperparametros_v3(DIRECTORIO_LOGS, device, 0)
+        hp = obtener_hiperparametros_v3(DIRECTORIO_LOGS, device, 0, total_steps)
         policy_kwargs = hp.pop(
             "policy_kwargs", None) or obtener_policy_kwargs()
         fase_label = hp.pop("_fase", "?")
@@ -486,7 +488,7 @@ def entrenar_auto(
         pb = prob_bot_actual(paso_actual, total_steps,
                              prob_bot_start, prob_bot_end)
         hp_actual = obtener_hiperparametros_v3(
-            DIRECTORIO_LOGS, device, paso_actual)
+            DIRECTORIO_LOGS, device, paso_actual, total_steps)
         nueva_fase = hp_actual.pop("_fase", "?")
         hp_actual.pop("policy", None)
         hp_actual.pop("policy_kwargs", None)
@@ -569,7 +571,37 @@ def entrenar_auto(
                 print(f"  📈 WR={wr:.1%} | AvgScore={avg_s:.1f}")
             except Exception as e:
                 print(f"  ⚠️  Error en evaluación: {e}")
-
+            # Evaluación contra 3× BotExperto
+            if eval_experto:
+                print(
+                    f"  🤖 Evaluando vs 3× BotExperto ({eval_experto_partidas} partidas)...")
+                try:
+                    from src.torneo.evaluacion import evaluar_vs_experto
+                    res_exp = evaluar_vs_experto(
+                        ruta_snapshot=ruta,
+                        num_partidas=eval_experto_partidas,
+                    )
+                    wr_exp = res_exp["pct_primero"]
+                    top2_exp = res_exp["pct_top2"]
+                    cuarto_exp = res_exp["pct_cuarto"]
+                    avg_exp = res_exp["punt_promedio"]
+                    print(
+                        f"  🤖 vsExperto: WR={wr_exp:.1%} | Top2={top2_exp:.1%} | 4º={cuarto_exp:.1%} | Avg={avg_exp:.1f}")
+                    # Guardar en el mismo eval_log.jsonl
+                    entry_exp = {
+                        "timestamp": datetime.now().isoformat(),
+                        "paso": paso_actual,
+                        "snapshot": nombre,
+                        "win_rate_experto": round(wr_exp, 4),
+                        "top2_experto": round(top2_exp, 4),
+                        "pct_cuarto_experto": round(cuarto_exp, 4),
+                        "avg_score_experto": round(avg_exp, 2),
+                        "num_partidas_experto": eval_experto_partidas,
+                    }
+                    with open(eval_log_path, "a", encoding="utf-8") as f:
+                        f.write(json.dumps(entry_exp) + "\n")
+                except Exception as e:
+                    print(f"  ⚠️  Error en eval vs Experto: {e}")
         # Torneo ELO periódico
         if elo_every > 0 and snapshot_count % elo_every == 0:
             min_paso_elo = max(
@@ -674,12 +706,16 @@ def main() -> None:
                         help="Directorio de salida para snapshots (default: modelos/v6)")
     parser.add_argument("--best-top", type=int, default=BEST_TOP,
                         help=f"Guardar los N mejores snapshots tras cada torneo Elo (default: {BEST_TOP})")
-    parser.add_argument("--obs-dim", type=int, default=194, choices=[194, 220],
-                        help="Dimensión del vector de observación (default: 194)")
+    parser.add_argument("--obs-dim", type=int, default=220, choices=[194, 220],
+                        help="Dimensión del vector de observación (default: 220)")
     parser.add_argument("--prob-experto", type=float, default=0.0,
                         help="Probabilidad de usar BotExperto como oponente (default: 0.0)")
     parser.add_argument("--bc-pretrain", type=str, default=None,
                         help="Ruta al modelo BC preentrenado .zip para inicializar pesos")
+    parser.add_argument("--eval-experto", action="store_true", default=False,
+                        help="Evaluar también contra 3× BotExperto en cada evaluación")
+    parser.add_argument("--eval-experto-partidas", type=int, default=30,
+                        help="Partidas contra 3× BotExperto (default: 30)")
     args = parser.parse_args()
 
     paso_final = entrenar_auto(
@@ -698,6 +734,8 @@ def main() -> None:
         best_top=args.best_top,
         obs_dim=args.obs_dim,
         bc_pretrain=args.bc_pretrain,
+        eval_experto=args.eval_experto,
+        eval_experto_partidas=args.eval_experto_partidas,
     )
     print(f"\nPaso final alcanzado: {paso_final:,}")
 

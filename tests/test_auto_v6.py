@@ -1,5 +1,5 @@
 """
-Pruebas unitarias para train_auto_v6.py: entrenamiento autónomo.
+Pruebas unitarias para train.py: entrenamiento autónomo.
 
 Cubre:
   - Decaimiento progresivo de prob_bot
