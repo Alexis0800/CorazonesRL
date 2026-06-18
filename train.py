@@ -166,6 +166,88 @@ def log_eval(
 
 
 # ------------------------------------------------------------------
+# Diagnóstico automático de entrenamiento
+# ------------------------------------------------------------------
+
+def _capturar_diagnosticos(modelo) -> Dict[str, float]:
+    """Extrae métricas de diagnóstico del logger interno de SB3.
+
+    Captura las métricas con prefijo 'train/' que SB3 registra
+    durante learn(). Útil para detectar colapso de política,
+    divergencia de value function, o exploding KL.
+
+    Args:
+        modelo: Instancia de MaskablePPO tras una llamada a learn().
+
+    Returns:
+        Diccionario {metrica_sin_prefijo: valor} con las métricas
+        relevantes, o dict vacío si el logger no tiene datos.
+    """
+    try:
+        raw = modelo.logger.name_to_value
+    except (AttributeError, TypeError):
+        return {}
+
+    if not raw:
+        return {}
+
+    diagnosticas = {}
+    for key, value in raw.items():
+        if key.startswith("train/"):
+            nombre = key.replace("train/", "")
+            diagnosticas[nombre] = round(float(value), 6)
+    return diagnosticas
+
+
+def _alertas_diagnostico(diag: Dict[str, float]) -> list:
+    """Genera alertas textuales si alguna métrica cruza umbrales peligrosos.
+
+    Umbrales calibrados para Corazones con PPO + VecNormalize:
+        - entropy_loss < -0.5: política colapsando (determinística extrema).
+        - approx_kl > 0.03: cambio de política demasiado brusco.
+        - clip_fraction > 0.5: >50% de updates están siendo clipados.
+        - value_loss > 10.0: value function divergiendo.
+
+    Args:
+        diag: Diccionario de métricas de _capturar_diagnosticos.
+
+    Returns:
+        Lista de strings con alertas (vacía si todo está bien).
+    """
+    alertas = []
+
+    entropy = diag.get("entropy_loss")
+    if entropy is not None and entropy < -0.5:
+        alertas.append(
+            f"⚠️  COLAPSO DE ENTROPÍA: entropy_loss={entropy:.4f} (< -0.5). "
+            f"La política es sobredeterminística."
+        )
+
+    kl = diag.get("approx_kl")
+    if kl is not None and kl > 0.03:
+        alertas.append(
+            f"⚠️  KL DIVERGENTE: approx_kl={kl:.4f} (> 0.03). "
+            f"La política está cambiando demasiado rápido."
+        )
+
+    clip = diag.get("clip_fraction")
+    if clip is not None and clip > 0.5:
+        alertas.append(
+            f"⚠️  CLIP SATURADO: clip_fraction={clip:.4f} (> 0.5). "
+            f"Más del 50% de updates están siendo recortados."
+        )
+
+    v_loss = diag.get("value_loss")
+    if v_loss is not None and v_loss > 10.0:
+        alertas.append(
+            f"⚠️  VALUE LOSS ALTO: value_loss={v_loss:.2f} (> 10.0). "
+            f"La value function puede estar divergiendo."
+        )
+
+    return alertas
+
+
+# ------------------------------------------------------------------
 # Torneo ELO asíncrono
 # ------------------------------------------------------------------
 
@@ -548,6 +630,27 @@ def entrenar_auto(
         )
         paso_actual += bloque
         snapshot_count += 1
+
+        # --- Diagnóstico automático (v13): capturar métricas internas de SB3 ---
+        diag = _capturar_diagnosticos(modelo)
+        alertas = _alertas_diagnostico(diag)
+        if alertas:
+            for a in alertas:
+                print(f"  {a}")
+        if diag:
+            diag_entry = {
+                "timestamp": datetime.now().isoformat(),
+                "paso": paso_actual,
+                "tipo": "diagnostico",
+                **diag,
+            }
+            with open(eval_log_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(diag_entry) + "\n")
+            # Mostrar las 3 métricas más importantes en consola
+            ent = diag.get("entropy_loss", "?")
+            kl = diag.get("approx_kl", "?")
+            vf = diag.get("value_loss", "?")
+            print(f"  [Diag] entropy={ent} | kl={kl} | v_loss={vf}")
 
         # Guardar snapshot
         venv.save(vecnorm_path)
