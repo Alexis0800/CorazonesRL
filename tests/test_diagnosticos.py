@@ -106,18 +106,30 @@ class TestCapturarDiagnosticos:
 class TestAlertasDiagnostico:
     """Verifica el sistema de alertas automáticas."""
 
-    def test_alerta_entropy_muy_negativa(self):
-        """entropy_loss < -0.5 debe generar alerta."""
+    def test_alerta_entropy_colapso_real(self):
+        """entropy_loss > -0.15 (entropía < 0.15) debe generar alerta.
+        Con action masking (~7 acciones efectivas), entropía < 0.15
+        significa < 8% del máximo → colapso real."""
         from train import _alertas_diagnostico
-        alertas = _alertas_diagnostico({"entropy_loss": -0.63})
+        alertas = _alertas_diagnostico({"entropy_loss": -0.12})
         assert len(alertas) >= 1
         assert any("entropía" in a.lower() for a in alertas)
 
-    def test_no_alerta_entropy_normal(self):
-        """entropy_loss > -0.3 no debe generar alerta."""
+    def test_no_alerta_entropy_normal_masked(self):
+        """entropy_loss = -1.0 NO debe generar alerta.
+        Con action masking (~7 acciones legales), entropía = 1.0
+        es ~50% del máximo → exploración saludable."""
         from train import _alertas_diagnostico
-        alertas = _alertas_diagnostico({"entropy_loss": -0.25})
-        assert len(alertas) == 0
+        alertas = _alertas_diagnostico({"entropy_loss": -1.0})
+        assert len(alertas) == 0, \
+            f"entropy_loss=-1.0 es normal con action masking, no debe alertar"
+
+    def test_no_alerta_entropy_moderada(self):
+        """entropy_loss = -0.5 (entropía = 0.5) no debe generar alerta."""
+        from train import _alertas_diagnostico
+        alertas = _alertas_diagnostico({"entropy_loss": -0.5})
+        assert len(alertas) == 0, \
+            "entropy_loss=-0.5 es moderado con action masking, no debe alertar"
 
     def test_alerta_approx_kl_alto(self):
         """approx_kl > 0.03 debe generar alerta."""
@@ -143,7 +155,7 @@ class TestAlertasDiagnostico:
         """Todas las métricas en rangos normales no generan alertas."""
         from train import _alertas_diagnostico
         alertas = _alertas_diagnostico({
-            "entropy_loss": -0.2,
+            "entropy_loss": -1.0,   # normal con action masking
             "approx_kl": 0.01,
             "clip_fraction": 0.1,
             "value_loss": 1.5,

@@ -202,8 +202,10 @@ def _capturar_diagnosticos(modelo) -> Dict[str, float]:
 def _alertas_diagnostico(diag: Dict[str, float]) -> list:
     """Genera alertas textuales si alguna métrica cruza umbrales peligrosos.
 
-    Umbrales calibrados para Corazones con PPO + VecNormalize:
-        - entropy_loss < -0.5: política colapsando (determinística extrema).
+    Umbrales calibrados para Corazones con PPO + action masking:
+        - entropy_loss > -0.15: colapso real de entropía.
+          Con ~7 acciones legales típicas, entropía < 0.15 = < 8% del máximo.
+          entropy_loss = -1.0 es NORMAL (50% del máximo con masking).
         - approx_kl > 0.03: cambio de política demasiado brusco.
         - clip_fraction > 0.5: >50% de updates están siendo clipados.
         - value_loss > 10.0: value function divergiendo.
@@ -217,10 +219,10 @@ def _alertas_diagnostico(diag: Dict[str, float]) -> list:
     alertas = []
 
     entropy = diag.get("entropy_loss")
-    if entropy is not None and entropy < -0.5:
+    if entropy is not None and entropy > -0.15:
         alertas.append(
-            f"⚠️  COLAPSO DE ENTROPÍA: entropy_loss={entropy:.4f} (< -0.5). "
-            f"La política es sobredeterminística."
+            f"⚠️  COLAPSO DE ENTROPÍA: entropy_loss={entropy:.4f} (> -0.15). "
+            f"La política es sobredeterminística (entropía < 0.15 con action masking)."
         )
 
     kl = diag.get("approx_kl")
