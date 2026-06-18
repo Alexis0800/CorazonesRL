@@ -17,6 +17,7 @@ from unittest.mock import MagicMock
 
 class _FakeLogger:
     """Simula el logger de SB3."""
+
     def __init__(self, values=None):
         self.name_to_value = values or {}
 
