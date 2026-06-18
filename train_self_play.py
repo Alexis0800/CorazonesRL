@@ -254,21 +254,15 @@ def obtener_hiperparametros_v3(
 ) -> Dict:
     """Hiperparámetros PPO con learning rate schedule lineal.
 
-    v15 — ent_coef domina el gradiente de política para prevenir colapso:
-        Inicio (0%):  lr=3e-4, ent=0.50, clip=0.20, epochs=3, batch=1024, kl=0.06
-        Mitad (50%):  lr=2e-4, ent=0.375, clip=0.175, epochs=2
-        Final (100%): lr=1e-4, ent=0.25, clip=0.15, epochs=2, batch=1024
+    v16 — balance entre exploración (v15) y velocidad (v13):
+        Inicio (0%):  lr=3e-4, ent=0.30, clip=0.20, epochs=4, batch=512, kl=0.05
+        Mitad (50%):  lr=2e-4, ent=0.21, clip=0.175, epochs=3
+        Final (100%): lr=1e-4, ent=0.12, clip=0.15, epochs=3, batch=512
 
-    Cambios respecto a v14:
-        - ent_coef: 0.18→0.10 → 0.50→0.25 (3× más fuerte, domina pg_loss).
-        - n_epochs: 5→3 → 3→2 (menos overfitting por rollout).
-        - batch_size: 512 → 1024 (gradientes más estables).
-        - target_kl: 0.04 → 0.06 (más permisivo en fase 1).
-
-    El ent_coef=0.50 es crítico: con 52 acciones discretas y recompensas
-    densas que generan swings de ventaja de ±13.0, el gradiente de política
-    domina al bonus de entropía si ent_coef < ~0.40. Con 0.50, la entropía
-    se mantiene > 2.0 durante la fase de exploración.
+    Cambios respecto a v15:
+        - ent_coef: 0.50→0.25 → 0.30→0.12 (gradiente ×2.5 más fuerte que v15).
+        - n_epochs: 3→2 → 4→3 (más learning por rollout).
+        - batch_size: 1024 → 512 (mini-batches más pequeños, más updates).
 
     Args:
         logdir: Directorio para logs de TensorBoard.
@@ -281,15 +275,15 @@ def obtener_hiperparametros_v3(
     """
     progreso = min(paso_actual / total_pasos, 1.0)
 
-    # v15: lr suave para red grande
+    # v16: lr suave para red grande
     lr = 3e-4 + (1e-4 - 3e-4) * progreso
-    # v15: ent_coef muy alto para dominar pg_loss desde update #1
-    ent = 0.50 + (0.25 - 0.50) * progreso
-    # v15: clip amplio
+    # v16: ent_coef balanceado (más fuerte que v13, más débil que v15)
+    ent = 0.30 + (0.12 - 0.30) * progreso
+    # v16: clip amplio
     clip = 0.20 + (0.15 - 0.20) * progreso
-    # v15: menos épocas, batch más grande
-    epochs = int(3 + (2 - 3) * progreso)
-    # v15: grad_norm fijo
+    # v16: épocas moderadas
+    epochs = int(4 + (3 - 4) * progreso)
+    # v16: grad_norm fijo
     grad_norm = 0.8
 
     if progreso < 0.25:
@@ -304,7 +298,7 @@ def obtener_hiperparametros_v3(
         "policy": "MlpPolicy",
         "learning_rate": lr,
         "n_steps": 4096,
-        "batch_size": 1024,      # v15: más estable para red grande
+        "batch_size": 512,       # v16: balance tamaño/gradientes
         "n_epochs": epochs,
         "gamma": 0.995,
         "gae_lambda": 0.98,
@@ -313,7 +307,7 @@ def obtener_hiperparametros_v3(
         "ent_coef": ent,
         "vf_coef": 1.0,
         "max_grad_norm": grad_norm,
-        "target_kl": 0.06,       # v15: muy permisivo en fase 1
+        "target_kl": 0.05,       # v16: intermedio
         "policy_kwargs": policy_kwargs,
         "verbose": 1,
         "device": device,

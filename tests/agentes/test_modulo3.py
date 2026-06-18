@@ -735,80 +735,38 @@ class TestDirectoriosV6:
 
 
 # ============================================================
-# Pruebas de hiperparámetros v15 (ent_coef dominante: 0.50→0.25)
+# Pruebas de hiperparámetros v16 (balance exploración/velocidad)
 # ============================================================
 
-class TestHiperparametrosV15:
-    """Verifica que los hiperparámetros v15 tienen ent_coef suficientemente
-    alto (0.50→0.25) para dominar el gradiente de política desde el primer
-    update, previniendo el colapso inmediato de entropía."""
+class TestHiperparametrosV16:
+    """v16: ent_coef 0.30→0.12, balance entre v13 (colapso) y v15 (lento)."""
 
-    def test_ent_coef_start_muy_alto(self):
-        """ent_coef inicial debe ser ≥ 0.50 para dominar gradientes."""
+    def test_ent_coef_start(self):
         import importlib
         ts = importlib.import_module("train_self_play")
         hp = ts.obtener_hiperparametros_v3("/tmp", "cpu", 0, 20_000_000)
-        assert hp["ent_coef"] >= 0.50, \
-            f"ent_coef inicial debe ser ≥ 0.50 (v15), es {hp['ent_coef']}"
+        assert hp["ent_coef"] == pytest.approx(0.30, rel=0.01)
 
-    def test_ent_coef_floor_alto(self):
-        """ent_coef final debe ser ≥ 0.25 (exploración moderada)."""
+    def test_ent_coef_floor(self):
         import importlib
         ts = importlib.import_module("train_self_play")
-        hp = ts.obtener_hiperparametros_v3(
-            "/tmp", "cpu", 20_000_000, 20_000_000)
-        assert hp["ent_coef"] >= 0.25, \
-            f"ent_coef final debe ser ≥ 0.25, es {hp['ent_coef']}"
+        hp = ts.obtener_hiperparametros_v3("/tmp", "cpu", 20_000_000, 20_000_000)
+        assert hp["ent_coef"] == pytest.approx(0.12, rel=0.01)
 
-    def test_n_epochs_reducido(self):
-        """n_epochs inicial debe ser ≤ 3 (menos overfitting)."""
+    def test_n_epochs(self):
         import importlib
         ts = importlib.import_module("train_self_play")
         hp = ts.obtener_hiperparametros_v3("/tmp", "cpu", 0, 20_000_000)
-        assert hp["n_epochs"] <= 3, \
-            f"n_epochs inicial debe ser ≤ 3, es {hp['n_epochs']}"
+        assert hp["n_epochs"] == 4
 
-    def test_batch_size_aumentado(self):
-        """batch_size debe ser ≥ 1024 para gradientes más estables."""
+    def test_batch_size(self):
         import importlib
         ts = importlib.import_module("train_self_play")
         hp = ts.obtener_hiperparametros_v3("/tmp", "cpu", 0, 20_000_000)
-        assert hp["batch_size"] >= 1024, \
-            f"batch_size debe ser ≥ 1024, es {hp['batch_size']}"
+        assert hp["batch_size"] == 512
 
-    def test_target_kl_relajado(self):
-        """target_kl debe ser ≥ 0.06 para evitar early stopping."""
+    def test_target_kl(self):
         import importlib
         ts = importlib.import_module("train_self_play")
         hp = ts.obtener_hiperparametros_v3("/tmp", "cpu", 0, 20_000_000)
-        assert hp["target_kl"] >= 0.06, \
-            f"target_kl debe ser ≥ 0.06, es {hp['target_kl']}"
-
-    def test_fase_1_v15(self):
-        """Fase 1 (0%): lr=3e-4, ent=0.50, clip=0.20, epochs=3, batch=1024."""
-        import importlib
-        ts = importlib.import_module("train_self_play")
-        hp = ts.obtener_hiperparametros_v3("/tmp", "cpu", 0, 20_000_000)
-        assert hp["learning_rate"] == pytest.approx(3e-4, rel=0.01)
-        assert hp["ent_coef"] == pytest.approx(0.50, rel=0.01)
-        assert hp["n_epochs"] == 3
-        assert hp["batch_size"] == 1024
-
-    def test_fase_2_v15(self):
-        """Fase 2 (50%): lr=2e-4, ent=0.375."""
-        import importlib
-        ts = importlib.import_module("train_self_play")
-        hp = ts.obtener_hiperparametros_v3(
-            "/tmp", "cpu", 10_000_000, 20_000_000)
-        assert hp["learning_rate"] == pytest.approx(2e-4, rel=0.01)
-        assert hp["ent_coef"] == pytest.approx(0.375, rel=0.01)
-
-    def test_fase_3_v15(self):
-        """Fase 3 (100%): lr=1e-4, ent=0.25, epochs=2."""
-        import importlib
-        ts = importlib.import_module("train_self_play")
-        hp = ts.obtener_hiperparametros_v3(
-            "/tmp", "cpu", 20_000_000, 20_000_000)
-        assert hp["learning_rate"] == pytest.approx(1e-4, rel=0.01)
-        assert hp["ent_coef"] == pytest.approx(0.25, rel=0.01)
-        assert hp["n_epochs"] == 2
+        assert hp["target_kl"] == pytest.approx(0.05, rel=0.01)
