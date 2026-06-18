@@ -76,7 +76,8 @@ class TestRewardCorazonPozo:
 
         # Verificar precondiciones
         assert not env.motor.corazones_rotos, "corazones no deben estar rotos"
-        assert sum(1 for c in mano_pozo if c.es_corazon) >= 6, "debe tener ≥6 corazones"
+        assert sum(
+            1 for c in mano_pozo if c.es_corazon) >= 6, "debe tener ≥6 corazones"
         altos = sum(1 for c in mano_pozo if c.es_corazon and c.valor >= 11)
         assert altos >= 3, f"debe tener ≥3 corazones altos, tiene {altos}"
         assert env._puntuacion_historica[0] < 80, "puntaje debe ser <80"
@@ -122,7 +123,8 @@ class TestRewardDamaPicas:
     def test_q_spades_menor_que_perder_mano_con_10_pts(self):
         """Q♠ (-6.0) debe ser comparable a perder una mano con 10 puntos (~-3.0)."""
         q_penalty = abs(CorazonesEnv.REWARD_DAMA_PICAS)
-        perder_mano = abs(CorazonesEnv.REWARD_PERDER_MANO) + abs(CorazonesEnv.REWARD_POR_PUNTO_EN_MANO * 10)
+        perder_mano = abs(CorazonesEnv.REWARD_PERDER_MANO) + \
+            abs(CorazonesEnv.REWARD_POR_PUNTO_EN_MANO * 10)
         # Q♠ no debe ser más de 3× peor que perder una mano completa
         assert q_penalty <= perder_mano * 3.0, \
             f"Q♠ penalty ({q_penalty}) es desproporcionado vs perder mano ({perder_mano})"

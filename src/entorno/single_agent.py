@@ -39,9 +39,11 @@ class CorazonesEnv(gym.Env):
     # ------------------------------------------------------------------
     # Recompensas por evento (casting de cartas)
     REWARD_CORAZON: float = -1.0
-    REWARD_DAMA_PICAS: float = -6.0          # v12: reducido -10.0→-6.0 (balancear aversión)
+    # v12: reducido -10.0→-6.0 (balancear aversión)
+    REWARD_DAMA_PICAS: float = -6.0
     REWARD_SHOOTING_MOON: float = 50.0
-    REWARD_CORAZON_POZO: float = 1.5         # v12: positivo cuando _pozo_viable() es True
+    # v12: positivo cuando _pozo_viable() es True
+    REWARD_CORAZON_POZO: float = 1.5
     # Recompensa final: ganar la partida es lo más importante (5x refuerzo)
     REWARD_PRIMERO: float = 500.0
     REWARD_SEGUNDO: float = 200.0
@@ -51,7 +53,8 @@ class CorazonesEnv(gym.Env):
     # Recompensas densas (reward shaping): señales sutiles, no dominantes
     REWARD_NO_GANAR_BAZA_CON_PUNTOS: float = 0.3
     REWARD_DESCARTAR_CORAZON_SEGURO: float = 0.2
-    REWARD_DESCARTAR_DAMA_SEGURO: float = 2.0     # v12: reducido 8.0→2.0 (evitar reward hacking)
+    # v12: reducido 8.0→2.0 (evitar reward hacking)
+    REWARD_DESCARTAR_DAMA_SEGURO: float = 2.0
     REWARD_GANAR_BAZA_SIN_PUNTOS: float = -0.1
     REWARD_PERDER_MANO: float = -2.0
     REWARD_GANAR_MANO: float = 2.0
@@ -64,7 +67,8 @@ class CorazonesEnv(gym.Env):
     # --- RECOMPENSAS v9-v10: correcciones tácticas (v12: magnitudes reducidas) ---
     PENALTY_LIDERAR_PICA_CON_Q_ACTIVA: float = -2.0     # v12: -1.0→-2.0
     REWARD_QUEMAR_MAXIMA_PALO_SEGURO: float = 1.0       # v12: 0.5→1.0
-    PENALTY_LIDERAR_Q_EQUIVOCADO: float = -6.0          # v12: -3.0→-6.0 (penalty > reward de dump)
+    # v12: -3.0→-6.0 (penalty > reward de dump)
+    PENALTY_LIDERAR_Q_EQUIVOCADO: float = -6.0
     REWARD_DUMP_Q_SIGUIENDO_PICAS: float = 1.0         # v12: 2.0→1.0
     PENALTY_GANAR_BAZA_CON_PUNTOS_EVITABLE: float = -2.0  # v12: -3.0→-2.0
     REWARD_DESCARTAR_K_A_PICAS_CON_Q_ACTIVA: float = 1.0  # v12: 2.0→1.0
