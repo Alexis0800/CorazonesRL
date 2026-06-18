@@ -755,7 +755,8 @@ class TestHiperparametrosV14:
         """ent_coef final debe ser ≥ 0.10 (piso seguro para red grande)."""
         import importlib
         ts = importlib.import_module("train_self_play")
-        hp = ts.obtener_hiperparametros_v3("/tmp", "cpu", 20_000_000, 20_000_000)
+        hp = ts.obtener_hiperparametros_v3(
+            "/tmp", "cpu", 20_000_000, 20_000_000)
         assert hp["ent_coef"] >= 0.10, \
             f"ent_coef final debe ser ≥ 0.10, es {hp['ent_coef']}"
 
@@ -805,7 +806,8 @@ class TestHiperparametrosV14:
         """Fase 2 (50% progreso): lr=2e-4, ent=0.14, clip=0.175."""
         import importlib
         ts = importlib.import_module("train_self_play")
-        hp = ts.obtener_hiperparametros_v3("/tmp", "cpu", 10_000_000, 20_000_000)
+        hp = ts.obtener_hiperparametros_v3(
+            "/tmp", "cpu", 10_000_000, 20_000_000)
         assert hp["learning_rate"] == pytest.approx(2e-4, rel=0.01)
         assert hp["ent_coef"] == pytest.approx(0.14, rel=0.01)
         assert hp["clip_range"] == pytest.approx(0.175, rel=0.01)
@@ -814,7 +816,8 @@ class TestHiperparametrosV14:
         """Fase 3 (100% progreso): lr=1e-4, ent=0.10, clip=0.15, epochs=3."""
         import importlib
         ts = importlib.import_module("train_self_play")
-        hp = ts.obtener_hiperparametros_v3("/tmp", "cpu", 20_000_000, 20_000_000)
+        hp = ts.obtener_hiperparametros_v3(
+            "/tmp", "cpu", 20_000_000, 20_000_000)
         assert hp["learning_rate"] == pytest.approx(1e-4, rel=0.01)
         assert hp["ent_coef"] == pytest.approx(0.10, rel=0.01)
         assert hp["clip_range"] == pytest.approx(0.15, rel=0.01)
