@@ -55,8 +55,47 @@ class PoliticaSB3:
             except Exception:
                 self._obs_rms = None
 
-    def __call__(self, motor, jugador_idx: int, legales: List[Carta]) -> Carta:
-        obs = self._obs_builder.construir_desde_motor(motor, jugador_idx)
+    def _pad_or_truncate(self, obs: np.ndarray) -> np.ndarray:
+        """Ajusta observación al dim esperado por el modelo (padding o truncado).
+
+        Útil para compatibilidad entre generaciones (194↔220).
+        """
+        target = self._obs_builder.dim
+        if len(obs) == target:
+            return obs
+        if len(obs) < target:
+            padded = np.zeros(target, dtype=np.float32)
+            padded[:len(obs)] = obs
+            return padded
+        return obs[:target].astype(np.float32)
+
+    def __call__(
+        self,
+        motor,
+        jugador_idx: int,
+        legales: List[Carta],
+        obs: Optional[np.ndarray] = None,
+    ) -> Carta:
+        """Elige una carta usando la política RL.
+
+        Args:
+            motor: Instancia de MotorCorazones.
+            jugador_idx: Índice del jugador (0-3).
+            legales: Lista de cartas legales.
+            obs: Observación pre-construida (v12: oponentes reciben full obs).
+                 Si es None, se construye desde el motor (compatibilidad).
+
+        Returns:
+            Carta elegida.
+        """
+        if obs is None:
+            obs = self._obs_builder.construir_desde_motor(motor, jugador_idx)
+        else:
+            # Asegurar dtype y shape
+            obs = np.asarray(obs, dtype=np.float32)
+            if len(obs) != self._obs_builder.dim:
+                # Padding o truncado para compatibilidad entre generaciones
+                obs = self._pad_or_truncate(obs)
 
         if self._obs_rms is not None:
             mean = np.array(self._obs_rms.mean)

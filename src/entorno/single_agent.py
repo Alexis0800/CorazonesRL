@@ -48,46 +48,33 @@ class CorazonesEnv(gym.Env):
     REWARD_CUARTO: float = -500.0
 
     # Recompensas densas (reward shaping): señales sutiles, no dominantes
-    REWARD_NO_GANAR_BAZA_CON_PUNTOS: float = 0.5
-    REWARD_DESCARTAR_CORAZON_SEGURO: float = 0.3
-    REWARD_DESCARTAR_DAMA_SEGURO: float = 8.0
-    REWARD_GANAR_BAZA_SIN_PUNTOS: float = -0.15
+    REWARD_NO_GANAR_BAZA_CON_PUNTOS: float = 0.3
+    REWARD_DESCARTAR_CORAZON_SEGURO: float = 0.2
+    REWARD_DESCARTAR_DAMA_SEGURO: float = 2.0     # v12: reducido 8.0→2.0 (evitar reward hacking)
+    REWARD_GANAR_BAZA_SIN_PUNTOS: float = -0.1
     REWARD_PERDER_MANO: float = -2.0
     REWARD_GANAR_MANO: float = 2.0
 
     # --- NUEVAS RECOMPENSAS v5: correcciones estratégicas ---
-    # Penalización: ganar baza con Q♠ cuando el pozo NO es viable
-    REWARD_Q_SPADES_SIN_POZO: float = -8.0
-    # Penalización: ganar baza con corazones cuando el modo es MINIMIZAR
-    REWARD_GANAR_BAZA_CON_CORAZON: float = -3.0
-    # Penalización suave por punto acumulado en la mano
-    REWARD_POR_PUNTO_EN_MANO: float = -0.2
+    REWARD_Q_SPADES_SIN_POZO: float = -5.0         # v12: reducido -8.0→-5.0
+    REWARD_GANAR_BAZA_CON_CORAZON: float = -2.0    # v12: reducido -3.0→-2.0
+    REWARD_POR_PUNTO_EN_MANO: float = -0.1         # v12: reducido -0.2→-0.1
 
-    # --- NUEVAS RECOMPENSAS v9: correcciones tácticas ---
-    # Penalización: liderar pica (no Q♠) con Q♠ activa, sin ser última posición
-    # Recompensa: liderar la máxima de palo seguro (♣/♦)
-    PENALTY_LIDERAR_PICA_CON_Q_ACTIVA: float = -1.0
-    REWARD_QUEMAR_MAXIMA_PALO_SEGURO: float = 0.5
-    # Penalización: liderar Q♠ en mal momento (temprano o siendo máxima en picas)
-    PENALTY_LIDERAR_Q_EQUIVOCADO: float = -3.0
-    # Recompensa: soltar Q♠ siguiendo picas (dump seguro)
-    REWARD_DUMP_Q_SIGUIENDO_PICAS: float = 2.0
-    # Penalización: ganar baza con puntos teniendo alternativa perdedora
-    PENALTY_GANAR_BAZA_CON_PUNTOS_EVITABLE: float = -3.0
-    # Recompensa: descartar K♠/A♠ en baza limpia con Q♠ activa
-    REWARD_DESCARTAR_K_A_PICAS_CON_Q_ACTIVA: float = 2.0
-    # Recompensa: quemar la máxima cuando forzado a ganar siguiendo palo
-    REWARD_QUEMAR_MAXIMA_FORZADA: float = 0.3
-    # Recompensa: quemar alta (A/K) siguiendo palo en baza limpia
-    REWARD_QUEMAR_ALTA_SIGUIENDO_PALO: float = 0.5
+    # --- RECOMPENSAS v9-v10: correcciones tácticas (v12: magnitudes reducidas) ---
+    PENALTY_LIDERAR_PICA_CON_Q_ACTIVA: float = -2.0     # v12: -1.0→-2.0
+    REWARD_QUEMAR_MAXIMA_PALO_SEGURO: float = 1.0       # v12: 0.5→1.0
+    PENALTY_LIDERAR_Q_EQUIVOCADO: float = -6.0          # v12: -3.0→-6.0 (penalty > reward de dump)
+    REWARD_DUMP_Q_SIGUIENDO_PICAS: float = 1.0         # v12: 2.0→1.0
+    PENALTY_GANAR_BAZA_CON_PUNTOS_EVITABLE: float = -2.0  # v12: -3.0→-2.0
+    REWARD_DESCARTAR_K_A_PICAS_CON_Q_ACTIVA: float = 1.0  # v12: 2.0→1.0
+    REWARD_QUEMAR_MAXIMA_FORZADA: float = 0.5           # v12: 0.3→0.5
+    REWARD_QUEMAR_ALTA_SIGUIENDO_PALO: float = 1.0     # v12: 0.5→1.0
+    PENALTY_GANAR_BAZA_TARDIA_SIN_NECESIDAD: float = -1.0  # v12: -5.0→-1.0
+    REWARD_LIDERAR_Q_DUMP_SEGURO: float = 2.0          # v12: 8.0→2.0
+    REWARD_DESCARTAR_CORAZON_BAJO_ROTO: float = 0.5    # v12: 2.5→0.5
 
-    # --- NUEVAS RECOMPENSAS v10 (Fase B): correcciones tácticas adicionales ---
-    # Penalización: ganar baza tardía (≥9) sin puntos con máxima de palo seguro
-    PENALTY_GANAR_BAZA_TARDIA_SIN_NECESIDAD: float = -5.0
-    # Recompensa: liderar Q♠ como dump seguro (baza ≥7, K♠/A♠ en circulación)
-    REWARD_LIDERAR_Q_DUMP_SEGURO: float = 8.0
-    # Recompensa: descartar corazón en baza limpia con corazones rotos
-    REWARD_DESCARTAR_CORAZON_BAJO_ROTO: float = 2.5
+    # Phase-gating: recompensas tácticas solo en bazas ≥ este umbral
+    BAZA_TARDIA: int = 7
     PUNTUACION_MAXIMA: float = 100.0  # Umbral de fin de partida
 
     def __init__(
@@ -237,14 +224,14 @@ class CorazonesEnv(gym.Env):
 
         # --- PENALTY: liderar Q♠ en mal momento ---
         if posicion_en_baza == 0 and carta.es_dama_de_picas:
-            baza_temprana = self.motor.numero_baza < 7
+            baza_temprana = self.motor.numero_baza < self.BAZA_TARDIA
             soy_maxima_picas = self._es_maxima_en_mano(carta, self.agente_idx)
             if baza_temprana or soy_maxima_picas:
                 self._recompensa_pendiente += self.PENALTY_LIDERAR_Q_EQUIVOCADO
 
-        # --- REWARD: liderar Q♠ como dump seguro (baza ≥7, K♠/A♠ en circ.) ---
+        # --- REWARD: liderar Q♠ como dump seguro (baza ≥BAZA_TARDIA, K♠/A♠ en circ.) ---
         if posicion_en_baza == 0 and carta.es_dama_de_picas:
-            baza_tardia = self.motor.numero_baza >= 7
+            baza_tardia = self.motor.numero_baza >= self.BAZA_TARDIA
             soy_maxima_picas = self._es_maxima_en_mano(carta, self.agente_idx)
             if baza_tardia and not soy_maxima_picas:
                 # Verificar si K♠/A♠ están en circulación (no en cementerio ni en mano)
@@ -381,9 +368,16 @@ class CorazonesEnv(gym.Env):
                 return
             # Usar política configurada o random por defecto
             if actual in self._politicas_oponentes:
-                carta = self._politicas_oponentes[actual](
-                    self.motor, actual, legales
-                )
+                # v12: pasar observación completa a PoliticaSB3 para eliminar
+                # el distribution mismatch entre entrenamiento (220d) e inferencia
+                politica = self._politicas_oponentes[actual]
+                try:
+                    # Intentar pasar obs completa (soportado por PoliticaSB3)
+                    obs_completa = self._construir_observacion_desde(actual)
+                    carta = politica(self.motor, actual, legales, obs=obs_completa)
+                except TypeError:
+                    # Fallback: política legacy sin soporte de obs
+                    carta = politica(self.motor, actual, legales)
             else:
                 carta = self._rng.choice(legales)
             self._ejecutar_jugada(actual, carta)
@@ -430,6 +424,8 @@ class CorazonesEnv(gym.Env):
 
         # Capturar palo de salida ANTES de resolver (resolver_baza lo limpia)
         palo_salida = self.motor.palo_de_salida
+        # Capturar número de baza ANTES de resolver (se incrementa en resolver_baza)
+        numero_baza = self.motor.numero_baza
 
         ganador = self.motor.resolver_baza()
 
@@ -484,8 +480,8 @@ class CorazonesEnv(gym.Env):
                 if carta_agente.es_dama_de_picas:
                     self._recompensa_pendiente += self.REWARD_DESCARTAR_DAMA_SEGURO
 
-        # --- NUEVO v9: recompensas tácticas por baza ---
-        if idx_agente_en_mesa is not None:
+        # --- v9-v10: recompensas tácticas por baza (phase-gated: solo bazas ≥ BAZA_TARDIA) ---
+        if idx_agente_en_mesa is not None and numero_baza >= self.BAZA_TARDIA:
             carta_agente = cartas_en_mesa[idx_agente_en_mesa]
 
             # REWARD: quemar alta (A/K) siguiendo palo en baza limpia
@@ -518,7 +514,7 @@ class CorazonesEnv(gym.Env):
                     and not self._pozo_viable()):
                 self._recompensa_pendiente += self.PENALTY_GANAR_BAZA_CON_PUNTOS_EVITABLE
 
-            # --- NUEVO v10 (Fase B): recompensas tácticas adicionales ---
+            # --- v10 (Fase B): recompensas tácticas adicionales (phase-gated, baza ≥ BAZA_TARDIA) ---
 
             # PENALTY: ganar baza tardía sin puntos con máxima de palo seguro
             if (ganador == self.agente_idx
@@ -603,43 +599,26 @@ class CorazonesEnv(gym.Env):
     # ------------------------------------------------------------------
 
     def _construir_observacion(self) -> np.ndarray:
-        """Construye el vector de observación de obs_dim dimensiones (194 o 220).
+        """Construye el vector de observación desde la perspectiva del agente."""
+        return self._construir_observacion_desde(self.agente_idx)
 
-        Bloques v6 [0:194]:
-            [0:52]    Mano del agente (one-hot)
-            [52:104]  Mesa actual / baza en curso (one-hot)
-            [104:156] Cementerio / cartas jugadas en bazas anteriores (one-hot)
-            [156:172] Vacíos conocidos (4 jugadores × 4 palos)
-            [172:176] Puntajes históricos globales (normalizados /100)
-            [176:180] Puntos acumulados en la mano actual (normalizados /26)
-            [180]     Corazones rotos (0.0 o 1.0)
-            [181]     Posición en la baza actual (0.0, 0.33, 0.66, 1.0)
-            [182:187] Rastreador de la Dama de Picas (one-hot, 5 estados)
-            [187]     pozo_viable
-            [188]     debo_arriesgar
-            [189]     puedo_alimentar
-            [190:194] all_void_X
+    def _construir_observacion_desde(self, agente_idx: int) -> np.ndarray:
+        """Construye el vector de observación desde la perspectiva de cualquier jugador.
 
-        Bloques v9 [194:220] (solo si obs_dim == 220):
-            [194]      baza_numero / 13.0
-            [195]      jugadores_cerca_de_100 / 3.0
-            [196]      Q♠ ya capturada
-            [197]      soy lider en puntaje
-            [198]      mano terminal posible (algún jugador ≥74)
-            [199:203]  cartas restantes por palo / 13.0
-            [203:207]  cartas altas (J/Q/K/A) restantes por palo / 4.0
-            [207:211]  probabilidad Q♠ por jugador relativo
-            [211:215]  corazones capturados esta mano / 13.0
-            [215:219]  alerta pozo por jugador (≥6 corazones)
-            [219]      RESERVADO (siempre 0.0)
+        v12: Permite que los oponentes (PoliticaSB3) reciban la observación completa
+        de 220 dimensiones, eliminando el distribution mismatch entre entrenamiento
+        e inferencia de snapshots históricos.
+
+        Args:
+            agente_idx: Índice del jugador desde cuya perspectiva se construye.
 
         Returns:
             Array np.float32 de shape (obs_dim,).
         """
         obs = np.zeros(self._obs_dim, dtype=np.float32)
-        a = self.agente_idx
+        a = agente_idx
 
-        # --- [0:52] Mano del agente ---
+        # --- [0:52] Mano del jugador ---
         for c in self.motor.jugadores[a].mano:
             obs[c.id] = 1.0
 
@@ -684,9 +663,9 @@ class CorazonesEnv(gym.Env):
             obs[183 + rel] = 1.0
 
         # --- [187:190] Features estratégicas v5 ---
-        obs[187] = 1.0 if self._pozo_viable() else 0.0
-        obs[188] = 1.0 if self._debo_arriesgar() else 0.0
-        obs[189] = 1.0 if self._puedo_alimentar() else 0.0
+        obs[187] = 1.0 if self._pozo_viable(a) else 0.0
+        obs[188] = 1.0 if self._debo_arriesgar(a) else 0.0
+        obs[189] = 1.0 if self._puedo_alimentar(a) else 0.0
 
         # --- [190:194] Features all_void v6 ---
         for palo in range(4):
@@ -808,7 +787,7 @@ class CorazonesEnv(gym.Env):
     # Features estratégicas v5
     # ------------------------------------------------------------------
 
-    def _pozo_viable(self) -> bool:
+    def _pozo_viable(self, agente_idx: Optional[int] = None) -> bool:
         """Determina si es viable intentar shooting the moon.
 
         Condiciones:
@@ -820,7 +799,7 @@ class CorazonesEnv(gym.Env):
         if self.motor.corazones_rotos:
             return False
 
-        a = self.agente_idx
+        a = agente_idx if agente_idx is not None else self.agente_idx
         mano = self.motor.jugadores[a].mano
 
         corazones_en_mano = sum(1 for c in mano if c.es_corazon)
@@ -839,14 +818,14 @@ class CorazonesEnv(gym.Env):
 
         return True
 
-    def _debo_arriesgar(self) -> bool:
-        """Determina si el agente está tan atrás que debe arriesgarse.
+    def _debo_arriesgar(self, agente_idx: Optional[int] = None) -> bool:
+        """Determina si el jugador está tan atrás que debe arriesgarse.
 
         Condiciones:
-          - Puntaje del agente > 75
+          - Puntaje del jugador > 75
           - Existe al menos un rival con puntaje < 30
         """
-        a = self.agente_idx
+        a = agente_idx if agente_idx is not None else self.agente_idx
         if self._puntuacion_historica[a] <= 75:
             return False
 
@@ -855,14 +834,14 @@ class CorazonesEnv(gym.Env):
                 return True
         return False
 
-    def _puedo_alimentar(self) -> bool:
+    def _puedo_alimentar(self, agente_idx: Optional[int] = None) -> bool:
         """Determina si conviene darle puntos a un rival para que pierda.
 
         Condiciones:
           - Existe un rival con puntaje > 85 (cerca de perder)
-          - El agente tiene puntaje < 70 (margen seguro)
+          - El jugador tiene puntaje < 70 (margen seguro)
         """
-        a = self.agente_idx
+        a = agente_idx if agente_idx is not None else self.agente_idx
         if self._puntuacion_historica[a] >= 70:
             return False
 

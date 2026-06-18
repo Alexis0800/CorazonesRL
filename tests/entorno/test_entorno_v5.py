@@ -206,19 +206,19 @@ class TestRecompensasV5:
     los valores esperados."""
 
     def test_constante_q_spades_sin_pozo(self):
-        """REWARD_Q_SPADES_SIN_POZO debe existir y ser -8.0."""
+        """REWARD_Q_SPADES_SIN_POZO debe existir y ser -5.0 (v12)."""
         assert hasattr(CorazonesEnv, 'REWARD_Q_SPADES_SIN_POZO'), \
             "Falta REWARD_Q_SPADES_SIN_POZO en CorazonesEnv"
-        assert CorazonesEnv.REWARD_Q_SPADES_SIN_POZO == -8.0
+        assert CorazonesEnv.REWARD_Q_SPADES_SIN_POZO == -5.0
 
     def test_constante_ganar_baza_con_corazon(self):
-        """REWARD_GANAR_BAZA_CON_CORAZON debe existir y ser -3.0."""
+        """REWARD_GANAR_BAZA_CON_CORAZON debe existir y ser -2.0 (v12)."""
         assert hasattr(CorazonesEnv, 'REWARD_GANAR_BAZA_CON_CORAZON'), \
             "Falta REWARD_GANAR_BAZA_CON_CORAZON en CorazonesEnv"
-        assert CorazonesEnv.REWARD_GANAR_BAZA_CON_CORAZON == -3.0
+        assert CorazonesEnv.REWARD_GANAR_BAZA_CON_CORAZON == -2.0
 
     def test_constante_por_punto_en_mano(self):
-        """REWARD_POR_PUNTO_EN_MANO debe existir y ser -0.2."""
+        """REWARD_POR_PUNTO_EN_MANO debe existir y ser -0.1 (v12)."""
         assert hasattr(CorazonesEnv, 'REWARD_POR_PUNTO_EN_MANO'), \
             "Falta REWARD_POR_PUNTO_EN_MANO en CorazonesEnv"
-        assert CorazonesEnv.REWARD_POR_PUNTO_EN_MANO == -0.2
+        assert CorazonesEnv.REWARD_POR_PUNTO_EN_MANO == -0.1
