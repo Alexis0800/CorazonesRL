@@ -1,1 +1,1 @@
-# Tests de Corazones — organizados por capa de arquitectura
+# Tests de Corazones -- organizados por capa de arquitectura

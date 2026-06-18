@@ -58,7 +58,7 @@ class Hiperparametros:
     """Hiperparámetros del pipeline de entrenamiento (immutable)."""
     # Self-play
     prob_bot_start: float = 0.50
-    prob_bot_end: float = 0.20
+    prob_bot_end: float = 0.30
     min_snapshot_steps: int = 500_000
     max_snapshots_pool: int = 50
 
@@ -70,7 +70,7 @@ class Hiperparametros:
     gamma: float = 0.99
     gae_lambda: float = 0.95
     clip_range: float = 0.2
-    ent_coef: float = 0.08
+    ent_coef: float = 0.12
     vf_coef: float = 0.5
     max_grad_norm: float = 0.5
 

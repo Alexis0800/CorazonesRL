@@ -89,7 +89,7 @@ def _configurar_dispositivo(device: str) -> str:
 # Constantes
 # ------------------------------------------------------------------
 PROB_BOT_START: float = 0.50
-PROB_BOT_END: float = 0.20
+PROB_BOT_END: float = 0.30
 EVAL_PARTIDAS: int = 100
 ELO_PARTIDAS: int = 30
 ELO_MAX_SNAPSHOTS: int = 12
@@ -412,7 +412,7 @@ def entrenar_auto(
             f"  Evaluación cada: {eval_every} snapshots ({eval_partidas} partidas)")
         print(f"  Torneo ELO cada: {elo_every} snapshots")
         print(f"  prob_bot: {prob_bot_start:.0%} → {prob_bot_end:.0%}")
-        print(f"  LR schedule: 3 fases (1e-4 → 5e-5 → 2e-5)")
+        print(f"  LR schedule: 3 fases (5e-4 → 3e-4 → 1e-4)")
         print(f"  Snapshots → {dir_snapshots}")
         print(f"  VecNormalize → {dir_vecnorm}")
         print(f"  Eval log → {eval_log_path}")
@@ -433,7 +433,8 @@ def entrenar_auto(
         )
 
         # Crear modelo desde cero (o inicializar desde BC preentrenado)
-        hp = obtener_hiperparametros_v3(DIRECTORIO_LOGS, device, 0, total_steps)
+        hp = obtener_hiperparametros_v3(
+            DIRECTORIO_LOGS, device, 0, total_steps)
         policy_kwargs = hp.pop(
             "policy_kwargs", None) or obtener_policy_kwargs()
         fase_label = hp.pop("_fase", "?")

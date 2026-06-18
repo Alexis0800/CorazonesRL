@@ -667,7 +667,7 @@ class TestHiperparametrosV2:
     prevenir el colapso de política."""
 
     def test_hiperparametros_v2_lr_y_ent_coef(self):
-        """V2 usa learning_rate=1e-4 y ent_coef=0.08 (más exploración)."""
+        """V2 usa learning_rate=1e-4 y ent_coef=0.10 (más exploración, v11)."""
         import importlib
         ts = importlib.import_module("train_self_play")
 
@@ -675,8 +675,8 @@ class TestHiperparametrosV2:
         assert hp["learning_rate"] == 1e-4, (
             f"V2 debe usar lr=1e-4, tiene {hp['learning_rate']}"
         )
-        assert hp["ent_coef"] == 0.08, (
-            f"V2 debe usar ent_coef=0.08, tiene {hp['ent_coef']}"
+        assert hp["ent_coef"] == 0.10, (
+            f"V2 debe usar ent_coef=0.10 (v11), tiene {hp['ent_coef']}"
         )
 
     def test_hiperparametros_v2_prob_bot_default(self):
@@ -732,4 +732,3 @@ class TestDirectoriosV6:
         assert hasattr(
             ts, "DIRECTORIO_VECNORM_V6"), "Debe existir DIRECTORIO_VECNORM_V6"
         assert "v6" in ts.DIRECTORIO_VECNORM_V6, "Debe apuntar a v6"
-

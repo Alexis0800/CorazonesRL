@@ -213,7 +213,7 @@ def obtener_hiperparametros_v2(logdir: str, device: str) -> Dict:
 
     Cambios respecto a v1:
         - learning_rate: 3e-5 → 1e-4 (reactivar aprendizaje).
-        - ent_coef: 0.05 → 0.08 (forzar más exploración).
+        - ent_coef: 0.05 → 0.10 (forzar más exploración, v11).
         - n_epochs: 10 → 8 (reducir sobreajuste por batch).
         - max_grad_norm: 0.5 → 1.0 (permitir gradientes más grandes).
 
@@ -235,7 +235,7 @@ def obtener_hiperparametros_v2(logdir: str, device: str) -> Dict:
         "gae_lambda": 0.98,
         "clip_range": 0.15,
         "normalize_advantage": True,
-        "ent_coef": 0.08,
+        "ent_coef": 0.10,
         "vf_coef": 1.0,
         "max_grad_norm": 1.0,
         "target_kl": 0.02,
@@ -254,13 +254,22 @@ def obtener_hiperparametros_v3(
 ) -> Dict:
     """Hiperparámetros PPO con learning rate schedule lineal.
 
-    Linear LR decay (más agresivo, v10):
-        Inicio (0%):  lr=3e-4, ent=0.08, clip=0.15
-        Mitad (50%):  lr=2e-4, ent=0.05, clip=0.12
-        Final (100%): lr=5e-5, ent=0.03, clip=0.10
+    Linear LR decay (v11 — corregido para prevenir colapso de entropía):
+        Inicio (0%):  lr=5e-4, ent=0.12, clip=0.18
+        Mitad (50%):  lr=3e-4, ent=0.09, clip=0.15
+        Final (100%): lr=1e-4, ent=0.06, clip=0.12
 
-    La decadencia lineal permite exploración agresiva al inicio y refinamiento
-    quirúrgico al final, sin los saltos bruscos del step decay.
+    Cambios respecto a v10:
+        - lr start: 3e-4 → 5e-4 (más exploración inicial).
+        - lr end: 5e-5 → 1e-4 (piso más alto, evita estancamiento).
+        - ent_coef start: 0.08 → 0.12 (más entropía = más exploración).
+        - ent_coef end: 0.03 → 0.06 (piso seguro, previene colapso).
+        - clip_range start: 0.15 → 0.18 (más margen al inicio).
+
+    El piso de entropía de 0.06 es crítico: en juegos de información
+    imperfecta como Corazones, entropía < 0.05 causa colapso de política
+    porque la policy se vuelve 100% determinística y no puede recuperarse
+    de estrategias sub-óptimas reforzadas por self-play.
 
     Args:
         logdir: Directorio para logs de TensorBoard.
@@ -273,15 +282,15 @@ def obtener_hiperparametros_v3(
     """
     progreso = min(paso_actual / total_pasos, 1.0)
 
-    # Linear decay: lr_start → lr_end (más alto, v10)
-    lr = 3e-4 + (5e-5 - 3e-4) * progreso
-    # Entropy: high at start (exploration), moderate at end
-    ent = 0.08 + (0.03 - 0.08) * progreso
-    # Clip range: wider at start, moderate at end
-    clip = 0.15 + (0.10 - 0.15) * progreso
+    # Linear decay: lr_start → lr_end (más alto, v11)
+    lr = 5e-4 + (1e-4 - 5e-4) * progreso
+    # Entropy: high at start (exploration), safe floor at end (v11: piso 0.06)
+    ent = 0.12 + (0.06 - 0.12) * progreso
+    # Clip range: wider at start, moderate at end (v11)
+    clip = 0.18 + (0.12 - 0.18) * progreso
     # Epochs: more at start (learning), fewer at end (stability)
     epochs = int(8 + (4 - 8) * progreso)
-    grad_norm = 1.0 + (0.3 - 1.0) * progreso
+    grad_norm = 1.0 + (0.5 - 1.0) * progreso  # v11: floor 0.5 instead of 0.3
 
     if progreso < 0.25:
         fase = "1 (exploración)"
