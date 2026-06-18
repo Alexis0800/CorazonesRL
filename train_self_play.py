@@ -254,16 +254,14 @@ def obtener_hiperparametros_v3(
 ) -> Dict:
     """Hiperparámetros PPO con learning rate schedule lineal.
 
-    v17 — ent_coef calibrado con datos reales (ratio ent/pg = 3.9→1.8):
-        Inicio (0%):  lr=3e-4, ent=0.15, clip=0.20, epochs=5, batch=512, kl=0.04
-        Mitad (50%):  lr=2e-4, ent=0.115, clip=0.175, epochs=4
-        Final (100%): lr=1e-4, ent=0.08, clip=0.15, epochs=3, batch=512
+    v18 — mismo ent_coef que v13 (exitosa a 1M) pero menos epochs:
+        Inicio (0%):  lr=3e-4, ent=0.12, clip=0.20, epochs=4, batch=512, kl=0.03
+        Mitad (50%):  lr=2e-4, ent=0.09, clip=0.175, epochs=3
+        Final (100%): lr=1e-4, ent=0.06, clip=0.15, epochs=3, batch=512
 
-    Calibración basada en datos reales de v16:
-        - pg_loss ≈ -0.035, entropy_loss ≈ -0.90 a 2M pasos.
-        - ent_coef=0.15 da ratio 3.9:1 (suficiente protección sin aplastar aprendizaje).
-        - ent_coef=0.08 da ratio 1.8:1 (permite convergencia en fase final).
-        - ent_coef=0.12 (v13) colapsó por red grande (600K params sobreajustan).
+    Calibración:
+        - v13 con ent=0.12 tuvo WR=0.21 a 1M pero colapsó por epochs=8 (overfitting).
+        - v18 reduce epochs 50% (8→4) para prevenir colapso con misma exploración.
 
     Args:
         logdir: Directorio para logs de TensorBoard.
@@ -276,16 +274,16 @@ def obtener_hiperparametros_v3(
     """
     progreso = min(paso_actual / total_pasos, 1.0)
 
-    # v17: lr suave
+    # v18: lr suave
     lr = 3e-4 + (1e-4 - 3e-4) * progreso
-    # v17: ent_coef calibrado (ratio ent/pg = 3.9→1.8)
-    ent = 0.15 + (0.08 - 0.15) * progreso
-    # v17: clip amplio
+    # v18: ent_coef = v13 (probado: WR=0.21 a 1M)
+    ent = 0.12 + (0.06 - 0.12) * progreso
+    # v18: clip
     clip = 0.20 + (0.15 - 0.20) * progreso
-    # v17: épocas moderadas (más que v16, menos que v13)
-    epochs = int(5 + (3 - 5) * progreso)
-    # v17: grad_norm fijo
+    # v18: epochs reducidas (menos overfitting que v13)
+    epochs = int(4 + (3 - 4) * progreso)
     grad_norm = 0.8
+    target_kl = 0.03 + (0.02 - 0.03) * progreso
 
     if progreso < 0.25:
         fase = "1 (exploración)"
@@ -308,7 +306,7 @@ def obtener_hiperparametros_v3(
         "ent_coef": ent,
         "vf_coef": 1.0,
         "max_grad_norm": grad_norm,
-        "target_kl": 0.04,       # v17
+        "target_kl": target_kl,  # v18: decae con progreso
         "policy_kwargs": policy_kwargs,
         "verbose": 1,
         "device": device,

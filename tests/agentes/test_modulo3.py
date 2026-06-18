@@ -745,20 +745,20 @@ class TestHiperparametrosV16:
         import importlib
         ts = importlib.import_module("train_self_play")
         hp = ts.obtener_hiperparametros_v3("/tmp", "cpu", 0, 20_000_000)
-        assert hp["ent_coef"] == pytest.approx(0.15, rel=0.01)
+        assert hp["ent_coef"] == pytest.approx(0.12, rel=0.01)
 
     def test_ent_coef_floor(self):
         import importlib
         ts = importlib.import_module("train_self_play")
         hp = ts.obtener_hiperparametros_v3(
             "/tmp", "cpu", 20_000_000, 20_000_000)
-        assert hp["ent_coef"] == pytest.approx(0.08, rel=0.01)
+        assert hp["ent_coef"] == pytest.approx(0.06, rel=0.01)
 
     def test_n_epochs(self):
         import importlib
         ts = importlib.import_module("train_self_play")
         hp = ts.obtener_hiperparametros_v3("/tmp", "cpu", 0, 20_000_000)
-        assert hp["n_epochs"] == 5
+        assert hp["n_epochs"] == 4
 
     def test_batch_size(self):
         import importlib
@@ -770,4 +770,4 @@ class TestHiperparametrosV16:
         import importlib
         ts = importlib.import_module("train_self_play")
         hp = ts.obtener_hiperparametros_v3("/tmp", "cpu", 0, 20_000_000)
-        assert hp["target_kl"] == pytest.approx(0.04, rel=0.01)
+        assert hp["target_kl"] == pytest.approx(0.03, rel=0.01)
