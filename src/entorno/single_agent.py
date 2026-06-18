@@ -83,11 +83,11 @@ class CorazonesEnv(gym.Env):
 
     # --- NUEVAS RECOMPENSAS v10 (Fase B): correcciones tácticas adicionales ---
     # Penalización: ganar baza tardía (≥9) sin puntos con máxima de palo seguro
-    PENALTY_GANAR_BAZA_TARDIA_SIN_NECESIDAD: float = -2.0
+    PENALTY_GANAR_BAZA_TARDIA_SIN_NECESIDAD: float = -5.0
     # Recompensa: liderar Q♠ como dump seguro (baza ≥7, K♠/A♠ en circulación)
-    REWARD_LIDERAR_Q_DUMP_SEGURO: float = 3.0
+    REWARD_LIDERAR_Q_DUMP_SEGURO: float = 8.0
     # Recompensa: descartar corazón en baza limpia con corazones rotos
-    REWARD_DESCARTAR_CORAZON_BAJO_ROTO: float = 0.5
+    REWARD_DESCARTAR_CORAZON_BAJO_ROTO: float = 2.5
     PUNTUACION_MAXIMA: float = 100.0  # Umbral de fin de partida
 
     def __init__(

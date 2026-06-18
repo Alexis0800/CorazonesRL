@@ -175,6 +175,7 @@ def lanzar_torneo_elo(
     min_paso: int = 0,
     max_snapshots: int = ELO_MAX_SNAPSHOTS,
     partidas: int = ELO_PARTIDAS,
+    incluir_experto: bool = False,
 ) -> Optional[subprocess.Popen]:
     """Lanza torneo ELO en un proceso separado (no bloqueante).
 
@@ -184,6 +185,7 @@ def lanzar_torneo_elo(
         min_paso: Paso mínimo para incluir snapshots.
         max_snapshots: Máximo de snapshots en el torneo.
         partidas: Partidas por enfrentamiento.
+        incluir_experto: Si True, incluye BotExperto como participante.
 
     Returns:
         Objeto Popen del proceso, o None si falló.
@@ -197,6 +199,8 @@ def lanzar_torneo_elo(
         "--elo-puro",
         "--incluir-bots",
     ]
+    if incluir_experto:
+        cmd.append("--incluir-experto")
     try:
         with open(output_file, "w", encoding="utf-8") as out:
             proc = subprocess.Popen(
@@ -311,6 +315,7 @@ def entrenar_auto(
     bc_pretrain: Optional[str] = None,
     eval_experto: bool = False,
     eval_experto_partidas: int = 30,
+    elo_experto: bool = False,
 ) -> int:
     """Ejecuta entrenamiento autónomo completo desde cero o reanudando.
 
@@ -496,12 +501,14 @@ def entrenar_auto(
         hp_actual.pop("device", None)
         hp_actual.pop("tensorboard_log", None)
 
-        # Aplicar hiperparámetros
+        # Aplicar hiperparámetros (incluyendo lr_schedule para SB3)
         for key in ["learning_rate", "ent_coef", "vf_coef", "gamma",
                     "gae_lambda", "target_kl", "max_grad_norm",
                     "n_steps", "batch_size", "n_epochs"]:
             setattr(modelo, key, hp_actual[key])
         modelo.clip_range = lambda _: hp_actual["clip_range"]
+        # Forzar actualización del lr_schedule usado por SB3 internamente
+        modelo.lr_schedule = lambda _: hp_actual["learning_rate"]
 
         # Actualizar lr del optimizador
         if hasattr(modelo.policy, "optimizer") and modelo.policy.optimizer is not None:
@@ -616,6 +623,7 @@ def entrenar_auto(
                 output_file=elo_out,
                 min_paso=min_paso_elo,
                 max_snapshots=ELO_MAX_SNAPSHOTS,
+                incluir_experto=elo_experto,
             )
             if proc:
                 procesos_elo.append((proc, elo_out))
@@ -708,14 +716,16 @@ def main() -> None:
                         help=f"Guardar los N mejores snapshots tras cada torneo Elo (default: {BEST_TOP})")
     parser.add_argument("--obs-dim", type=int, default=220, choices=[194, 220],
                         help="Dimensión del vector de observación (default: 220)")
-    parser.add_argument("--prob-experto", type=float, default=0.0,
-                        help="Probabilidad de usar BotExperto como oponente (default: 0.0)")
+    parser.add_argument("--prob-experto", type=float, default=0.05,
+                        help="Probabilidad de usar BotExperto como oponente (default: 0.05)")
     parser.add_argument("--bc-pretrain", type=str, default=None,
                         help="Ruta al modelo BC preentrenado .zip para inicializar pesos")
     parser.add_argument("--eval-experto", action="store_true", default=False,
                         help="Evaluar también contra 3× BotExperto en cada evaluación")
     parser.add_argument("--eval-experto-partidas", type=int, default=30,
                         help="Partidas contra 3× BotExperto (default: 30)")
+    parser.add_argument("--elo-experto", action="store_true", default=False,
+                        help="Incluir BotExperto como participante en torneos Elo")
     args = parser.parse_args()
 
     paso_final = entrenar_auto(
@@ -736,6 +746,7 @@ def main() -> None:
         bc_pretrain=args.bc_pretrain,
         eval_experto=args.eval_experto,
         eval_experto_partidas=args.eval_experto_partidas,
+        elo_experto=args.elo_experto,
     )
     print(f"\nPaso final alcanzado: {paso_final:,}")
 

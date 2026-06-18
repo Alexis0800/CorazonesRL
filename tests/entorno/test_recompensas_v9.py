@@ -380,19 +380,19 @@ class TestRecompensasTacticasV10:
         """RewardConfig debe tener PENALTY_GANAR_BAZA_TARDIA_SIN_NECESIDAD."""
         cfg = RewardConfig()
         assert hasattr(cfg, "PENALTY_GANAR_BAZA_TARDIA_SIN_NECESIDAD")
-        assert cfg.PENALTY_GANAR_BAZA_TARDIA_SIN_NECESIDAD == -2.0
+        assert cfg.PENALTY_GANAR_BAZA_TARDIA_SIN_NECESIDAD == -5.0
 
     def test_config_tiene_reward_liderar_q_dump_seguro(self):
         """RewardConfig debe tener REWARD_LIDERAR_Q_DUMP_SEGURO."""
         cfg = RewardConfig()
         assert hasattr(cfg, "REWARD_LIDERAR_Q_DUMP_SEGURO")
-        assert cfg.REWARD_LIDERAR_Q_DUMP_SEGURO == 3.0
+        assert cfg.REWARD_LIDERAR_Q_DUMP_SEGURO == 8.0
 
     def test_config_tiene_reward_descartar_corazon_bajo_roto(self):
         """RewardConfig debe tener REWARD_DESCARTAR_CORAZON_BAJO_ROTO."""
         cfg = RewardConfig()
         assert hasattr(cfg, "REWARD_DESCARTAR_CORAZON_BAJO_ROTO")
-        assert cfg.REWARD_DESCARTAR_CORAZON_BAJO_ROTO == 0.5
+        assert cfg.REWARD_DESCARTAR_CORAZON_BAJO_ROTO == 2.5
 
     def test_penalty_ganar_baza_tardia_aplica(self):
         """Penalización -2.0 cuando baza ≥9 y se gana baza sin puntos con carta alta de palo seguro."""
@@ -404,7 +404,7 @@ class TestRecompensasTacticasV10:
             carta_jugada=_carta(14, TREBOL),  # A♣ = máxima de palo seguro
             es_maxima_en_mano=True,
         )
-        assert reward == pytest.approx(-2.0, abs=0.01)
+        assert reward == pytest.approx(-5.0, abs=0.01)
 
     def test_penalty_ganar_baza_tardia_no_aplica_baza_temprana(self):
         """No aplica en baza < 9."""
@@ -451,7 +451,7 @@ class TestRecompensasTacticasV10:
             es_maxima_en_picas=False,         # no soy máxima en picas
             hay_altas_en_circulacion=True,    # K♠/A♠ aún en juego
         )
-        assert reward == pytest.approx(3.0, abs=0.01)
+        assert reward == pytest.approx(8.0, abs=0.01)
 
     def test_reward_liderar_q_dump_no_aplica_baza_temprana(self):
         """No aplica en baza < 7."""
@@ -495,7 +495,7 @@ class TestRecompensasTacticasV10:
             es_descarte=True,   # void en palo de salida
             puntos_baza=0,
         )
-        assert reward == pytest.approx(0.5, abs=0.01)
+        assert reward == pytest.approx(2.5, abs=0.01)
 
     def test_reward_descartar_corazon_bajo_no_aplica_sin_rotos(self):
         """No aplica si corazones no están rotos."""

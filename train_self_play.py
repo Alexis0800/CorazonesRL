@@ -254,10 +254,10 @@ def obtener_hiperparametros_v3(
 ) -> Dict:
     """Hiperparámetros PPO con learning rate schedule lineal.
 
-    Linear LR decay:
+    Linear LR decay (más agresivo, v10):
         Inicio (0%):  lr=3e-4, ent=0.08, clip=0.15
-        Mitad (50%):  lr=1.5e-4, ent=0.05, clip=0.12
-        Final (100%): lr=1e-5, ent=0.02, clip=0.08
+        Mitad (50%):  lr=2e-4, ent=0.05, clip=0.12
+        Final (100%): lr=5e-5, ent=0.03, clip=0.10
 
     La decadencia lineal permite exploración agresiva al inicio y refinamiento
     quirúrgico al final, sin los saltos bruscos del step decay.
@@ -273,12 +273,12 @@ def obtener_hiperparametros_v3(
     """
     progreso = min(paso_actual / total_pasos, 1.0)
 
-    # Linear decay: lr_start → lr_end
-    lr = 3e-4 + (1e-5 - 3e-4) * progreso
-    # Entropy: high at start (exploration), low at end (exploitation)
-    ent = 0.08 + (0.02 - 0.08) * progreso
-    # Clip range: wider at start, tighter at end
-    clip = 0.15 + (0.08 - 0.15) * progreso
+    # Linear decay: lr_start → lr_end (más alto, v10)
+    lr = 3e-4 + (5e-5 - 3e-4) * progreso
+    # Entropy: high at start (exploration), moderate at end
+    ent = 0.08 + (0.03 - 0.08) * progreso
+    # Clip range: wider at start, moderate at end
+    clip = 0.15 + (0.10 - 0.15) * progreso
     # Epochs: more at start (learning), fewer at end (stability)
     epochs = int(8 + (4 - 8) * progreso)
     grad_norm = 1.0 + (0.3 - 1.0) * progreso

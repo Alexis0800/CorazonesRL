@@ -95,11 +95,11 @@ def normalizar_obs_si_hay_stats(
 ) -> np.ndarray:
     """Normaliza observación con stats de VecNormalize de SB3.
 
-    Soporta padding automático de 190→194 dimensiones para
-    compatibilidad con snapshots v5 cargados en entornos v6.
+    Soporta padding automático bidireccional para compatibilidad
+    entre modelos de distintas dimensiones (190, 194, 220).
 
     Args:
-        obs: Vector de observación crudo de shape (190,) o (194,).
+        obs: Vector de observación crudo.
         vecnorm_path: Ruta al archivo .pkl de VecNormalize.
 
     Returns:
@@ -115,10 +115,16 @@ def normalizar_obs_si_hay_stats(
             return obs
         mean = np.array(obs_rms.mean)
         var = np.array(obs_rms.var)
-        # Padding automático: stats 190-dim → 194-dim
-        if len(mean) == 190 and len(obs) == 194:
-            mean = np.concatenate([mean, np.zeros(4, dtype=np.float32)])
-            var = np.concatenate([var, np.ones(4, dtype=np.float32)])
+        # Padding bidireccional: adaptar stats ↔ obs a la misma dimensión
+        obs_len = len(obs)
+        stats_len = len(mean)
+        if stats_len < obs_len:
+            pad = obs_len - stats_len
+            mean = np.concatenate([mean, np.zeros(pad, dtype=np.float32)])
+            var = np.concatenate([var, np.ones(pad, dtype=np.float32)])
+        elif obs_len < stats_len:
+            pad = stats_len - obs_len
+            obs = np.concatenate([obs, np.zeros(pad, dtype=np.float32)])
         return np.clip(
             (obs - mean) / np.sqrt(var + 1e-8), -10.0, 10.0
         ).astype(np.float32)
@@ -258,11 +264,22 @@ class _PoliticaSnapshot:
     El entorno llama ``politica(motor, jugador_idx, legales) -> Carta``.
     Este adaptador construye la observación, normaliza con VecNormalize,
     llama a model.predict() con action masks, y devuelve la Carta elegida.
+
+    Soporta modelos de 190, 194 y 220 dimensiones (v5, v6/v7, v9/v10).
     """
 
-    def __init__(self, model: Any, vecnorm_path: Optional[str] = None):
+    def __init__(self, model: Any, vecnorm_path: Optional[str] = None,
+                 obs_dim: Optional[int] = None):
         self.model = model
         self._obs_rms = None
+        # Auto-detectar obs_dim del modelo si no se especifica
+        if obs_dim is not None:
+            self.obs_dim = obs_dim
+        else:
+            try:
+                self.obs_dim = model.observation_space.shape[0]
+            except Exception:
+                self.obs_dim = 194
         if vecnorm_path and os.path.exists(vecnorm_path):
             try:
                 with open(vecnorm_path, "rb") as f:
@@ -272,9 +289,13 @@ class _PoliticaSnapshot:
                 self._obs_rms = None
 
     def _construir_obs(self, motor: Any, jugador_idx: int) -> np.ndarray:
-        """Construye vector 194-dim (v6) desde la perspectiva del jugador."""
-        from src.dominio.carta import Carta
-        obs = np.zeros(194, dtype=np.float32)
+        """Construye vector de observación desde la perspectiva del jugador.
+
+        Soporta 190, 194 y 220 dimensiones. Las features que no pueden
+        calcularse desde el motor quedan en 0 (consistente con
+        ObservacionBuilder.construir_desde_motor).
+        """
+        obs = np.zeros(self.obs_dim, dtype=np.float32)
         a = jugador_idx
 
         for c in motor.jugadores[a].mano:
@@ -302,7 +323,65 @@ class _PoliticaSnapshot:
         posiciones = {0: 0.0, 1: 0.33, 2: 0.66, 3: 1.0}
         obs[181] = posiciones.get(len(motor.mesa), 0.0)
 
-        # Features v5+v6 se dejan en 0 (no disponibles desde motor para oponentes)
+        # Features v5+v6+ se dejan en 0 (no disponibles desde motor para oponentes)
+        # [182:187] Q♠ tracker
+        # [187:190] strategic flags
+        # [190:194] all_void_X
+
+        # --- Features v9/v10 (220-dim): calculables desde motor ---
+        if self.obs_dim >= 220:
+            # [194] Baza number / 13.0
+            obs[194] = (motor.numero_baza - 1) / 13.0
+            # [195] Players near 100 / 3.0
+            cerca = sum(1 for j in motor.jugadores
+                        if j.puntuacion_historica >= 90)
+            obs[195] = cerca / 3.0
+            # [196] Q♠ already captured
+            capturada = any(
+                c.es_dama_de_picas
+                for j in motor.jugadores for c in j.bazas_ganadas)
+            obs[196] = 1.0 if capturada else 0.0
+            # [197] Agent is score leader
+            scores = [j.puntuacion_historica for j in motor.jugadores]
+            obs[197] = 1.0 if min(scores) == scores[a] else 0.0
+            # [198] Terminal hand possible (score ≥74)
+            obs[198] = 1.0 if max(scores) >= 74 else 0.0
+            # [199:203] Cards remaining by suit
+            for palo in range(4):
+                jugadas = sum(1 for j in motor.jugadores
+                              for c in j.bazas_ganadas if c.palo == palo)
+                en_mesa = sum(1 for _, c in motor.mesa if c.palo == palo)
+                en_mano = sum(1 for c in motor.jugadores[a].mano
+                              if c.palo == palo)
+                obs[199 + palo] = (13 - jugadas - en_mesa - en_mano) / 13.0
+            # [203:207] High cards (J/Q/K/A) remaining by suit
+            altas = {11, 12, 13, 14}  # J, Q, K, A
+            for palo in range(4):
+                jugadas_altas = sum(1 for j in motor.jugadores
+                                    for c in j.bazas_ganadas
+                                    if c.palo == palo and c.valor in altas)
+                en_mesa_altas = sum(1 for _, c in motor.mesa
+                                    if c.palo == palo and c.valor in altas)
+                en_mano_altas = sum(1 for c in motor.jugadores[a].mano
+                                    if c.palo == palo and c.valor in altas)
+                obs[203 + palo] = max(0, 4 - jugadas_altas -
+                                      en_mesa_altas - en_mano_altas) / 4.0
+            # [207:211] Probability Q♠ by relative player (simplified: 0)
+            # [211:215] Hearts captured this hand
+            for i in range(4):
+                rel = (i - a) % 4
+                corazones = sum(1 for c in motor.jugadores[i].bazas_ganadas
+                                if c.es_corazon)
+                obs[211 + rel] = corazones / 13.0
+            # [215:219] Moon alert by player (≥6 hearts)
+            for i in range(4):
+                rel = (i - a) % 4
+                corazones = sum(1 for c in motor.jugadores[i].bazas_ganadas
+                                if c.es_corazon)
+                obs[215 + rel] = 1.0 if corazones >= 6 else 0.0
+            # [219] Led suit
+            palo_salida = motor.palo_de_salida
+            obs[219] = -1.0 if palo_salida is None else palo_salida / 3.0
 
         return obs
 
@@ -313,10 +392,18 @@ class _PoliticaSnapshot:
         if self._obs_rms is not None:
             mean = np.array(self._obs_rms.mean)
             var = np.array(self._obs_rms.var)
-            # Padding: stats de 190-dim → 194-dim (nuevos features: mean=0, var=1)
-            if len(mean) == 190:
-                mean = np.concatenate([mean, np.zeros(4, dtype=np.float32)])
-                var = np.concatenate([var, np.ones(4, dtype=np.float32)])
+            # Padding bidireccional: adaptar stats ↔ obs a la misma dimensión
+            obs_len = len(obs)
+            stats_len = len(mean)
+            if stats_len < obs_len:
+                # Stats más cortas que obs: rellenar con mean=0, var=1
+                pad = obs_len - stats_len
+                mean = np.concatenate([mean, np.zeros(pad, dtype=np.float32)])
+                var = np.concatenate([var, np.ones(pad, dtype=np.float32)])
+            elif obs_len < stats_len:
+                # Obs más corta que stats: rellenar obs con ceros
+                pad = stats_len - obs_len
+                obs = np.concatenate([obs, np.zeros(pad, dtype=np.float32)])
             obs = np.clip((obs - mean) / np.sqrt(var + 1e-8),
                           -10.0, 10.0).astype(np.float32)
 
