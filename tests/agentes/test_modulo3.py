@@ -750,7 +750,8 @@ class TestHiperparametrosV16:
     def test_ent_coef_floor(self):
         import importlib
         ts = importlib.import_module("train_self_play")
-        hp = ts.obtener_hiperparametros_v3("/tmp", "cpu", 20_000_000, 20_000_000)
+        hp = ts.obtener_hiperparametros_v3(
+            "/tmp", "cpu", 20_000_000, 20_000_000)
         assert hp["ent_coef"] == pytest.approx(0.12, rel=0.01)
 
     def test_n_epochs(self):
