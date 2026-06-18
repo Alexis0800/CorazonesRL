@@ -254,22 +254,19 @@ def obtener_hiperparametros_v3(
 ) -> Dict:
     """Hiperparámetros PPO con learning rate schedule lineal.
 
-    Linear LR decay (v11 — corregido para prevenir colapso de entropía):
-        Inicio (0%):  lr=5e-4, ent=0.12, clip=0.18
-        Mitad (50%):  lr=3e-4, ent=0.09, clip=0.15
-        Final (100%): lr=1e-4, ent=0.06, clip=0.12
+    v14 — recalibrado para red grande [512, 512, 256] (~600K params):
+        Inicio (0%):  lr=3e-4, ent=0.18, clip=0.20, epochs=5, grad_norm=0.8
+        Mitad (50%):  lr=2e-4, ent=0.14, clip=0.175, epochs=4
+        Final (100%): lr=1e-4, ent=0.10, clip=0.15, epochs=3, grad_norm=0.8
 
-    Cambios respecto a v10:
-        - lr start: 3e-4 → 5e-4 (más exploración inicial).
-        - lr end: 5e-5 → 1e-4 (piso más alto, evita estancamiento).
-        - ent_coef start: 0.08 → 0.12 (más entropía = más exploración).
-        - ent_coef end: 0.03 → 0.06 (piso seguro, previene colapso).
-        - clip_range start: 0.15 → 0.18 (más margen al inicio).
-
-    El piso de entropía de 0.06 es crítico: en juegos de información
-    imperfecta como Corazones, entropía < 0.05 causa colapso de política
-    porque la policy se vuelve 100% determinística y no puede recuperarse
-    de estrategias sub-óptimas reforzadas por self-play.
+    Cambios respecto a v11-v13:
+        - lr start: 5e-4 → 3e-4 (red grande necesita gradientes más suaves).
+        - ent_coef start: 0.12 → 0.18 (más entropía para 600K params).
+        - ent_coef floor: 0.06 → 0.10 (piso seguro para evitar colapso).
+        - target_kl: 0.02 → 0.04 (permite más cambio por update, evita early stop).
+        - n_epochs: 8→4 → 5→3 (menos épocas = menos overfitting por rollout).
+        - clip_range: 0.18→0.12 → 0.20→0.15 (más margen).
+        - max_grad_norm: fijo en 0.8 (estabilidad para red grande).
 
     Args:
         logdir: Directorio para logs de TensorBoard.
@@ -282,15 +279,16 @@ def obtener_hiperparametros_v3(
     """
     progreso = min(paso_actual / total_pasos, 1.0)
 
-    # Linear decay: lr_start → lr_end (más alto, v11)
-    lr = 5e-4 + (1e-4 - 5e-4) * progreso
-    # Entropy: high at start (exploration), safe floor at end (v11: piso 0.06)
-    ent = 0.12 + (0.06 - 0.12) * progreso
-    # Clip range: wider at start, moderate at end (v11)
-    clip = 0.18 + (0.12 - 0.18) * progreso
-    # Epochs: more at start (learning), fewer at end (stability)
-    epochs = int(8 + (4 - 8) * progreso)
-    grad_norm = 1.0 + (0.5 - 1.0) * progreso  # v11: floor 0.5 instead of 0.3
+    # v14: lr más bajo para red grande
+    lr = 3e-4 + (1e-4 - 3e-4) * progreso
+    # v14: entropía alta para prevenir colapso en red de 600K params
+    ent = 0.18 + (0.10 - 0.18) * progreso
+    # v14: clip más amplio
+    clip = 0.20 + (0.15 - 0.20) * progreso
+    # v14: menos épocas = menos overfitting
+    epochs = int(5 + (3 - 5) * progreso)
+    # v14: grad_norm fijo para estabilidad
+    grad_norm = 0.8
 
     if progreso < 0.25:
         fase = "1 (exploración)"
@@ -313,7 +311,7 @@ def obtener_hiperparametros_v3(
         "ent_coef": ent,
         "vf_coef": 1.0,
         "max_grad_norm": grad_norm,
-        "target_kl": 0.02,
+        "target_kl": 0.04,       # v14: relajado para red grande
         "policy_kwargs": policy_kwargs,
         "verbose": 1,
         "device": device,
