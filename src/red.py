@@ -18,20 +18,21 @@ from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 class CorazonesFeatureExtractor(BaseFeaturesExtractor):
     """Extractor de características MLP para el entorno de Corazones.
 
-    Arquitectura: input_dim → 256 → 256 → 128 (ReLU).
+    Arquitectura: input_dim → 512 → 512 → 256 (ReLU).
+    v12: Ampliada de [256,256,128] para mayor capacidad de representación.
     """
 
     def __init__(
         self,
         observation_space: gym.spaces.Box,
-        features_dim: int = 128,
+        features_dim: int = 256,
     ) -> None:
         super().__init__(observation_space, features_dim)
         input_dim = int(observation_space.shape[0])
         self.net = nn.Sequential(
-            nn.Linear(input_dim, 256), nn.ReLU(),
-            nn.Linear(256, 256), nn.ReLU(),
-            nn.Linear(256, features_dim), nn.ReLU(),
+            nn.Linear(input_dim, 512), nn.ReLU(),
+            nn.Linear(512, 512), nn.ReLU(),
+            nn.Linear(512, features_dim), nn.ReLU(),
         )
 
     def forward(self, observations: torch.Tensor) -> torch.Tensor:
@@ -40,11 +41,14 @@ class CorazonesFeatureExtractor(BaseFeaturesExtractor):
 
 def obtener_policy_kwargs(
     net_arch: Optional[Sequence[int]] = None,
-    features_dim: int = 128,
+    features_dim: int = 256,
 ) -> Dict:
-    """Retorna los policy_kwargs para MaskablePPO."""
+    """Retorna los policy_kwargs para MaskablePPO.
+
+    v12: Default ampliado a [512, 512, 256] para mayor capacidad.
+    """
     if net_arch is None:
-        net_arch = [256, 256, 128]
+        net_arch = [512, 512, 256]
     return {
         "features_extractor_class": CorazonesFeatureExtractor,
         "features_extractor_kwargs": {"features_dim": features_dim},

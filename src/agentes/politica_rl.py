@@ -75,6 +75,7 @@ class PoliticaSB3:
         jugador_idx: int,
         legales: List[Carta],
         obs: Optional[np.ndarray] = None,
+        deterministic: bool = True,
     ) -> Carta:
         """Elige una carta usando la política RL.
 
@@ -84,6 +85,8 @@ class PoliticaSB3:
             legales: Lista de cartas legales.
             obs: Observación pre-construida (v12: oponentes reciben full obs).
                  Si es None, se construye desde el motor (compatibilidad).
+            deterministic: Si True, argmax. Si False, samplea de la distribución
+                (v12: oponentes usan False para diversidad en self-play).
 
         Returns:
             Carta elegida.
@@ -109,6 +112,6 @@ class PoliticaSB3:
             mask[c.id] = True
 
         action, _ = self.model.predict(
-            obs, action_masks=mask, deterministic=True
+            obs, action_masks=mask, deterministic=deterministic
         )
         return Carta._TODAS[int(action)]

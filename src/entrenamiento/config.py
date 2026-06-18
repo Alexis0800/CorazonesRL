@@ -81,8 +81,8 @@ class Hiperparametros:
     best_top: int = 2
 
     # Arquitectura
-    net_arch: List[int] = field(default_factory=lambda: [256, 256, 128])
-    features_dim: int = 128
+    net_arch: List[int] = field(default_factory=lambda: [512, 512, 256])
+    features_dim: int = 256
 
     # Observación
     dim_observacion: int = 194

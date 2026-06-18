@@ -39,8 +39,9 @@ class CorazonesEnv(gym.Env):
     # ------------------------------------------------------------------
     # Recompensas por evento (casting de cartas)
     REWARD_CORAZON: float = -1.0
-    REWARD_DAMA_PICAS: float = -10.0
+    REWARD_DAMA_PICAS: float = -6.0          # v12: reducido -10.0→-6.0 (balancear aversión)
     REWARD_SHOOTING_MOON: float = 50.0
+    REWARD_CORAZON_POZO: float = 1.5         # v12: positivo cuando _pozo_viable() es True
     # Recompensa final: ganar la partida es lo más importante (5x refuerzo)
     REWARD_PRIMERO: float = 500.0
     REWARD_SEGUNDO: float = 200.0
@@ -368,16 +369,20 @@ class CorazonesEnv(gym.Env):
                 return
             # Usar política configurada o random por defecto
             if actual in self._politicas_oponentes:
-                # v12: pasar observación completa a PoliticaSB3 para eliminar
-                # el distribution mismatch entre entrenamiento (220d) e inferencia
+                # v12: pasar observación completa y deterministic=False
+                # para eliminar distribution mismatch y agregar diversidad
                 politica = self._politicas_oponentes[actual]
                 try:
-                    # Intentar pasar obs completa (soportado por PoliticaSB3)
                     obs_completa = self._construir_observacion_desde(actual)
-                    carta = politica(self.motor, actual, legales, obs=obs_completa)
+                    carta = politica(self.motor, actual, legales,
+                                     obs=obs_completa, deterministic=False)
                 except TypeError:
-                    # Fallback: política legacy sin soporte de obs
-                    carta = politica(self.motor, actual, legales)
+                    try:
+                        # Fallback: sin deterministic (políticas legacy)
+                        carta = politica(self.motor, actual, legales,
+                                         obs=obs_completa)
+                    except TypeError:
+                        carta = politica(self.motor, actual, legales)
             else:
                 carta = self._rng.choice(legales)
             self._ejecutar_jugada(actual, carta)
@@ -443,13 +448,18 @@ class CorazonesEnv(gym.Env):
         puntos_baza = sum(c.puntos for c in cartas_en_mesa)
 
         # Calcular recompensa para el agente por esta baza
+        en_modo_pozo = self._pozo_viable()
         if ganador == self.agente_idx:
             # Penalización por puntos ganados (corazones + dama)
             gano_corazon = False
             gano_q_spades = False
             for c in cartas_en_mesa:
                 if c.es_corazon:
-                    self._recompensa_pendiente += self.REWARD_CORAZON
+                    # v12: reward positivo si está intentando shooting the moon
+                    if en_modo_pozo:
+                        self._recompensa_pendiente += self.REWARD_CORAZON_POZO
+                    else:
+                        self._recompensa_pendiente += self.REWARD_CORAZON
                     gano_corazon = True
                 if c.es_dama_de_picas:
                     self._recompensa_pendiente += self.REWARD_DAMA_PICAS
