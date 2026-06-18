@@ -254,15 +254,16 @@ def obtener_hiperparametros_v3(
 ) -> Dict:
     """Hiperparámetros PPO con learning rate schedule lineal.
 
-    v16 — balance entre exploración (v15) y velocidad (v13):
-        Inicio (0%):  lr=3e-4, ent=0.30, clip=0.20, epochs=4, batch=512, kl=0.05
-        Mitad (50%):  lr=2e-4, ent=0.21, clip=0.175, epochs=3
-        Final (100%): lr=1e-4, ent=0.12, clip=0.15, epochs=3, batch=512
+    v17 — ent_coef calibrado con datos reales (ratio ent/pg = 3.9→1.8):
+        Inicio (0%):  lr=3e-4, ent=0.15, clip=0.20, epochs=5, batch=512, kl=0.04
+        Mitad (50%):  lr=2e-4, ent=0.115, clip=0.175, epochs=4
+        Final (100%): lr=1e-4, ent=0.08, clip=0.15, epochs=3, batch=512
 
-    Cambios respecto a v15:
-        - ent_coef: 0.50→0.25 → 0.30→0.12 (gradiente ×2.5 más fuerte que v15).
-        - n_epochs: 3→2 → 4→3 (más learning por rollout).
-        - batch_size: 1024 → 512 (mini-batches más pequeños, más updates).
+    Calibración basada en datos reales de v16:
+        - pg_loss ≈ -0.035, entropy_loss ≈ -0.90 a 2M pasos.
+        - ent_coef=0.15 da ratio 3.9:1 (suficiente protección sin aplastar aprendizaje).
+        - ent_coef=0.08 da ratio 1.8:1 (permite convergencia en fase final).
+        - ent_coef=0.12 (v13) colapsó por red grande (600K params sobreajustan).
 
     Args:
         logdir: Directorio para logs de TensorBoard.
@@ -275,15 +276,15 @@ def obtener_hiperparametros_v3(
     """
     progreso = min(paso_actual / total_pasos, 1.0)
 
-    # v16: lr suave para red grande
+    # v17: lr suave
     lr = 3e-4 + (1e-4 - 3e-4) * progreso
-    # v16: ent_coef balanceado (más fuerte que v13, más débil que v15)
-    ent = 0.30 + (0.12 - 0.30) * progreso
-    # v16: clip amplio
+    # v17: ent_coef calibrado (ratio ent/pg = 3.9→1.8)
+    ent = 0.15 + (0.08 - 0.15) * progreso
+    # v17: clip amplio
     clip = 0.20 + (0.15 - 0.20) * progreso
-    # v16: épocas moderadas
-    epochs = int(4 + (3 - 4) * progreso)
-    # v16: grad_norm fijo
+    # v17: épocas moderadas (más que v16, menos que v13)
+    epochs = int(5 + (3 - 5) * progreso)
+    # v17: grad_norm fijo
     grad_norm = 0.8
 
     if progreso < 0.25:
@@ -298,7 +299,7 @@ def obtener_hiperparametros_v3(
         "policy": "MlpPolicy",
         "learning_rate": lr,
         "n_steps": 4096,
-        "batch_size": 512,       # v16: balance tamaño/gradientes
+        "batch_size": 512,
         "n_epochs": epochs,
         "gamma": 0.995,
         "gae_lambda": 0.98,
@@ -307,7 +308,7 @@ def obtener_hiperparametros_v3(
         "ent_coef": ent,
         "vf_coef": 1.0,
         "max_grad_norm": grad_norm,
-        "target_kl": 0.05,       # v16: intermedio
+        "target_kl": 0.04,       # v17
         "policy_kwargs": policy_kwargs,
         "verbose": 1,
         "device": device,

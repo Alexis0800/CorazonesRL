@@ -735,30 +735,30 @@ class TestDirectoriosV6:
 
 
 # ============================================================
-# Pruebas de hiperparámetros v16 (balance exploración/velocidad)
+# Pruebas de hiperparámetros v17 (calibrado con datos reales)
 # ============================================================
 
 class TestHiperparametrosV16:
-    """v16: ent_coef 0.30→0.12, balance entre v13 (colapso) y v15 (lento)."""
+    """v17: ent_coef 0.15→0.08, ratio ent/pg = 3.9→1.8."""
 
     def test_ent_coef_start(self):
         import importlib
         ts = importlib.import_module("train_self_play")
         hp = ts.obtener_hiperparametros_v3("/tmp", "cpu", 0, 20_000_000)
-        assert hp["ent_coef"] == pytest.approx(0.30, rel=0.01)
+        assert hp["ent_coef"] == pytest.approx(0.15, rel=0.01)
 
     def test_ent_coef_floor(self):
         import importlib
         ts = importlib.import_module("train_self_play")
         hp = ts.obtener_hiperparametros_v3(
             "/tmp", "cpu", 20_000_000, 20_000_000)
-        assert hp["ent_coef"] == pytest.approx(0.12, rel=0.01)
+        assert hp["ent_coef"] == pytest.approx(0.08, rel=0.01)
 
     def test_n_epochs(self):
         import importlib
         ts = importlib.import_module("train_self_play")
         hp = ts.obtener_hiperparametros_v3("/tmp", "cpu", 0, 20_000_000)
-        assert hp["n_epochs"] == 4
+        assert hp["n_epochs"] == 5
 
     def test_batch_size(self):
         import importlib
@@ -770,4 +770,4 @@ class TestHiperparametrosV16:
         import importlib
         ts = importlib.import_module("train_self_play")
         hp = ts.obtener_hiperparametros_v3("/tmp", "cpu", 0, 20_000_000)
-        assert hp["target_kl"] == pytest.approx(0.05, rel=0.01)
+        assert hp["target_kl"] == pytest.approx(0.04, rel=0.01)
