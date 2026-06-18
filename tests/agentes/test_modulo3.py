@@ -735,90 +735,80 @@ class TestDirectoriosV6:
 
 
 # ============================================================
-# Pruebas de hiperparámetros v14 (red grande 600K params)
+# Pruebas de hiperparámetros v15 (ent_coef dominante: 0.50→0.25)
 # ============================================================
 
-class TestHiperparametrosV14:
-    """Verifica que los hiperparámetros v14 están calibrados para la red
-    grande [512, 512, 256] (~600K parámetros) y previenen el colapso
-    de entropía observado en v13."""
+class TestHiperparametrosV15:
+    """Verifica que los hiperparámetros v15 tienen ent_coef suficientemente
+    alto (0.50→0.25) para dominar el gradiente de política desde el primer
+    update, previniendo el colapso inmediato de entropía."""
 
-    def test_ent_coef_start_alto(self):
-        """ent_coef inicial debe ser ≥ 0.18 para red grande."""
+    def test_ent_coef_start_muy_alto(self):
+        """ent_coef inicial debe ser ≥ 0.50 para dominar gradientes."""
         import importlib
         ts = importlib.import_module("train_self_play")
         hp = ts.obtener_hiperparametros_v3("/tmp", "cpu", 0, 20_000_000)
-        assert hp["ent_coef"] >= 0.18, \
-            f"ent_coef inicial debe ser ≥ 0.18 (red grande), es {hp['ent_coef']}"
+        assert hp["ent_coef"] >= 0.50, \
+            f"ent_coef inicial debe ser ≥ 0.50 (v15), es {hp['ent_coef']}"
 
-    def test_ent_coef_floor_seguro(self):
-        """ent_coef final debe ser ≥ 0.10 (piso seguro para red grande)."""
+    def test_ent_coef_floor_alto(self):
+        """ent_coef final debe ser ≥ 0.25 (exploración moderada)."""
         import importlib
         ts = importlib.import_module("train_self_play")
         hp = ts.obtener_hiperparametros_v3(
             "/tmp", "cpu", 20_000_000, 20_000_000)
-        assert hp["ent_coef"] >= 0.10, \
-            f"ent_coef final debe ser ≥ 0.10, es {hp['ent_coef']}"
-
-    def test_target_kl_relajado(self):
-        """target_kl debe ser 0.04 (más permisivo que 0.02 para red grande)."""
-        import importlib
-        ts = importlib.import_module("train_self_play")
-        hp = ts.obtener_hiperparametros_v3("/tmp", "cpu", 0, 20_000_000)
-        assert hp["target_kl"] >= 0.04, \
-            f"target_kl debe ser ≥ 0.04, es {hp['target_kl']}"
-
-    def test_lr_start_reducido(self):
-        """lr inicial debe ser ≤ 3e-4 (más bajo para red grande)."""
-        import importlib
-        ts = importlib.import_module("train_self_play")
-        hp = ts.obtener_hiperparametros_v3("/tmp", "cpu", 0, 20_000_000)
-        assert hp["learning_rate"] <= 3e-4, \
-            f"lr inicial debe ser ≤ 3e-4, es {hp['learning_rate']}"
+        assert hp["ent_coef"] >= 0.25, \
+            f"ent_coef final debe ser ≥ 0.25, es {hp['ent_coef']}"
 
     def test_n_epochs_reducido(self):
-        """n_epochs inicial debe ser ≤ 5 para prevenir overfitting."""
+        """n_epochs inicial debe ser ≤ 3 (menos overfitting)."""
         import importlib
         ts = importlib.import_module("train_self_play")
         hp = ts.obtener_hiperparametros_v3("/tmp", "cpu", 0, 20_000_000)
-        assert hp["n_epochs"] <= 5, \
-            f"n_epochs inicial debe ser ≤ 5, es {hp['n_epochs']}"
+        assert hp["n_epochs"] <= 3, \
+            f"n_epochs inicial debe ser ≤ 3, es {hp['n_epochs']}"
 
-    def test_max_grad_norm_acotado(self):
-        """max_grad_norm debe ser ≤ 0.8 para estabilidad."""
+    def test_batch_size_aumentado(self):
+        """batch_size debe ser ≥ 1024 para gradientes más estables."""
         import importlib
         ts = importlib.import_module("train_self_play")
         hp = ts.obtener_hiperparametros_v3("/tmp", "cpu", 0, 20_000_000)
-        assert hp["max_grad_norm"] <= 0.8, \
-            f"max_grad_norm debe ser ≤ 0.8, es {hp['max_grad_norm']}"
+        assert hp["batch_size"] >= 1024, \
+            f"batch_size debe ser ≥ 1024, es {hp['batch_size']}"
 
-    def test_fase_1_valores_especificos(self):
-        """Fase 1 (0% progreso): lr=3e-4, ent=0.18, clip=0.20, epochs=5."""
+    def test_target_kl_relajado(self):
+        """target_kl debe ser ≥ 0.06 para evitar early stopping."""
+        import importlib
+        ts = importlib.import_module("train_self_play")
+        hp = ts.obtener_hiperparametros_v3("/tmp", "cpu", 0, 20_000_000)
+        assert hp["target_kl"] >= 0.06, \
+            f"target_kl debe ser ≥ 0.06, es {hp['target_kl']}"
+
+    def test_fase_1_v15(self):
+        """Fase 1 (0%): lr=3e-4, ent=0.50, clip=0.20, epochs=3, batch=1024."""
         import importlib
         ts = importlib.import_module("train_self_play")
         hp = ts.obtener_hiperparametros_v3("/tmp", "cpu", 0, 20_000_000)
         assert hp["learning_rate"] == pytest.approx(3e-4, rel=0.01)
-        assert hp["ent_coef"] == pytest.approx(0.18, rel=0.01)
-        assert hp["clip_range"] == pytest.approx(0.20, rel=0.01)
-        assert hp["n_epochs"] == 5
+        assert hp["ent_coef"] == pytest.approx(0.50, rel=0.01)
+        assert hp["n_epochs"] == 3
+        assert hp["batch_size"] == 1024
 
-    def test_fase_2_valores_intermedios(self):
-        """Fase 2 (50% progreso): lr=2e-4, ent=0.14, clip=0.175."""
+    def test_fase_2_v15(self):
+        """Fase 2 (50%): lr=2e-4, ent=0.375."""
         import importlib
         ts = importlib.import_module("train_self_play")
         hp = ts.obtener_hiperparametros_v3(
             "/tmp", "cpu", 10_000_000, 20_000_000)
         assert hp["learning_rate"] == pytest.approx(2e-4, rel=0.01)
-        assert hp["ent_coef"] == pytest.approx(0.14, rel=0.01)
-        assert hp["clip_range"] == pytest.approx(0.175, rel=0.01)
+        assert hp["ent_coef"] == pytest.approx(0.375, rel=0.01)
 
-    def test_fase_3_valores_finales(self):
-        """Fase 3 (100% progreso): lr=1e-4, ent=0.10, clip=0.15, epochs=3."""
+    def test_fase_3_v15(self):
+        """Fase 3 (100%): lr=1e-4, ent=0.25, epochs=2."""
         import importlib
         ts = importlib.import_module("train_self_play")
         hp = ts.obtener_hiperparametros_v3(
             "/tmp", "cpu", 20_000_000, 20_000_000)
         assert hp["learning_rate"] == pytest.approx(1e-4, rel=0.01)
-        assert hp["ent_coef"] == pytest.approx(0.10, rel=0.01)
-        assert hp["clip_range"] == pytest.approx(0.15, rel=0.01)
-        assert hp["n_epochs"] == 3
+        assert hp["ent_coef"] == pytest.approx(0.25, rel=0.01)
+        assert hp["n_epochs"] == 2

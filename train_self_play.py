@@ -254,19 +254,21 @@ def obtener_hiperparametros_v3(
 ) -> Dict:
     """Hiperparámetros PPO con learning rate schedule lineal.
 
-    v14 — recalibrado para red grande [512, 512, 256] (~600K params):
-        Inicio (0%):  lr=3e-4, ent=0.18, clip=0.20, epochs=5, grad_norm=0.8
-        Mitad (50%):  lr=2e-4, ent=0.14, clip=0.175, epochs=4
-        Final (100%): lr=1e-4, ent=0.10, clip=0.15, epochs=3, grad_norm=0.8
+    v15 — ent_coef domina el gradiente de política para prevenir colapso:
+        Inicio (0%):  lr=3e-4, ent=0.50, clip=0.20, epochs=3, batch=1024, kl=0.06
+        Mitad (50%):  lr=2e-4, ent=0.375, clip=0.175, epochs=2
+        Final (100%): lr=1e-4, ent=0.25, clip=0.15, epochs=2, batch=1024
 
-    Cambios respecto a v11-v13:
-        - lr start: 5e-4 → 3e-4 (red grande necesita gradientes más suaves).
-        - ent_coef start: 0.12 → 0.18 (más entropía para 600K params).
-        - ent_coef floor: 0.06 → 0.10 (piso seguro para evitar colapso).
-        - target_kl: 0.02 → 0.04 (permite más cambio por update, evita early stop).
-        - n_epochs: 8→4 → 5→3 (menos épocas = menos overfitting por rollout).
-        - clip_range: 0.18→0.12 → 0.20→0.15 (más margen).
-        - max_grad_norm: fijo en 0.8 (estabilidad para red grande).
+    Cambios respecto a v14:
+        - ent_coef: 0.18→0.10 → 0.50→0.25 (3× más fuerte, domina pg_loss).
+        - n_epochs: 5→3 → 3→2 (menos overfitting por rollout).
+        - batch_size: 512 → 1024 (gradientes más estables).
+        - target_kl: 0.04 → 0.06 (más permisivo en fase 1).
+
+    El ent_coef=0.50 es crítico: con 52 acciones discretas y recompensas
+    densas que generan swings de ventaja de ±13.0, el gradiente de política
+    domina al bonus de entropía si ent_coef < ~0.40. Con 0.50, la entropía
+    se mantiene > 2.0 durante la fase de exploración.
 
     Args:
         logdir: Directorio para logs de TensorBoard.
@@ -279,15 +281,15 @@ def obtener_hiperparametros_v3(
     """
     progreso = min(paso_actual / total_pasos, 1.0)
 
-    # v14: lr más bajo para red grande
+    # v15: lr suave para red grande
     lr = 3e-4 + (1e-4 - 3e-4) * progreso
-    # v14: entropía alta para prevenir colapso en red de 600K params
-    ent = 0.18 + (0.10 - 0.18) * progreso
-    # v14: clip más amplio
+    # v15: ent_coef muy alto para dominar pg_loss desde update #1
+    ent = 0.50 + (0.25 - 0.50) * progreso
+    # v15: clip amplio
     clip = 0.20 + (0.15 - 0.20) * progreso
-    # v14: menos épocas = menos overfitting
-    epochs = int(5 + (3 - 5) * progreso)
-    # v14: grad_norm fijo para estabilidad
+    # v15: menos épocas, batch más grande
+    epochs = int(3 + (2 - 3) * progreso)
+    # v15: grad_norm fijo
     grad_norm = 0.8
 
     if progreso < 0.25:
@@ -302,7 +304,7 @@ def obtener_hiperparametros_v3(
         "policy": "MlpPolicy",
         "learning_rate": lr,
         "n_steps": 4096,
-        "batch_size": 512,
+        "batch_size": 1024,      # v15: más estable para red grande
         "n_epochs": epochs,
         "gamma": 0.995,
         "gae_lambda": 0.98,
@@ -311,7 +313,7 @@ def obtener_hiperparametros_v3(
         "ent_coef": ent,
         "vf_coef": 1.0,
         "max_grad_norm": grad_norm,
-        "target_kl": 0.04,       # v14: relajado para red grande
+        "target_kl": 0.06,       # v15: muy permisivo en fase 1
         "policy_kwargs": policy_kwargs,
         "verbose": 1,
         "device": device,
