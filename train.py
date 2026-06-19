@@ -25,6 +25,7 @@ Uso:
 from __future__ import annotations
 from src.torneo.evaluacion import evaluar_snapshot_callback
 from src.entorno.single_agent import CorazonesEnv
+from src.entorno.dimensiones import DIM_ENTRENAMIENTO
 from train_self_play import (
     DIRECTORIO_MODELOS_V6, DIRECTORIO_VECNORM_V6, DIRECTORIO_LOGS,
     MIN_SNAPSHOT_STEPS, MAX_SNAPSHOTS_POOL,
@@ -245,6 +246,18 @@ def _alertas_diagnostico(diag: Dict[str, float]) -> list:
             f"⚠️  VALUE LOSS ALTO: value_loss={v_loss:.2f} (> 10.0). "
             f"La value function puede estar divergiendo."
         )
+    elif v_loss is not None and v_loss > 0.05:
+        alertas.append(
+            f"🟡  VALUE LOSS ELEVADO: value_loss={v_loss:.4f} (> 0.05). "
+            f"Posible inestabilidad en value head."
+        )
+
+    explained_var = diag.get("explained_variance")
+    if explained_var is not None and explained_var < 0.3:
+        alertas.append(
+            f"🟡  EXPLAINED VARIANCE BAJO: explained_variance={explained_var:.4f} (< 0.30). "
+            f"El value head no está aprendiendo correctamente."
+        )
 
     return alertas
 
@@ -395,7 +408,7 @@ def entrenar_auto(
     resume_from: Optional[str] = None,
     output_dir: Optional[str] = None,
     best_top: int = BEST_TOP,
-    obs_dim: int = 220,
+    obs_dim: int = DIM_ENTRENAMIENTO,
     bc_pretrain: Optional[str] = None,
     eval_experto: bool = False,
     eval_experto_partidas: int = 30,
@@ -639,6 +652,15 @@ def entrenar_auto(
         if alertas:
             for a in alertas:
                 print(f"  {a}")
+            # v12: también escribir alertas en eval_log.jsonl
+            alerta_entry = {
+                "timestamp": datetime.now().isoformat(),
+                "paso": paso_actual,
+                "tipo": "alerta",
+                "alertas": alertas,
+            }
+            with open(eval_log_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(alerta_entry) + "\n")
         if diag:
             diag_entry = {
                 "timestamp": datetime.now().isoformat(),

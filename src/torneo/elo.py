@@ -29,6 +29,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
+from src.entorno.dimensiones import DIM_ENTORNO
+
 # ------------------------------------------------------------------
 # Constantes
 # ------------------------------------------------------------------
@@ -204,7 +206,7 @@ class _Modelo190Wrapper:
         # Parchear observation_space para compatibilidad con predict()
         from gymnasium import spaces
         self.observation_space = spaces.Box(
-            low=0.0, high=1.0, shape=(194,), dtype=np.float32
+            low=0.0, high=1.0, shape=(DIM_ENTORNO,), dtype=np.float32
         )
 
     def predict(self, observation, **kwargs):
@@ -527,7 +529,7 @@ def _jugar_match_snapshots(
             idx_offset += 1
 
     # --- Detectar obs_dim de los modelos para crear el entorno correcto ---
-    obs_dim = 194  # fallback
+    obs_dim: int = DIM_ENTORNO  # fallback
     if not es_bot_a:
         try:
             obs_dim = modelo_a.observation_space.shape[0]

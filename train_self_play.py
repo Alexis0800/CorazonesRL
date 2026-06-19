@@ -11,6 +11,7 @@ from src.agentes.heuristicos import bot_conservador, bot_agresivo, bot_evasivo
 from src.agentes.bot_experto import BotExperto
 from src.agentes.politica_rl import PoliticaSB3
 from src.entorno.single_agent import CorazonesEnv
+from src.entorno.dimensiones import DIM_ENTORNO, DIMS_VALIDAS
 
 import os
 import sys
@@ -135,7 +136,7 @@ def crear_entorno_self_play(
     prob_bot: float = PROB_BOT_V2,
     min_snapshot_steps: int = MIN_SNAPSHOT_STEPS,
     prob_experto: float = 0.0,
-    obs_dim: int = 194,
+    obs_dim: int = DIM_ENTORNO,
 ) -> CorazonesEnv:
     """Crea entorno Self-Play con snapshots del directorio especificado.
 
@@ -152,7 +153,7 @@ def crear_entorno_self_play(
         prob_bot: Probabilidad de usar un bot heurístico como oponente.
         min_snapshot_steps: Pasos mínimos para considerar un snapshot.
         prob_experto: Probabilidad de usar BotExperto como oponente.
-        obs_dim: Dimensión del vector de observación (194 o 220).
+        obs_dim: Dimensión del vector de observación. Usar DIMS_VALIDAS.
 
     Returns:
         Entorno CorazonesEnv configurado con oponentes mixtos.

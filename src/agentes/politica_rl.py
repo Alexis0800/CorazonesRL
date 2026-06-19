@@ -15,6 +15,8 @@ from typing import Any, List, Optional
 
 import numpy as np
 
+from src.entorno.dimensiones import DIM_ENTORNO
+
 from src.dominio.carta import Carta
 from src.entorno.observacion import ObservacionBuilder
 
@@ -44,7 +46,7 @@ class PoliticaSB3:
         try:
             obs_dim = model.observation_space.shape[0]
         except Exception:
-            obs_dim = 194
+            obs_dim = DIM_ENTORNO
         self._obs_builder = ObservacionBuilder(dim=obs_dim)
 
         if vecnorm_path and os.path.exists(vecnorm_path):

@@ -43,14 +43,31 @@ _3_DIAMANTE = _carta(3, 1)   # 3♦
 
 
 def _cfg_v9() -> RewardConfig:
-    """RewardConfig con valores v9."""
+    """RewardConfig con valores v9 (todos los que difieren de v12)."""
     return RewardConfig(
+        REWARD_DAMA_PICAS=-10.0,
         REWARD_Q_SPADES_SIN_POZO=-10.0,
+        REWARD_GANAR_BAZA_CON_CORAZON=-3.0,
         REWARD_DESCARTAR_DAMA_SEGURO=5.0,
+        REWARD_NO_GANAR_BAZA_CON_PUNTOS=1.5,
+        REWARD_DESCARTAR_CORAZON_SEGURO=0.3,
+        REWARD_GANAR_BAZA_SIN_PUNTOS=-0.5,
         REWARD_POR_PUNTO_EN_MANO=-0.1,
         REWARD_BLOQUEAR_POZO=15.0,
         REWARD_ALIMENTAR_EXITOSO=10.0,
         REWARD_CORAZON_POZO=1.5,
+        PENALTY_LIDERAR_PICA_CON_Q_ACTIVA=-3.0,
+        REWARD_QUEMAR_MAXIMA_PALO_SEGURO=2.5,
+        PENALTY_LIDERAR_Q_EQUIVOCADO=-8.0,
+        REWARD_DUMP_Q_SIGUIENDO_PICAS=5.0,
+        PENALTY_GANAR_BAZA_CON_PUNTOS_EVITABLE=-8.0,
+        REWARD_DESCARTAR_K_A_PICAS_CON_Q_ACTIVA=5.0,
+        REWARD_QUEMAR_MAXIMA_FORZADA=1.5,
+        REWARD_QUEMAR_ALTA_SIGUIENDO_PALO=2.5,
+        PENALTY_GANAR_BAZA_TARDIA_SIN_NECESIDAD=-5.0,
+        REWARD_LIDERAR_Q_DUMP_SEGURO=8.0,
+        REWARD_DESCARTAR_CORAZON_BAJO_ROTO=2.5,
+        BAZA_TARDIA=9,
     )
 
 
@@ -377,20 +394,20 @@ class TestRecompensasTacticasV10:
     """Tests para las 3 nuevas recompensas tácticas basadas en errores del BotExperto."""
 
     def test_config_tiene_penalty_ganar_baza_tardia(self):
-        """RewardConfig debe tener PENALTY_GANAR_BAZA_TARDIA_SIN_NECESIDAD."""
-        cfg = RewardConfig()
+        """RewardConfig v9 debe tener PENALTY_GANAR_BAZA_TARDIA_SIN_NECESIDAD."""
+        cfg = _cfg_v9()
         assert hasattr(cfg, "PENALTY_GANAR_BAZA_TARDIA_SIN_NECESIDAD")
         assert cfg.PENALTY_GANAR_BAZA_TARDIA_SIN_NECESIDAD == -5.0
 
     def test_config_tiene_reward_liderar_q_dump_seguro(self):
-        """RewardConfig debe tener REWARD_LIDERAR_Q_DUMP_SEGURO."""
-        cfg = RewardConfig()
+        """RewardConfig v9 debe tener REWARD_LIDERAR_Q_DUMP_SEGURO."""
+        cfg = _cfg_v9()
         assert hasattr(cfg, "REWARD_LIDERAR_Q_DUMP_SEGURO")
         assert cfg.REWARD_LIDERAR_Q_DUMP_SEGURO == 8.0
 
     def test_config_tiene_reward_descartar_corazon_bajo_roto(self):
-        """RewardConfig debe tener REWARD_DESCARTAR_CORAZON_BAJO_ROTO."""
-        cfg = RewardConfig()
+        """RewardConfig v9 debe tener REWARD_DESCARTAR_CORAZON_BAJO_ROTO."""
+        cfg = _cfg_v9()
         assert hasattr(cfg, "REWARD_DESCARTAR_CORAZON_BAJO_ROTO")
         assert cfg.REWARD_DESCARTAR_CORAZON_BAJO_ROTO == 2.5
 

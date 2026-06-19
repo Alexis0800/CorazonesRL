@@ -27,6 +27,8 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 
+from src.entorno.dimensiones import DIM_ENTORNO, DIM_V10
+
 
 # ------------------------------------------------------------------
 # Constantes de rutas (relativas al proyecto)
@@ -279,7 +281,7 @@ class _PoliticaSnapshot:
             try:
                 self.obs_dim = model.observation_space.shape[0]
             except Exception:
-                self.obs_dim = 194
+                self.obs_dim = DIM_ENTORNO
         if vecnorm_path and os.path.exists(vecnorm_path):
             try:
                 with open(vecnorm_path, "rb") as f:
@@ -329,7 +331,7 @@ class _PoliticaSnapshot:
         # [190:194] all_void_X
 
         # --- Features v9/v10 (220-dim): calculables desde motor ---
-        if self.obs_dim >= 220:
+        if self.obs_dim >= DIM_V10:
             # [194] Baza number / 13.0
             obs[194] = (motor.numero_baza - 1) / 13.0
             # [195] Players near 100 / 3.0

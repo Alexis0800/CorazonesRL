@@ -21,6 +21,9 @@ from gymnasium import spaces
 
 from src.dominio.carta import Carta, _PALOS, _PUNTOS, _ES_CORAZON, _ES_DOS_TREBOL
 from src.dominio.motor import MotorCorazones
+from src.entorno.recompensas import CalculadoraRecompensas, RewardConfig
+from src.entorno.observacion import ObservacionBuilder
+from src.entorno.dimensiones import DIM_ENTORNO, DIMS_VALIDAS
 
 
 class CorazonesEnv(gym.Env):
@@ -35,69 +38,73 @@ class CorazonesEnv(gym.Env):
     """
 
     # ------------------------------------------------------------------
-    # Constantes de recompensa
+    # Recompensas — delegadas a RewardConfig (SSOT en recompensas.py)
     # ------------------------------------------------------------------
-    # Recompensas por evento (casting de cartas)
-    REWARD_CORAZON: float = -1.0
-    # v12: reducido -10.0→-6.0 (balancear aversión)
-    REWARD_DAMA_PICAS: float = -6.0
-    REWARD_SHOOTING_MOON: float = 50.0
-    # v12: positivo cuando _pozo_viable() es True
-    REWARD_CORAZON_POZO: float = 1.5
-    # Recompensa final: ganar la partida es lo más importante (5x refuerzo)
-    REWARD_PRIMERO: float = 500.0
-    REWARD_SEGUNDO: float = 200.0
-    REWARD_TERCERO: float = -200.0
-    REWARD_CUARTO: float = -500.0
+    # Acceso de clase para retrocompatibilidad con tests.
+    # El SSOT real es RewardConfig; estas referencias se actualizan
+    # automáticamente al cambiar los valores en recompensas.py.
 
-    # Recompensas densas (reward shaping): señales sutiles, no dominantes
-    REWARD_NO_GANAR_BAZA_CON_PUNTOS: float = 0.3
-    REWARD_DESCARTAR_CORAZON_SEGURO: float = 0.2
-    # v12: reducido 8.0→2.0 (evitar reward hacking)
-    REWARD_DESCARTAR_DAMA_SEGURO: float = 2.0
-    REWARD_GANAR_BAZA_SIN_PUNTOS: float = -0.1
-    REWARD_PERDER_MANO: float = -2.0
-    REWARD_GANAR_MANO: float = 2.0
+    _REWARD_CFG: RewardConfig = RewardConfig()
 
-    # --- NUEVAS RECOMPENSAS v5: correcciones estratégicas ---
-    REWARD_Q_SPADES_SIN_POZO: float = -5.0         # v12: reducido -8.0→-5.0
-    REWARD_GANAR_BAZA_CON_CORAZON: float = -2.0    # v12: reducido -3.0→-2.0
-    REWARD_POR_PUNTO_EN_MANO: float = -0.1         # v12: reducido -0.2→-0.1
+    REWARD_CORAZON: float = _REWARD_CFG.REWARD_CORAZON
+    REWARD_DAMA_PICAS: float = _REWARD_CFG.REWARD_DAMA_PICAS
+    REWARD_SHOOTING_MOON: float = _REWARD_CFG.REWARD_SHOOTING_MOON
+    REWARD_CORAZON_POZO: float = _REWARD_CFG.REWARD_CORAZON_POZO
+    REWARD_PRIMERO: float = _REWARD_CFG.REWARD_PRIMERO
+    REWARD_SEGUNDO: float = _REWARD_CFG.REWARD_SEGUNDO
+    REWARD_TERCERO: float = _REWARD_CFG.REWARD_TERCERO
+    REWARD_CUARTO: float = _REWARD_CFG.REWARD_CUARTO
+    REWARD_NO_GANAR_BAZA_CON_PUNTOS: float = _REWARD_CFG.REWARD_NO_GANAR_BAZA_CON_PUNTOS
+    REWARD_DESCARTAR_CORAZON_SEGURO: float = _REWARD_CFG.REWARD_DESCARTAR_CORAZON_SEGURO
+    REWARD_DESCARTAR_DAMA_SEGURO: float = _REWARD_CFG.REWARD_DESCARTAR_DAMA_SEGURO
+    REWARD_GANAR_BAZA_SIN_PUNTOS: float = _REWARD_CFG.REWARD_GANAR_BAZA_SIN_PUNTOS
+    REWARD_PERDER_MANO: float = _REWARD_CFG.REWARD_PERDER_MANO
+    REWARD_GANAR_MANO: float = _REWARD_CFG.REWARD_GANAR_MANO
+    REWARD_Q_SPADES_SIN_POZO: float = _REWARD_CFG.REWARD_Q_SPADES_SIN_POZO
+    REWARD_GANAR_BAZA_CON_CORAZON: float = _REWARD_CFG.REWARD_GANAR_BAZA_CON_CORAZON
+    REWARD_POR_PUNTO_EN_MANO: float = _REWARD_CFG.REWARD_POR_PUNTO_EN_MANO
+    PENALTY_LIDERAR_PICA_CON_Q_ACTIVA: float = _REWARD_CFG.PENALTY_LIDERAR_PICA_CON_Q_ACTIVA
+    REWARD_QUEMAR_MAXIMA_PALO_SEGURO: float = _REWARD_CFG.REWARD_QUEMAR_MAXIMA_PALO_SEGURO
+    PENALTY_LIDERAR_Q_EQUIVOCADO: float = _REWARD_CFG.PENALTY_LIDERAR_Q_EQUIVOCADO
+    REWARD_DUMP_Q_SIGUIENDO_PICAS: float = _REWARD_CFG.REWARD_DUMP_Q_SIGUIENDO_PICAS
+    PENALTY_GANAR_BAZA_CON_PUNTOS_EVITABLE: float = _REWARD_CFG.PENALTY_GANAR_BAZA_CON_PUNTOS_EVITABLE
+    REWARD_DESCARTAR_K_A_PICAS_CON_Q_ACTIVA: float = _REWARD_CFG.REWARD_DESCARTAR_K_A_PICAS_CON_Q_ACTIVA
+    REWARD_QUEMAR_MAXIMA_FORZADA: float = _REWARD_CFG.REWARD_QUEMAR_MAXIMA_FORZADA
+    REWARD_QUEMAR_ALTA_SIGUIENDO_PALO: float = _REWARD_CFG.REWARD_QUEMAR_ALTA_SIGUIENDO_PALO
+    PENALTY_GANAR_BAZA_TARDIA_SIN_NECESIDAD: float = _REWARD_CFG.PENALTY_GANAR_BAZA_TARDIA_SIN_NECESIDAD
+    REWARD_LIDERAR_Q_DUMP_SEGURO: float = _REWARD_CFG.REWARD_LIDERAR_Q_DUMP_SEGURO
+    REWARD_DESCARTAR_CORAZON_BAJO_ROTO: float = _REWARD_CFG.REWARD_DESCARTAR_CORAZON_BAJO_ROTO
+    BAZA_TARDIA: int = _REWARD_CFG.BAZA_TARDIA
+    PUNTUACION_MAXIMA: float = _REWARD_CFG.PUNTUACION_MAXIMA
 
-    # --- RECOMPENSAS v9-v10: correcciones tácticas (v12: magnitudes reducidas) ---
-    PENALTY_LIDERAR_PICA_CON_Q_ACTIVA: float = -2.0     # v12: -1.0→-2.0
-    REWARD_QUEMAR_MAXIMA_PALO_SEGURO: float = 1.0       # v12: 0.5→1.0
-    # v12: -3.0→-6.0 (penalty > reward de dump)
-    PENALTY_LIDERAR_Q_EQUIVOCADO: float = -6.0
-    REWARD_DUMP_Q_SIGUIENDO_PICAS: float = 1.0         # v12: 2.0→1.0
-    PENALTY_GANAR_BAZA_CON_PUNTOS_EVITABLE: float = -2.0  # v12: -3.0→-2.0
-    REWARD_DESCARTAR_K_A_PICAS_CON_Q_ACTIVA: float = 1.0  # v12: 2.0→1.0
-    REWARD_QUEMAR_MAXIMA_FORZADA: float = 0.5           # v12: 0.3→0.5
-    REWARD_QUEMAR_ALTA_SIGUIENDO_PALO: float = 1.0     # v12: 0.5→1.0
-    PENALTY_GANAR_BAZA_TARDIA_SIN_NECESIDAD: float = -1.0  # v12: -5.0→-1.0
-    REWARD_LIDERAR_Q_DUMP_SEGURO: float = 2.0          # v12: 8.0→2.0
-    REWARD_DESCARTAR_CORAZON_BAJO_ROTO: float = 0.5    # v12: 2.5→0.5
-
-    # Phase-gating: recompensas tácticas solo en bazas ≥ este umbral
-    BAZA_TARDIA: int = 7
-    PUNTUACION_MAXIMA: float = 100.0  # Umbral de fin de partida
+    @property
+    def _cfg(self) -> RewardConfig:
+        """Acceso de instancia al RewardConfig (mismo SSOT que los class attrs)."""
+        return self._calc.cfg
 
     def __init__(
         self,
         agente_idx: int = 0,
         politicas_oponentes: Optional[Dict[int, object]] = None,
-        obs_dim: int = 194,
+        obs_dim: int = DIM_ENTORNO,
     ) -> None:
         super().__init__()
 
         if not (0 <= agente_idx <= 3):
             raise ValueError(
                 f"agente_idx debe estar entre 0 y 3, recibido {agente_idx}")
-        if obs_dim not in (194, 220):
-            raise ValueError(f"obs_dim debe ser 194 o 220, recibido {obs_dim}")
+        if obs_dim not in DIMS_VALIDAS:
+            raise ValueError(
+                f"obs_dim debe ser una de {DIMS_VALIDAS}, recibido {obs_dim}")
 
         self.agente_idx: int = agente_idx
         self._obs_dim: int = obs_dim
+
+        # Calculadora de recompensas (SSOT — recompensas.py)
+        self._calc: CalculadoraRecompensas = CalculadoraRecompensas()
+
+        # Builder de observación (SSOT — observacion.py)
+        self._obs_builder: ObservacionBuilder = ObservacionBuilder(dim=obs_dim)
 
         # Políticas de oponentes: dict jugador_idx → callable(motor, idx, legales) → Carta
         # Si no se especifica, se usa selección aleatoria
@@ -208,8 +215,6 @@ class CorazonesEnv(gym.Env):
         self._ejecutar_jugada(self.agente_idx, carta)
 
         # --- PENALTY: liderar pica no-máxima con Q♠ activa ---
-        # Solo si el agente lideró (posición 0), Q♠ sigue en juego,
-        # la carta es pica (no Q♠), y no era la máxima pica del agente.
         if (posicion_en_baza == 0
                 and self._dama_picas_en is None
                 and carta.palo == 2
@@ -219,27 +224,32 @@ class CorazonesEnv(gym.Env):
                 if c.palo == 2
             ]
             if picas_en_mano and carta.valor < max(c.valor for c in picas_en_mano):
-                self._recompensa_pendiente += self.PENALTY_LIDERAR_PICA_CON_Q_ACTIVA
+                self._recompensa_pendiente += self._calc.recompensa_liderar_pica(
+                    self.agente_idx, carta,
+                    self.motor.jugadores[self.agente_idx].mano,
+                    posicion_en_baza, self._dama_picas_en is None,
+                )
 
         # --- REWARD: liderar máxima de palo seguro (♣/♦) ---
         if (posicion_en_baza == 0
                 and carta.palo in (0, 1)
                 and self._es_maxima_en_mano(carta, self.agente_idx)):
-            self._recompensa_pendiente += self.REWARD_QUEMAR_MAXIMA_PALO_SEGURO
+            self._recompensa_pendiente += self._calc.recompensa_quemar_maxima_palo_seguro(
+                posicion_en_baza, carta, True,
+            )
 
         # --- PENALTY: liderar Q♠ en mal momento ---
         if posicion_en_baza == 0 and carta.es_dama_de_picas:
-            baza_temprana = self.motor.numero_baza < self.BAZA_TARDIA
             soy_maxima_picas = self._es_maxima_en_mano(carta, self.agente_idx)
-            if baza_temprana or soy_maxima_picas:
-                self._recompensa_pendiente += self.PENALTY_LIDERAR_Q_EQUIVOCADO
+            self._recompensa_pendiente += self._calc.recompensa_liderar_q_equivocado(
+                self.motor.numero_baza, carta, soy_maxima_picas,
+            )
 
         # --- REWARD: liderar Q♠ como dump seguro (baza ≥BAZA_TARDIA, K♠/A♠ en circ.) ---
         if posicion_en_baza == 0 and carta.es_dama_de_picas:
-            baza_tardia = self.motor.numero_baza >= self.BAZA_TARDIA
+            baza_tardia = self.motor.numero_baza >= self._cfg.BAZA_TARDIA
             soy_maxima_picas = self._es_maxima_en_mano(carta, self.agente_idx)
             if baza_tardia and not soy_maxima_picas:
-                # Verificar si K♠/A♠ están en circulación (no en cementerio ni en mano)
                 cementerio_ids = set()
                 for j in range(4):
                     for c in self.motor.jugadores[j].bazas_ganadas:
@@ -251,7 +261,10 @@ class CorazonesEnv(gym.Env):
                 k_en_circulacion = k_spades and k_spades.id not in cementerio_ids
                 a_en_circulacion = a_spades and a_spades.id not in cementerio_ids
                 if k_en_circulacion or a_en_circulacion:
-                    self._recompensa_pendiente += self.REWARD_LIDERAR_Q_DUMP_SEGURO
+                    self._recompensa_pendiente += self._calc.recompensa_liderar_q_dump(
+                        self.motor.numero_baza, carta, soy_maxima_picas,
+                        k_en_circulacion or a_en_circulacion,
+                    )
 
         # --- REWARD: quemar máxima forzada (siguiendo palo) ---
         if (posicion_en_baza > 0
@@ -263,7 +276,9 @@ class CorazonesEnv(gym.Env):
                 if c.palo == self.motor.palo_de_salida
             ]
             if not cartas_palo or carta.valor >= max(c.valor for c in cartas_palo):
-                self._recompensa_pendiente += self.REWARD_QUEMAR_MAXIMA_FORZADA
+                self._recompensa_pendiente += self._calc.recompensa_quemar_maxima_forzada(
+                    posicion_en_baza, True, carta,
+                )
 
         # Auto-jugar hasta que sea el turno del agente de nuevo
         self._autoplay_hasta_turno_agente()
@@ -454,71 +469,43 @@ class CorazonesEnv(gym.Env):
         # Calcular recompensa para el agente por esta baza
         en_modo_pozo = self._pozo_viable()
         if ganador == self.agente_idx:
-            # Penalización por puntos ganados (corazones + dama)
-            gano_corazon = False
-            gano_q_spades = False
-            for c in cartas_en_mesa:
-                if c.es_corazon:
-                    # v12: reward positivo si está intentando shooting the moon
-                    if en_modo_pozo:
-                        self._recompensa_pendiente += self.REWARD_CORAZON_POZO
-                    else:
-                        self._recompensa_pendiente += self.REWARD_CORAZON
-                    gano_corazon = True
-                if c.es_dama_de_picas:
-                    self._recompensa_pendiente += self.REWARD_DAMA_PICAS
-                    gano_q_spades = True
-
-            # --- NUEVO v5: penalización extra si ganó Q♠ sin pozo viable ---
-            if gano_q_spades and not self._pozo_viable():
-                self._recompensa_pendiente += self.REWARD_Q_SPADES_SIN_POZO
-
-            # --- NUEVO v5: penalización extra si ganó corazones sin pozo ---
-            if gano_corazon and not self._pozo_viable():
-                self._recompensa_pendiente += self.REWARD_GANAR_BAZA_CON_CORAZON
-
-            # Si ganó baza sin puntos, pequeña penalización
-            if puntos_baza == 0:
-                self._recompensa_pendiente += self.REWARD_GANAR_BAZA_SIN_PUNTOS
+            r_baza = self._calc.recompensa_baza_ganada(
+                cartas_en_mesa, self.agente_idx, ganador,
+                pozo_viable=self._pozo_viable(),
+                numero_baza=numero_baza,
+                en_modo_pozo=en_modo_pozo,
+            )
+            self._recompensa_pendiente += r_baza
         else:
-            # El agente NO ganó la baza → ¡BUENO si la baza tenía puntos!
-            if puntos_baza > 0:
-                self._recompensa_pendiente += self.REWARD_NO_GANAR_BAZA_CON_PUNTOS * \
-                    min(puntos_baza, 3)
-
-            # ¿El agente jugó un corazón o la Dama en esta baza y NO la ganó?
-            if idx_agente_en_mesa is not None:
-                carta_agente = cartas_en_mesa[idx_agente_en_mesa]
-                if carta_agente.es_corazon:
-                    self._recompensa_pendiente += self.REWARD_DESCARTAR_CORAZON_SEGURO
-                if carta_agente.es_dama_de_picas:
-                    self._recompensa_pendiente += self.REWARD_DESCARTAR_DAMA_SEGURO
+            r_evitada = self._calc.recompensa_baza_evitada(
+                cartas_en_mesa, self.agente_idx, idx_agente_en_mesa,
+                numero_baza=numero_baza,
+            )
+            self._recompensa_pendiente += r_evitada
 
         # --- v9-v10: recompensas tácticas por baza (phase-gated: solo bazas ≥ BAZA_TARDIA) ---
-        if idx_agente_en_mesa is not None and numero_baza >= self.BAZA_TARDIA:
+        if idx_agente_en_mesa is not None and numero_baza >= self._cfg.BAZA_TARDIA:
             carta_agente = cartas_en_mesa[idx_agente_en_mesa]
 
             # REWARD: quemar alta (A/K) siguiendo palo en baza limpia
-            if (puntos_baza == 0
-                    and palo_salida is not None
-                    and carta_agente.palo == palo_salida
-                    and carta_agente.valor >= 13):
-                self._recompensa_pendiente += self.REWARD_QUEMAR_ALTA_SIGUIENDO_PALO
+            self._recompensa_pendiente += self._calc.recompensa_quemar_alta_siguiendo_palo(
+                puntos_baza, carta_agente,
+                palo_salida is not None and carta_agente.palo == palo_salida,
+            )
 
             # REWARD: soltar Q♠ siguiendo picas (dump seguro)
-            if (carta_agente.es_dama_de_picas
-                    and ganador != self.agente_idx
-                    and palo_salida == 2):
-                self._recompensa_pendiente += self.REWARD_DUMP_Q_SIGUIENDO_PICAS
+            self._recompensa_pendiente += self._calc.recompensa_dump_q_siguiendo_picas(
+                carta_agente, ganador != self.agente_idx, palo_salida, numero_baza,
+            )
 
             # REWARD: descartar K♠/A♠ en baza limpia con Q♠ activa
-            if (puntos_baza == 0
-                    and self._dama_picas_en is None
-                    and carta_agente.palo == 2
-                    and carta_agente.valor >= 13
-                    and palo_salida is not None
-                    and carta_agente.palo != palo_salida):
-                self._recompensa_pendiente += self.REWARD_DESCARTAR_K_A_PICAS_CON_Q_ACTIVA
+            es_descarte = (
+                palo_salida is not None and carta_agente.palo != palo_salida
+            )
+            self._recompensa_pendiente += self._calc.recompensa_descartar_k_a_picas(
+                carta_agente, puntos_baza,
+                self._dama_picas_en is None, es_descarte,
+            )
 
             # PENALTY: ganar baza con puntos teniendo cartas perdedoras
             if (ganador == self.agente_idx
@@ -526,87 +513,59 @@ class CorazonesEnv(gym.Env):
                     and palo_salida is not None
                     and carta_agente.palo == palo_salida
                     and not self._pozo_viable()):
-                self._recompensa_pendiente += self.PENALTY_GANAR_BAZA_CON_PUNTOS_EVITABLE
+                self._recompensa_pendiente += self._calc.recompensa_ganar_baza_con_puntos_evitable(
+                    numero_baza, puntos_baza, self._pozo_viable(),
+                )
 
-            # --- v10 (Fase B): recompensas tácticas adicionales (phase-gated, baza ≥ BAZA_TARDIA) ---
-
-            # PENALTY: ganar baza tardía sin puntos con máxima de palo seguro
+            # --- v10 (Fase B): penalización ganar baza tardía sin puntos ---
             if (ganador == self.agente_idx
                     and puntos_baza == 0
-                    and palo_salida in (0, 1)  # ♣/♦ = palos seguros
+                    and palo_salida in (0, 1)
                     and carta_agente.palo == palo_salida
                     and self._es_maxima_en_mano(carta_agente, self.agente_idx)
-                    and carta_agente.valor >= 13):  # A o K
-                self._recompensa_pendiente += self.PENALTY_GANAR_BAZA_TARDIA_SIN_NECESIDAD
+                    and carta_agente.valor >= 13):
+                self._recompensa_pendiente += self._calc.recompensa_ganar_baza_tardia(
+                    numero_baza, puntos_baza, palo_salida, carta_agente,
+                    self._es_maxima_en_mano(carta_agente, self.agente_idx),
+                )
 
             # REWARD: descartar corazón en baza limpia con corazones rotos
-            if (self.motor.corazones_rotos
-                    and palo_salida is not None
-                    and carta_agente.palo != palo_salida  # es descarte (void)
-                    and carta_agente.es_corazon
-                    and puntos_baza == 0):
-                self._recompensa_pendiente += self.REWARD_DESCARTAR_CORAZON_BAJO_ROTO
+            self._recompensa_pendiente += self._calc.recompensa_descartar_corazon_bajo(
+                self.motor.corazones_rotos, carta_agente, es_descarte, puntos_baza,
+            )
 
     def _finalizar_mano(self) -> None:
         """Finaliza la mano actual: aplica puntuación, verifica pleno,
         y actualiza puntuaciones históricas."""
-        # Detectar pleno ANTES de aplicar puntuación (los puntos crudos)
         puntos_crudos = [j.contar_puntos_bazas() for j in self.motor.jugadores]
         for i, pts in enumerate(puntos_crudos):
             if pts == 26:
                 self._pleno_jugador = i
                 if i == self.agente_idx:
-                    self._recompensa_pendiente += self.REWARD_SHOOTING_MOON
+                    self._recompensa_pendiente += self._cfg.REWARD_SHOOTING_MOON
                 break
 
-        # Aplicar puntuación (el motor maneja la conversión de pleno)
         puntuaciones_mano = self.motor.aplicar_puntuacion()
 
-        # Actualizar puntuación histórica desde el motor
         for i in range(4):
             self._puntuacion_historica[i] = self.motor.jugadores[i].puntuacion_historica
 
-        # Recompensa por mano: premiar si el agente sumó menos puntos que el promedio
-        if self._pleno_jugador is None:
-            puntos_agente = puntuaciones_mano[self.agente_idx]
-            puntos_otros = [puntuaciones_mano[i]
-                            for i in range(4) if i != self.agente_idx]
-            if puntos_agente < min(puntos_otros):
-                self._recompensa_pendiente += self.REWARD_GANAR_MANO
-            elif puntos_agente > max(puntos_otros):
-                self._recompensa_pendiente += self.REWARD_PERDER_MANO
-
-            # --- NUEVO v5: penalización suave por punto acumulado ---
-            self._recompensa_pendiente += (
-                puntos_agente * self.REWARD_POR_PUNTO_EN_MANO
-            )
-        elif self._pleno_jugador == self.agente_idx:
-            self._recompensa_pendiente += self.REWARD_GANAR_MANO * 2
+        # Recompensa de fin de mano (delegada a CalculadoraRecompensas)
+        r_fin_mano = self._calc.recompensa_fin_mano(
+            self.agente_idx, puntuaciones_mano, self._pleno_jugador,
+        )
+        self._recompensa_pendiente += r_fin_mano
 
     def _juego_terminado(self) -> bool:
         """Determina si la partida ha terminado (algún jugador >= 100 puntos)."""
-        return any(p >= self.PUNTUACION_MAXIMA for p in self._puntuacion_historica)
+        return any(p >= self._cfg.PUNTUACION_MAXIMA for p in self._puntuacion_historica)
 
     def _calcular_recompensa_final(self) -> float:
         """Calcula la recompensa de fin de partida basada en la posición final.
-
-        Returns:
-            Recompensa según el puesto: +500 (1º), +200 (2º), -200 (3º), -500 (4º).
-        """
-        # Ordenar jugadores por puntuación (menor es mejor)
-        puntuaciones = list(self._puntuacion_historica)
-        ranking = sorted(range(4), key=lambda i: puntuaciones[i])
-
-        posicion = ranking.index(self.agente_idx)
-
-        if posicion == 0:
-            return self.REWARD_PRIMERO
-        elif posicion == 1:
-            return self.REWARD_SEGUNDO
-        elif posicion == 2:
-            return self.REWARD_TERCERO
-        else:
-            return self.REWARD_CUARTO
+        Delegada a CalculadoraRecompensas (SSOT)."""
+        return self._calc.recompensa_fin_partida(
+            self.agente_idx, list(self._puntuacion_historica),
+        )
 
     # ------------------------------------------------------------------
     # Construcción del vector de observación (190 dimensiones, v5)
@@ -619,9 +578,7 @@ class CorazonesEnv(gym.Env):
     def _construir_observacion_desde(self, agente_idx: int) -> np.ndarray:
         """Construye el vector de observación desde la perspectiva de cualquier jugador.
 
-        v12: Permite que los oponentes (PoliticaSB3) reciban la observación completa
-        de 220 dimensiones, eliminando el distribution mismatch entre entrenamiento
-        e inferencia de snapshots históricos.
+        Delega en ObservacionBuilder (SSOT en observacion.py). Soporta 194 y 220 dims.
 
         Args:
             agente_idx: Índice del jugador desde cuya perspectiva se construye.
@@ -629,173 +586,16 @@ class CorazonesEnv(gym.Env):
         Returns:
             Array np.float32 de shape (obs_dim,).
         """
-        obs = np.zeros(self._obs_dim, dtype=np.float32)
-        a = agente_idx
-
-        # --- [0:52] Mano del jugador ---
-        for c in self.motor.jugadores[a].mano:
-            obs[c.id] = 1.0
-
-        # --- [52:104] Mesa actual ---
-        for _, c in self.motor.mesa:
-            obs[52 + c.id] = 1.0
-
-        # --- [104:156] Cementerio (solo cartas de bazas ya resueltas) ---
-        for i in range(4):
-            for c in self.motor.jugadores[i].bazas_ganadas:
-                obs[104 + c.id] = 1.0
-
-        # --- [156:172] Vacíos conocidos (4 jugadores × 4 palos) ---
-        for jug_idx in range(4):
-            rel = (jug_idx - a) % 4
-            for palo in self._vacios[jug_idx]:
-                obs[156 + rel * 4 + palo] = 1.0
-
-        # --- [172:176] Puntajes históricos (normalizados /100) ---
-        for jug_idx in range(4):
-            rel = (jug_idx - a) % 4
-            obs[172 +
-                rel] = min(self._puntuacion_historica[jug_idx] / 100.0, 1.0)
-
-        # --- [176:180] Puntos de la mano actual (normalizados /26) ---
-        for jug_idx in range(4):
-            rel = (jug_idx - a) % 4
-            obs[176 + rel] = min(self._puntos_mano_actual[jug_idx] / 26.0, 1.0)
-
-        # --- [180] Corazones rotos ---
-        obs[180] = 1.0 if self.motor.corazones_rotos else 0.0
-
-        # --- [181] Posición en la baza actual ---
-        posiciones = {0: 0.0, 1: 0.33, 2: 0.66, 3: 1.0}
-        obs[181] = posiciones.get(len(self.motor.mesa), 0.0)
-
-        # --- [182:187] Rastreador de la Dama de Picas ---
-        if self._dama_picas_en is None:
-            obs[182] = 1.0  # Oculta
-        else:
-            rel = (self._dama_picas_en - a) % 4
-            obs[183 + rel] = 1.0
-
-        # --- [187:190] Features estratégicas v5 ---
-        obs[187] = 1.0 if self._pozo_viable(a) else 0.0
-        obs[188] = 1.0 if self._debo_arriesgar(a) else 0.0
-        obs[189] = 1.0 if self._puedo_alimentar(a) else 0.0
-
-        # --- [190:194] Features all_void v6 ---
-        for palo in range(4):
-            todos_vacios = all(
-                palo in self._vacios[j]
-                for j in range(4) if j != a
-            )
-            obs[190 + palo] = 1.0 if todos_vacios else 0.0
-
-        # --- Bloque v9 [194:220] (solo si obs_dim == 220) ---
-        if self._obs_dim >= 220:
-            self._construir_bloque_v9(obs, a)
-
-        return obs
-
-    def _construir_bloque_v9(self, obs: np.ndarray, a: int) -> None:
-        """Añade los 26 features v9 al vector obs en los índices [194:220]."""
-        # [194] baza_numero / 13.0
-        obs[194] = min(self.motor.numero_baza / 13.0, 1.0)
-
-        # [195] jugadores_cerca_de_100 / 3.0
-        cerca = sum(1 for p in self._puntuacion_historica if p >= 85)
-        obs[195] = cerca / 3.0
-
-        # [196] Q♠ ya fue capturada (dama_picas_en conocido → fue jugada)
-        obs[196] = 1.0 if self._dama_picas_en is not None else 0.0
-
-        # [197] soy líder en puntaje (tengo el puntaje más bajo)
-        mi_pts = self._puntuacion_historica[a]
-        obs[197] = 1.0 if all(
-            mi_pts <= self._puntuacion_historica[j] for j in range(4)
-        ) else 0.0
-
-        # [198] mano terminal posible (algún jugador ≥74 → esta mano puede acabar)
-        obs[198] = 1.0 if any(
-            p >= 74 for p in self._puntuacion_historica) else 0.0
-
-        # [199:203] cartas restantes por palo (no en cementerio) / 13.0
-        cementerio_por_palo = [0, 0, 0, 0]
-        for j in range(4):
-            for c in self.motor.jugadores[j].bazas_ganadas:
-                cementerio_por_palo[c.palo] += 1
-        for palo in range(4):
-            obs[199 + palo] = max(0.0, (13 - cementerio_por_palo[palo]) / 13.0)
-
-        # [203:207] cartas altas (J/Q/K/A) restantes por palo / 4.0
-        altas_cementerio = [0, 0, 0, 0]
-        for j in range(4):
-            for c in self.motor.jugadores[j].bazas_ganadas:
-                if c.valor >= 11:
-                    altas_cementerio[c.palo] += 1
-        for palo in range(4):
-            obs[203 + palo] = max(0.0, (4 - altas_cementerio[palo]) / 4.0)
-
-        # [207:211] probabilidad Q♠ por jugador relativo
-        q_prob = self._calcular_prob_q_picas(a)
-        for r in range(4):
-            obs[207 + r] = q_prob[r]
-
-        # [211:215] corazones capturados ESTA MANO por jugador relativo / 13.0
-        for j in range(4):
-            rel = (j - a) % 4
-            corazones = sum(
-                1 for c in self.motor.jugadores[j].bazas_ganadas
-                if c.es_corazon
-            )
-            obs[211 + rel] = min(corazones / 13.0, 1.0)
-
-        # [215:219] alerta pozo: jugador capturó ≥6 corazones esta mano
-        for j in range(4):
-            rel = (j - a) % 4
-            corazones = sum(
-                1 for c in self.motor.jugadores[j].bazas_ganadas
-                if c.es_corazon
-            )
-            obs[215 + rel] = 1.0 if corazones >= 6 else 0.0
-
-        # [219] palo_salida: -1.0 si no hay palo de salida, else palo/3.0
-        obs[219] = (
-            -1.0 if self.motor.palo_de_salida is None
-            else self.motor.palo_de_salida / 3.0
+        return self._obs_builder.construir(
+            self.motor, agente_idx,
+            vacios=self._vacios,
+            puntuacion_historica=self._puntuacion_historica,
+            puntos_mano_actual=self._puntos_mano_actual,
+            dama_picas_en=self._dama_picas_en,
+            pozo_viable=self._pozo_viable(agente_idx),
+            debo_arriesgar=self._debo_arriesgar(agente_idx),
+            puedo_alimentar=self._puedo_alimentar(agente_idx),
         )
-
-    def _calcular_prob_q_picas(self, a: int) -> list:
-        """Distribuye probabilidad de Q♠ entre jugadores por eliminación de voids."""
-        _PICA = 2
-
-        # Q♠ ya capturada: nadie la tiene en la mano
-        if self._dama_picas_en is not None:
-            return [0.0, 0.0, 0.0, 0.0]
-
-        # Q♠ está en mi mano
-        mi_mano = self.motor.jugadores[a].mano
-        if any(c.es_dama_de_picas for c in mi_mano):
-            return [1.0, 0.0, 0.0, 0.0]  # posición relativa 0 = yo
-
-        # Q♠ está en la mesa (alguien la acaba de jugar)
-        for jug_idx, carta in self.motor.mesa:
-            if carta.es_dama_de_picas:
-                rel = (jug_idx - a) % 4
-                result = [0.0, 0.0, 0.0, 0.0]
-                result[rel] = 1.0
-                return result
-
-        # Q♠ podría estar en cualquier rival que no sea void en picas
-        candidatos = [
-            r for r in range(1, 4)
-            if _PICA not in self._vacios[(a + r) % 4]
-        ]
-        if not candidatos:
-            return [0.0, 0.0, 0.0, 0.0]
-        prob = 1.0 / len(candidatos)
-        result = [0.0, 0.0, 0.0, 0.0]
-        for r in candidatos:
-            result[r] = prob
-        return result
 
     # ------------------------------------------------------------------
     # Features estratégicas v5

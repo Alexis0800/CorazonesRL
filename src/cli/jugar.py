@@ -13,6 +13,7 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 
 from src.dominio.carta import Carta
+from src.entorno.dimensiones import DIM_ENTORNO
 from src.agentes.heuristicos import bot_conservador, bot_agresivo, bot_evasivo
 from src.torneo.normalizacion import normalizar_obs_desde_archivo
 
@@ -95,7 +96,7 @@ def ejecutar_juego(
 def _modelo_politica(model, idx, legales, vecnorm_path):
     """Política del modelo RL como callable."""
     from src.entorno.observacion import ObservacionBuilder
-    obs_builder = ObservacionBuilder(dim=194)
+    obs_builder = ObservacionBuilder(dim=DIM_ENTORNO)
     obs = obs_builder.construir_desde_motor(None, idx)  # Stub
     mask = np.zeros(52, dtype=np.bool_)
     for c in legales:

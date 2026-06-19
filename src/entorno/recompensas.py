@@ -5,14 +5,13 @@ Extraído de entorno.py para cumplir Single Responsibility Principle (SRP).
 Centraliza todas las constantes de recompensa y la lógica de cálculo
 asociada a eventos de baza y fin de mano.
 
-Cambios v9 (Fase 6):
-  - Phase-gating: recompensas densas solo en bazas ≥9
-  - REWARD_Q_SPADES_SIN_POZO: -8.0 → -10.0
-  - REWARD_DESCARTAR_DAMA_SEGURO: 3.0 → 5.0
-  - REWARD_POR_PUNTO_EN_MANO: -0.2 → -0.1
-  - Nueva: REWARD_BLOQUEAR_POZO = 15.0
-  - Nueva: REWARD_ALIMENTAR_EXITOSO = 10.0
-  - Nueva: REWARD_CORAZON_POZO = 1.5 (positivo en modo pozo)
+v12 (consolidación — SSOT):
+  - Valores unificados con los que se usaban en CorazonesEnv (v12).
+  - Magnitudes reducidas respecto a v9 para evitar reward hacking.
+  - BAZA_TARDIA = 7 (phase-gating).
+  - Nuevos métodos tácticos: liderar_q_equivocado, quemar_maxima_palo_seguro,
+    quemar_maxima_forzada, dump_q_siguiendo_picas, ganar_baza_con_puntos_evitable,
+    descartar_k_a_picas, quemar_alta_siguiendo_palo.
 """
 
 from __future__ import annotations
@@ -23,13 +22,17 @@ from typing import List, Optional
 
 @dataclass(frozen=True)
 class RewardConfig:
-    """Configuración inmutable de todas las constantes de recompensa."""
+    """Configuración inmutable de todas las constantes de recompensa (v12 SSOT).
+
+    Estos valores son el Single Source of Truth. CorazonesEnv DEBE usar
+    CalculadoraRecompensas para toda lógica de recompensa.
+    """
 
     # --- Recompensas por evento (siempre activas) ---
     REWARD_CORAZON: float = -1.0
-    REWARD_DAMA_PICAS: float = -10.0
+    REWARD_DAMA_PICAS: float = -6.0            # v12: reducido -10.0→-6.0
     REWARD_SHOOTING_MOON: float = 50.0
-    REWARD_CORAZON_POZO: float = 1.5       # positivo cuando pozo_viable=True
+    REWARD_CORAZON_POZO: float = 1.5           # positivo cuando pozo_viable=True
 
     # --- Recompensa final ---
     REWARD_PRIMERO: float = 500.0
@@ -37,48 +40,45 @@ class RewardConfig:
     REWARD_TERCERO: float = -200.0
     REWARD_CUARTO: float = -500.0
 
-    # --- Recompensas densas (solo en bazas ≥9) ---
-    REWARD_NO_GANAR_BAZA_CON_PUNTOS: float = 1.5
-    REWARD_DESCARTAR_CORAZON_SEGURO: float = 0.3
-    REWARD_DESCARTAR_DAMA_SEGURO: float = 5.0
-    REWARD_GANAR_BAZA_SIN_PUNTOS: float = -0.5
+    # --- Recompensas densas (solo en bazas ≥ BAZA_TARDIA para evitar/ganar) ---
+    REWARD_NO_GANAR_BAZA_CON_PUNTOS: float = 0.3   # v12: 1.5→0.3
+    REWARD_DESCARTAR_CORAZON_SEGURO: float = 0.2   # v12: 0.3→0.2
+    REWARD_DESCARTAR_DAMA_SEGURO: float = 2.0      # v12: 5.0→2.0
+    REWARD_GANAR_BAZA_SIN_PUNTOS: float = -0.1     # v12: -0.5→-0.1
 
     # --- Recompensas de fin de mano ---
     REWARD_PERDER_MANO: float = -2.0
     REWARD_GANAR_MANO: float = 2.0
-    REWARD_POR_PUNTO_EN_MANO: float = -0.1
+    REWARD_POR_PUNTO_EN_MANO: float = -0.1         # v12: -0.2→-0.1
 
     # --- Correcciones estratégicas (siempre activas) ---
-    REWARD_Q_SPADES_SIN_POZO: float = -10.0
-    REWARD_GANAR_BAZA_CON_CORAZON: float = -3.0
+    REWARD_Q_SPADES_SIN_POZO: float = -5.0          # v12: -10.0→-5.0
+    REWARD_GANAR_BAZA_CON_CORAZON: float = -2.0     # v12: -3.0→-2.0
 
-    # --- Recompensas estratégicas nuevas (v9) ---
+    # --- Recompensas estratégicas ---
     REWARD_BLOQUEAR_POZO: float = 15.0
     REWARD_ALIMENTAR_EXITOSO: float = 10.0
 
-    # --- Correcciones tácticas (v9, Fase 6) ---
-    PENALTY_LIDERAR_PICA_CON_Q_ACTIVA: float = -3.0
-    REWARD_QUEMAR_MAXIMA_PALO_SEGURO: float = 2.5
-    PENALTY_LIDERAR_Q_EQUIVOCADO: float = -8.0
-    REWARD_DUMP_Q_SIGUIENDO_PICAS: float = 5.0
-    PENALTY_GANAR_BAZA_CON_PUNTOS_EVITABLE: float = -8.0
-    REWARD_DESCARTAR_K_A_PICAS_CON_Q_ACTIVA: float = 5.0
-    REWARD_QUEMAR_MAXIMA_FORZADA: float = 1.5
-    REWARD_QUEMAR_ALTA_SIGUIENDO_PALO: float = 2.5
+    # --- Correcciones tácticas (v12: magnitudes reducidas) ---
+    PENALTY_LIDERAR_PICA_CON_Q_ACTIVA: float = -2.0     # v12: -3.0→-2.0
+    REWARD_QUEMAR_MAXIMA_PALO_SEGURO: float = 1.0       # v12: 2.5→1.0
+    PENALTY_LIDERAR_Q_EQUIVOCADO: float = -6.0          # v12: -8.0→-6.0
+    REWARD_DUMP_Q_SIGUIENDO_PICAS: float = 1.0          # v12: 5.0→1.0
+    PENALTY_GANAR_BAZA_CON_PUNTOS_EVITABLE: float = -2.0  # v12: -8.0→-2.0
+    REWARD_DESCARTAR_K_A_PICAS_CON_Q_ACTIVA: float = 1.0  # v12: 5.0→1.0
+    REWARD_QUEMAR_MAXIMA_FORZADA: float = 0.5           # v12: 1.5→0.5
+    REWARD_QUEMAR_ALTA_SIGUIENDO_PALO: float = 1.0     # v12: 2.5→1.0
 
-    # --- Correcciones tácticas (v10, Fase B) ---
-    PENALTY_GANAR_BAZA_TARDIA_SIN_NECESIDAD: float = -5.0
-    REWARD_LIDERAR_Q_DUMP_SEGURO: float = 8.0
-    REWARD_DESCARTAR_CORAZON_BAJO_ROTO: float = 2.5
+    # --- Correcciones tácticas (v10 Fase B, v12: magnitudes reducidas) ---
+    PENALTY_GANAR_BAZA_TARDIA_SIN_NECESIDAD: float = -1.0  # v12: -5.0→-1.0
+    REWARD_LIDERAR_Q_DUMP_SEGURO: float = 2.0          # v12: 8.0→2.0
+    REWARD_DESCARTAR_CORAZON_BAJO_ROTO: float = 0.5    # v12: 2.5→0.5
 
-    # --- Umbral de fin de partida ---
+    # --- Umbrales ---
     PUNTUACION_MAXIMA: float = 100.0
-
-    # --- Umbral de phase-gating ---
-    BAZA_TARDIA: int = 9           # baza ≥9 activa dense rewards
-    SCORE_RIVAL_CERCA: int = 85    # umbral para "rival cerca de 100"
-    # corazones capturados para detectar intento de moon
-    CORAZONES_ALERTA_POZO: int = 10
+    BAZA_TARDIA: int = 7            # v12: 9→7 (phase-gating más temprano)
+    SCORE_RIVAL_CERCA: int = 85     # umbral para "rival cerca de 100"
+    CORAZONES_ALERTA_POZO: int = 10  # corazones capturados para detectar moon
 
 
 class CalculadoraRecompensas:
@@ -372,6 +372,150 @@ class CalculadoraRecompensas:
         if not carta_descartada.es_corazon:
             return 0.0
         return self.cfg.REWARD_DESCARTAR_CORAZON_BAJO_ROTO
+
+    def recompensa_liderar_q_equivocado(
+        self,
+        numero_baza: int,
+        carta_jugada,  # Carta
+        es_maxima_picas: bool,
+    ) -> float:
+        """Penaliza liderar Q♠ en mal momento.
+
+        Condiciones:
+        - Baza temprana (< BAZA_TARDIA): liderar Q♠ es peligroso, nadie ha
+          descartado picas aún.
+        - Soy máxima en picas: si lidero Q♠ siendo máxima, la recuperaré
+          yo mismo → auto-13 puntos garantizados.
+        """
+        if not carta_jugada.es_dama_de_picas:
+            return 0.0
+        baza_temprana = numero_baza < self.cfg.BAZA_TARDIA
+        if baza_temprana or es_maxima_picas:
+            return self.cfg.PENALTY_LIDERAR_Q_EQUIVOCADO
+        return 0.0
+
+    def recompensa_quemar_maxima_palo_seguro(
+        self,
+        posicion_en_baza: int,
+        carta_jugada,  # Carta
+        es_maxima: bool,
+    ) -> float:
+        """Recompensa liderar la máxima de un palo seguro (♣/♦).
+
+        Solo aplica si el agente es el líder de la baza y la carta es
+        la máxima que tiene en ese palo.
+        """
+        if posicion_en_baza != 0:
+            return 0.0
+        if carta_jugada.palo not in (0, 1):  # solo ♣ y ♦
+            return 0.0
+        if not es_maxima:
+            return 0.0
+        return self.cfg.REWARD_QUEMAR_MAXIMA_PALO_SEGURO
+
+    def recompensa_quemar_maxima_forzada(
+        self,
+        posicion_en_baza: int,
+        forzado_a_ganar: bool,
+        carta_jugada,  # Carta
+    ) -> float:
+        """Recompensa jugar la máxima cuando se está forzado a ganar.
+
+        Si el agente va a ganar sí o sí (todas sus cartas del palo superan
+        la máxima en mesa), jugar la más alta es correcto.
+        """
+        if posicion_en_baza == 0:
+            return 0.0  # solo cuando sigue el palo, no cuando lidera
+        if not forzado_a_ganar:
+            return 0.0
+        return self.cfg.REWARD_QUEMAR_MAXIMA_FORZADA
+
+    def recompensa_dump_q_siguiendo_picas(
+        self,
+        carta_jugada,  # Carta
+        gano_baza: bool,
+        palo_salida: Optional[int],
+        numero_baza: int,
+    ) -> float:
+        """Recompensa soltar Q♠ siguiendo el palo de picas.
+
+        Si otro jugador lideró picas y el agente juega Q♠ (obligado
+        por seguir el palo), es un dump forzado que evita recibir
+        los 13 puntos más tarde.
+        """
+        if numero_baza < self.cfg.BAZA_TARDIA:
+            return 0.0
+        if not carta_jugada.es_dama_de_picas:
+            return 0.0
+        if gano_baza:
+            return 0.0  # si ganó la baza, no fue un dump
+        if palo_salida != 2:  # no es pica
+            return 0.0
+        return self.cfg.REWARD_DUMP_Q_SIGUIENDO_PICAS
+
+    def recompensa_ganar_baza_con_puntos_evitable(
+        self,
+        numero_baza: int,
+        puntos_baza: int,
+        pozo_viable: bool,
+    ) -> float:
+        """Penaliza ganar baza con puntos cuando era evitable.
+
+        Condiciones:
+        - Baza ≥ BAZA_TARDIA
+        - La baza tiene puntos
+        - No es modo pozo
+        """
+        if numero_baza < self.cfg.BAZA_TARDIA:
+            return 0.0
+        if puntos_baza <= 0:
+            return 0.0
+        if pozo_viable:
+            return 0.0
+        return self.cfg.PENALTY_GANAR_BAZA_CON_PUNTOS_EVITABLE
+
+    def recompensa_descartar_k_a_picas(
+        self,
+        carta_jugada,  # Carta
+        puntos_baza: int,
+        dama_picas_activa: bool,
+        es_descarte: bool,
+    ) -> float:
+        """Recompensa descartar K♠/A♠ en baza limpia con Q♠ aún activa.
+
+        Descartar cartas altas de picas cuando Q♠ sigue en juego reduce
+        el riesgo de verse forzado a capturarla después.
+        """
+        if not dama_picas_activa:
+            return 0.0
+        if puntos_baza != 0:
+            return 0.0
+        if not es_descarte:
+            return 0.0
+        if carta_jugada.palo != 2:
+            return 0.0
+        if carta_jugada.valor < 13:  # K=13, A=14
+            return 0.0
+        return self.cfg.REWARD_DESCARTAR_K_A_PICAS_CON_Q_ACTIVA
+
+    def recompensa_quemar_alta_siguiendo_palo(
+        self,
+        puntos_baza: int,
+        carta_jugada,  # Carta
+        es_mismo_palo: bool,
+    ) -> float:
+        """Recompensa jugar carta alta (A/K) siguiendo el palo en baza limpia.
+
+        Quemar cartas altas en bazas sin puntos libera al agente de
+        tener que ganar bazas con puntos más tarde.
+        """
+        if puntos_baza != 0:
+            return 0.0
+        if not es_mismo_palo:
+            return 0.0
+        if carta_jugada.valor < 13:
+            return 0.0
+        return self.cfg.REWARD_QUEMAR_ALTA_SIGUIENDO_PALO
 
     def recompensa_fin_partida(
         self, agente_idx: int, puntuacion_historica: List[int]

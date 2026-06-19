@@ -154,13 +154,13 @@ class TestPettingZooAEC:
         env.close()
 
     def test_observation_spaces_son_box_190(self):
-        """Cada agente debe tener espacio de observación Box(194,)."""
+        """Cada agente debe tener espacio de observación Box(220,)."""
         from src.entorno.multi_agent import CorazonesAEC
         env = CorazonesAEC()
         env.reset()
         for agent in env.agents:
             space = env.observation_space(agent)
-            assert space.shape == (194,)
+            assert space.shape == (220,)
             assert space.dtype == np.float32
         env.close()
 
@@ -446,17 +446,17 @@ class TestNormalizacionEvaluacion:
             mean = np.array(obs_rms.mean)
             var = np.array(obs_rms.var)
             assert mean.shape == (
-                194,), f"mean shape debe ser (194,), es {mean.shape}"
+                220,), f"mean shape debe ser (220,), es {mean.shape}"
             assert var.shape == (
-                194,), f"var shape debe ser (194,), es {var.shape}"
+                220,), f"var shape debe ser (220,), es {var.shape}"
             assert obs_rms.count > 0, "count debe ser > 0 tras simular pasos"
 
             # Probar normalización manual (equivalente a SB3)
-            obs_raw = np.ones(194, dtype=np.float32)
+            obs_raw = np.ones(220, dtype=np.float32)
             obs_norm = np.clip(
                 (obs_raw - mean) / np.sqrt(var + 1e-8), -10.0, 10.0
             ).astype(np.float32)
-            assert obs_norm.shape == (194,)
+            assert obs_norm.shape == (220,)
             assert obs_norm.dtype == np.float32
             # Verificar que la normalización efectivamente cambió los valores
             assert not np.allclose(obs_norm, obs_raw), (

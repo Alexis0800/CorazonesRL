@@ -1,7 +1,7 @@
 # 📊 STATUS del Proyecto — Corazones RL
 
-**Fecha:** 2026-06-15 14:00
-**Último hito:** Refactorización completa — src/ aplanado, tests/ reorganizado, modelos/ estandarizado, docs/ curado
+**Fecha:** 2026-06-19
+**Último hito:** Consolidación v12 — SSOT de recompensas, dimensiones unificadas (220-dim estándar), value head estabilizado
 
 ---
 
@@ -15,14 +15,15 @@ src/
 │   ├── jugador.py             # Jugador (mano, puntuación)
 │   └── motor.py               # Motor del juego (bazas, reglas)
 ├── entorno/                   # RL Environment
-│   ├── observacion.py         # Observable builder (SRP)
-│   ├── recompensas.py         # Reward config + calculator (SRP)
+│   ├── dimensiones.py         # SSOT de dimensionalidad (DRY)
+│   ├── observacion.py         # Observable builder 220-dim (SRP)
+│   ├── recompensas.py         # RewardConfig v12 + Calculadora (SRP)
 │   ├── single_agent.py        # CorazonesEnv (Gymnasium)
 │   └── multi_agent.py         # CorazonesAEC (PettingZoo)
 ├── agentes/                   # Estrategias de juego
 │   ├── heuristicos.py         # 3 bots (conservador, agresivo, evasivo)
 │   └── politica_rl.py         # Adaptador MaskablePPO → Strategy
-├── red.py                     # Red neuronal MLP [256,256,128]
+├── red.py                     # Red neuronal MLP [512,512,256]
 ├── torneo/                    # Evaluación y rating
 │   ├── elo.py                 # Sistema Elo (least-squares convergente)
 │   ├── evaluacion.py          # Win rate contra bots

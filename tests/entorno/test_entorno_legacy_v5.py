@@ -57,8 +57,8 @@ class TestObservacionV5:
         """El vector de observación debe tener exactamente 190 floats."""
         env = CorazonesEnv(agente_idx=0)
         obs, _ = env.reset(seed=42)
-        assert obs.shape == (194,), \
-            f"Se esperaba (194,), se obtuvo {obs.shape}"
+        assert obs.shape == (220,), \
+            f"Se esperaba (220,), se obtuvo {obs.shape}"
         assert obs.dtype == np.float32
 
     def test_pozo_viable_mano_fuerte_sin_corazones_rotos(self):

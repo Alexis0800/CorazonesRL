@@ -12,6 +12,8 @@ import os
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
+from src.entorno.dimensiones import DIM_ENTRENAMIENTO
+
 
 # ------------------------------------------------------------------
 # Paths base
@@ -72,8 +74,9 @@ class Hiperparametros:
     gae_lambda: float = 0.95
     clip_range: float = 0.2
     ent_coef: float = 0.12
-    vf_coef: float = 0.5
-    max_grad_norm: float = 0.5
+    vf_coef: float = 0.25        # v12: 0.5→0.25 (estabilizar value head)
+    # v12: 0.5→0.3 (prevenir gradientes explosivos)
+    max_grad_norm: float = 0.3
 
     # Evaluación
     eval_partidas: int = 100
@@ -85,8 +88,8 @@ class Hiperparametros:
     net_arch: List[int] = field(default_factory=lambda: [512, 512, 256])
     features_dim: int = 256
 
-    # Observación
-    dim_observacion: int = 194
+    # Observación — SSOT en src/entorno/dimensiones.py
+    dim_observacion: int = DIM_ENTRENAMIENTO
 
 
 # Instancia por defecto

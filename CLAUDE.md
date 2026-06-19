@@ -66,10 +66,11 @@ python scripts/jugar.py --modelo modelos/v8/elite/snapshot_0015000000.zip
 
 **`src/entorno/`** — Gymnasium RL environment.
 
-- `single_agent.py`: `CorazonesEnv(gym.Env)` — the primary training environment. Wraps `MotorCorazones`, handles action masking, calls opponent policies.
+- `single_agent.py`: `CorazonesEnv(gym.Env)` — the primary training environment. Wraps `MotorCorazones`, handles action masking, calls opponent policies. Uses `CalculadoraRecompensas` for all reward logic (delegated, not inline).
 - `multi_agent.py`: `CorazonesAEC` — PettingZoo AEC environment for multi-agent experiments.
-- `observacion.py`: `ObservacionBuilder` — single source of truth for the 220-dim observation vector. Call `construir()` for the full observation; `construir_desde_motor()` for a minimal observation (used by opponent snapshots in self-play).
-- `recompensas.py`: `RewardConfig` (frozen dataclass) and `CalculadoraRecompensas` — all reward logic isolated here (SRP).
+- `observacion.py`: `ObservacionBuilder` — SSOT for the **220-dim** observation vector (standard). Supports 190/194/220 via constructor parameter. Call `construir()` for full observation; `construir_desde_motor()` for minimal (used by opponent snapshots in self-play).
+- `recompensas.py`: `RewardConfig` (frozen dataclass, **v12 SSOT**) and `CalculadoraRecompensas` — ALL reward logic centralized here (SRP). `CorazonesEnv` delegates every reward calculation to this module.
+- `dimensiones.py`: SSOT for observation dimensions (`DIM_V5=190`, `DIM_V6=194`, `DIM_V10=220`, `DIM_ENTORNO=220`, `DIM_ENTRENAMIENTO=220`, `DIMS_VALIDAS`). All modules import from here — no hardcoded `194` or `220` anywhere.
 
 **`src/agentes/`** — Agent strategies (Strategy pattern: `(motor, idx, legales) → Carta`).
 
@@ -86,14 +87,14 @@ python scripts/jugar.py --modelo modelos/v8/elite/snapshot_0015000000.zip
 
 **`src/entrenamiento/`** — Training plumbing.
 
-- `config.py`: SSOT for all paths and hyperparameters (`Hiperparametros` dataclass, `HP_DEFAULT`). Also provides `directorio_*_version(version)` path helpers.
+- `config.py`: SSOT for all paths and hyperparameters (`Hiperparametros` dataclass, `HP_DEFAULT`). Key v12 defaults: `vf_coef=0.25`, `max_grad_norm=0.3`, `dim_observacion=220`. Also provides `directorio_*_version(version)` path helpers.
 - `self_play.py`: `crear_entorno_self_play()` — builds a `CorazonesEnv` with mixed opponents (bots + historical snapshots loaded from `modelos/{version}/snapshots/`).
 
 **`train.py`** — Main autonomous training pipeline. Manages the full loop: snapshot saving, VecNormalize, cosine decay of `prob_bot` (50%→20%), LR schedule (3 phases), async Elo tournaments, elite snapshot pruning.
 
 **`train_self_play.py`** — Legacy constants and helpers still imported by `train.py`.
 
-### Observation Vector (220 dims, v10)
+### Observation Vector (220 dims, v12 standard)
 
 | Range | Content |
 |-------|---------
@@ -118,7 +119,7 @@ python scripts/jugar.py --modelo modelos/v8/elite/snapshot_0015000000.zip
 | `[207:211]` | Probability Q♠ by relative player |
 | `[211:215]` | Hearts captured this hand / 13.0 |
 | `[215:219]` | Moon alert by player (≥6 hearts) |
-| `[219]` | Led suit (`palo_salida`): -1.0 if None, else suit/3.0 |
+| `[219]` | Led suit (`palo_salida`): 0.0 if None, else suit/3.0 |
 
 All positions are **relative to the agent** (`(player_idx - agent_idx) % 4`).
 
@@ -137,7 +138,9 @@ Golden (frozen) baselines: `modelos/v5_golden/` (190-dim, ~1500 Elo) and `modelo
 
 ### Key Design Constraints
 
-- **VecNormalize coupling**: every `MaskablePPO` snapshot has a paired `_vecnorm.pkl`. Loading a model without its VecNormalize degrades play quality. The `_Modelo190Wrapper` in `elo.py` handles cross-gen compatibility for 190-dim vs 194-dim models.
+- **Single Source of Truth (SSOT)**: Reward values live ONLY in `RewardConfig` (recompensas.py). Observation dimensions live ONLY in `dimensiones.py`. No magic numbers `194` or `220` anywhere in the codebase — always import `DIM_ENTORNO` or `DIM_ENTRENAMIENTO`.
+- **VecNormalize coupling**: every `MaskablePPO` snapshot has a paired `_vecnorm.pkl`. Loading a model without its VecNormalize degrades play quality. The `_Modelo190Wrapper` in `elo.py` handles cross-gen compatibility for 190-dim vs 220-dim models.
 - **Action masking**: `CorazonesEnv` always provides an action mask via `action_masks()`. Use `MaskablePPO` (not `PPO`) and `MaskableEvalCallback`.
 - **Self-play pool**: snapshots older than `min_snapshot_steps` (500k) are excluded from the opponent pool. Pool is capped at `max_snapshots` (50) most-recent entries.
 - **Elo is the primary metric**; win rate against bots is a weaker signal because the bots are simple.
+- **Diagnostic alerts** are written to `eval_log.jsonl` with `"tipo": "alerta"` when metrics cross thresholds (entropy, KL, value_loss, explained_variance).

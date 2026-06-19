@@ -49,8 +49,8 @@ class TestObservacionV6:
         """El vector de observación debe tener exactamente 194 floats."""
         env = CorazonesEnv(agente_idx=0)
         obs, _ = env.reset(seed=42)
-        assert obs.shape == (194,), \
-            f"Se esperaba (194,), se obtuvo {obs.shape}"
+        assert obs.shape == (220,), \
+            f"Se esperaba (220,), se obtuvo {obs.shape}"
         assert obs.dtype == np.float32
 
     def test_all_void_treboles_todos_vacios(self):

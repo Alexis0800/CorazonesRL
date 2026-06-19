@@ -20,6 +20,7 @@ from gymnasium import spaces
 
 from src.dominio.carta import Carta, _PALOS, _PUNTOS, _ES_CORAZON, _ES_DOS_TREBOL
 from src.dominio.motor import MotorCorazones
+from src.entorno.dimensiones import DIM_V10
 
 
 class CorazonesAEC:
@@ -63,7 +64,7 @@ class CorazonesAEC:
         # Espacios por agente (v6: 194 dimensiones con all_void)
         self.observation_spaces: Dict[str, spaces.Box] = {
             agent: spaces.Box(low=0.0, high=1.0,
-                              shape=(194,), dtype=np.float32)
+                              shape=(DIM_V10,), dtype=np.float32)
             for agent in self.possible_agents
         }
         self.action_spaces: Dict[str, spaces.Discrete] = {

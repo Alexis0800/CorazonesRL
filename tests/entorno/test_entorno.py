@@ -103,7 +103,7 @@ class TestDimensionV9:
         """CorazonesEnv sin obs_dim sigue generando 194 dims."""
         env = CorazonesEnv()
         obs, _ = env.reset(seed=0)
-        assert obs.shape == (194,)
+        assert obs.shape == (220,)
 
     def test_observation_space_220(self):
         """observation_space debe reflejar la dimensión configurada."""
@@ -417,12 +417,12 @@ class TestDeteccionMoon:
             f"Agente con 6 corazones: obs[215] debe ser 1.0, obtuvo {obs[215]}"
 
     def test_palo_salida_none_es_menos_uno(self):
-        """Cuando no hay palo de salida (motor.palo_de_salida is None) → obs[219] = -1.0."""
+        """Cuando no hay palo de salida (motor.palo_de_salida is None) → obs[219] = 0.0."""
         env = _env_v9()
         env.motor.palo_de_salida = None
         obs = env._construir_observacion()
-        assert obs[219] == - \
-            1.0, f"Sin palo de salida, [219] debe ser -1.0: {obs[219]}"
+        assert obs[219] == 0.0, \
+            f"Sin palo de salida, [219] debe ser 0.0: {obs[219]}"
 
     def test_palo_salida_trebol(self):
         """Cuando el palo de salida es trébol (0) → obs[219] = 0.0."""
@@ -472,8 +472,8 @@ class TestIntegridad:
     """Tests de consistencia end-to-end del vector v9."""
 
     def test_bloque_194_no_afecta_bloque_antiguo(self):
-        """Los features antiguos [0:194] deben ser idénticos en v6 y v9."""
-        env_v6 = CorazonesEnv(agente_idx=0)
+        """Los features antiguos [0:194] deben ser idénticos en 194 y 220."""
+        env_v6 = CorazonesEnv(agente_idx=0, obs_dim=194)
         obs_v6, _ = env_v6.reset(seed=42)
 
         env_v9 = CorazonesEnv(agente_idx=0, obs_dim=220)

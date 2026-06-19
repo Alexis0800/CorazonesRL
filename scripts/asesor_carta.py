@@ -30,6 +30,9 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
+# SSOT de dimensiones
+from src.entorno.dimensiones import DIM_ENTORNO
+
 # Mapeos de palos y valores para parseo de texto
 NOMBRES_PALOS: Dict[str, int] = {
     "♣": 0, "♦": 1, "♠": 2, "♥": 3,
@@ -302,7 +305,7 @@ def construir_observacion_parcial(
     dama_picas_en: Optional[int],
     agente_idx: int = 0,
 ) -> np.ndarray:
-    """Construye el vector de observación de 194 dimensiones (v6).
+    """Construye el vector de observación de 220 dimensiones (v10).
 
     Bloques:
         [0:52]    Mano del agente (one-hot)
@@ -318,6 +321,7 @@ def construir_observacion_parcial(
         [188]     debo_arriesgar
         [189]     puedo_alimentar
         [190:194] all_void_X — ¿los 3 rivales son void en palo X?
+        [194:220] Features avanzadas (conteo, prob Q♠, alertas) — quedan en 0
 
     Args:
         mano_ids: IDs de cartas en mano del agente.
@@ -331,9 +335,9 @@ def construir_observacion_parcial(
         agente_idx: Índice del jugador humano (0 por defecto).
 
     Returns:
-        Array np.float32 de shape (194,).
+        Array np.float32 de shape (220,).
     """
-    obs = np.zeros(194, dtype=np.float32)
+    obs = np.zeros(DIM_ENTORNO, dtype=np.float32)
     a = agente_idx
 
     # [0:52] Mano

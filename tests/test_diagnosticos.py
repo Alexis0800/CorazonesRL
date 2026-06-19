@@ -158,6 +158,6 @@ class TestAlertasDiagnostico:
             "entropy_loss": -1.0,   # normal con action masking
             "approx_kl": 0.01,
             "clip_fraction": 0.1,
-            "value_loss": 1.5,
+            "value_loss": 0.01,     # v12: normal (bajo umbral amarillo 0.05)
         })
         assert alertas == []
