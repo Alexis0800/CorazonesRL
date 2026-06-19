@@ -246,6 +246,236 @@ def obtener_hiperparametros_v2(logdir: str, device: str) -> Dict:
     }
 
 
+def obtener_hiperparametros_v4(
+    logdir: str,
+    device: str,
+    paso_actual: int = 0,
+    total_pasos: int = 20_000_000,
+) -> Dict:
+    """Hiperparámetros PPO corregidos para v19 — critic forte + self-play agresivo.
+
+    Correcciones respecto a v3/v18 (análisis a 7.5M):
+        - vf_coef: 1.0 → 2.0→1.5 (forzar critic, explained_variance estancado en ~0.60).
+        - ent_coef: 0.12→0.06 → 0.16→0.08 (más exploración, policy_gradient_loss casi plano).
+        - prob_bot_end: 0.30 → 0.15 (menos sobreajuste a bots simples en etapas tardías).
+        - prob_experto default: 0.05 → 0.15 (más exposure al benchmark real).
+        - max_grad_norm: 0.8 → 1.0 (permitir gradientes más grandes con critic fuerte).
+        - n_steps: 4096 → 2048 (actualizaciones más frecuentes, batch_size ajustado a 256).
+
+    Schedule lineal:
+        Inicio (0%):  lr=3e-4, ent=0.16, vf_coef=2.0, clip=0.20, epochs=4
+        Mitad (50%):  lr=2e-4, ent=0.12, vf_coef=1.75, clip=0.175, epochs=3
+        Final (100%): lr=1e-4, ent=0.08, vf_coef=1.5, clip=0.15, epochs=3
+
+    Args:
+        logdir: Directorio para logs de TensorBoard.
+        device: Dispositivo de cómputo ('cpu' o 'cuda').
+        paso_actual: Paso global actual para calcular el progreso.
+        total_pasos: Pasos totales planeados (default: 20M).
+
+    Returns:
+        Diccionario con hiperparámetros para MaskablePPO.
+    """
+    progreso = min(paso_actual / total_pasos, 1.0)
+
+    # v19: lr (sin cambios)
+    lr = 3e-4 + (1e-4 - 3e-4) * progreso
+    # v19: ent_coef aumentado para combatir policy_gradient_loss plano
+    ent = 0.16 + (0.08 - 0.16) * progreso
+    # v19: clip (sin cambios)
+    clip = 0.20 + (0.15 - 0.20) * progreso
+    # v19: epochs (sin cambios)
+    epochs = int(4 + (3 - 4) * progreso)
+    # v19: vf_coef fuerte para forzar al critic (explained_variance estancado ~0.60)
+    vf_coef = 2.0 + (1.5 - 2.0) * progreso
+    # v19: grad_norm aumentado
+    grad_norm = 1.0
+    target_kl = 0.03 + (0.02 - 0.03) * progreso
+
+    if progreso < 0.25:
+        fase = "1 (exploración)"
+    elif progreso < 0.75:
+        fase = "2 (consolidación)"
+    else:
+        fase = "3 (fine-tuning)"
+
+    policy_kwargs = obtener_policy_kwargs()
+    return {
+        "policy": "MlpPolicy",
+        "learning_rate": lr,
+        "n_steps": 2048,
+        "batch_size": 256,
+        "n_epochs": epochs,
+        "gamma": 0.995,
+        "gae_lambda": 0.98,
+        "clip_range": clip,
+        "normalize_advantage": True,
+        "ent_coef": ent,
+        "vf_coef": vf_coef,
+        "max_grad_norm": grad_norm,
+        "target_kl": target_kl,
+        "policy_kwargs": policy_kwargs,
+        "verbose": 1,
+        "device": device,
+        "tensorboard_log": logdir,
+        "_fase": fase,
+    }
+
+
+def obtener_hiperparametros_v5(
+    logdir: str,
+    device: str,
+    paso_actual: int = 0,
+    total_pasos: int = 20_000_000,
+) -> Dict:
+    """Hiperparámetros PPO corregidos para v19b — correcciones conservadoras sobre v19.
+
+    v19 fracasó por 3 cambios simultáneos agresivos:
+        - vf_coef=2.0 → critic inestable (explained_variance colapsos a ~0.16).
+        - n_steps=2048 → solo 8 mini-batches, updates ruidosos.
+        - ent_coef=0.16 inicial → política ruidosa early.
+
+    Correcciones v19b:
+        - vf_coef: 1.5→1.0 (moderado, estable, similar a v18 con leve boost inicial).
+        - n_steps: 4096, batch_size: 512 (restaurar 8 epochs × 8 mini-batches → 64 updates).
+        - ent_coef: 0.10→0.06 (similar a v18, era adecuado; 0.16 era excesivo).
+        - prob_bot_end: 0.20 (compromiso entre 0.30 y 0.15).
+        - prob_experto: 0.10 (más que v18, sin la sobreexposición de v19).
+
+    Schedule lineal:
+        Inicio (0%):  lr=3e-4, ent=0.10, vf_coef=1.5, clip=0.20, epochs=4
+        Mitad (50%):  lr=2e-4, ent=0.08, vf_coef=1.25, clip=0.175, epochs=3
+        Final (100%): lr=1e-4, ent=0.06, vf_coef=1.0, clip=0.15, epochs=3
+
+    Args:
+        logdir: Directorio para logs de TensorBoard.
+        device: Dispositivo de cómputo ('cpu' o 'cuda').
+        paso_actual: Paso global actual para calcular el progreso.
+        total_pasos: Pasos totales planeados (default: 20M).
+
+    Returns:
+        Diccionario con hiperparámetros para MaskablePPO.
+    """
+    progreso = min(paso_actual / total_pasos, 1.0)
+
+    lr = 3e-4 + (1e-4 - 3e-4) * progreso
+    ent = 0.10 + (0.06 - 0.10) * progreso
+    clip = 0.20 + (0.15 - 0.20) * progreso
+    epochs = int(4 + (3 - 4) * progreso)
+    vf_coef = 1.5 + (1.0 - 1.5) * progreso
+    max_grad_norm = 0.8
+    target_kl = 0.03 + (0.02 - 0.03) * progreso
+
+    if progreso < 0.25:
+        fase = "1 (exploración)"
+    elif progreso < 0.75:
+        fase = "2 (consolidación)"
+    else:
+        fase = "3 (fine-tuning)"
+
+    policy_kwargs = obtener_policy_kwargs()
+    return {
+        "policy": "MlpPolicy",
+        "learning_rate": lr,
+        "n_steps": 4096,
+        "batch_size": 512,
+        "n_epochs": epochs,
+        "gamma": 0.995,
+        "gae_lambda": 0.98,
+        "clip_range": clip,
+        "normalize_advantage": True,
+        "ent_coef": ent,
+        "vf_coef": vf_coef,
+        "max_grad_norm": max_grad_norm,
+        "target_kl": target_kl,
+        "policy_kwargs": policy_kwargs,
+        "verbose": 1,
+        "device": device,
+        "tensorboard_log": logdir,
+        "_fase": fase,
+    }
+
+
+def obtener_hiperparametros_v6(
+    logdir: str,
+    device: str,
+    paso_actual: int = 0,
+    total_pasos: int = 20_000_000,
+) -> Dict:
+    """Hiperparámetros PPO para v20 — ent_coef constante + LR con floor.
+
+    v19b alcanzó 1636 Elo a 5.2M pero colapsó después por:
+        - ent_coef decay 0.10→0.06 → entropía colapsó (0.70), KL→0.011
+        - LR bajó demasiado rápido → actor dejó de aprender
+        - La política se volvió determinística prematuramente.
+
+    Correcciones v20:
+        - ent_coef: 0.12 CONSTANTE (sin decay) — previene colapso de entropía.
+        - LR en 2 fases: 3e-4→2e-4 (0-10M), 2e-4→1e-4 (10M-20M).
+        - vf_coef: 1.5→1.0 (mismo decay estable de v19b, funcionó bien).
+        - clip_range, epochs, target_kl: mismo schedule conservador de v19b.
+        - n_steps=4096, batch_size=512 (sin cambios).
+
+    Comparativa vs v19b:
+        v19b: ent 0.10→0.06,  LR 3e-4→1e-4 (lineal)
+        v20:  ent 0.12 fijo,   LR 3e-4→2e-4 (50%)→1e-4 (100%)
+
+    Args:
+        logdir: Directorio para logs de TensorBoard.
+        device: Dispositivo de cómputo ('cpu' o 'cuda').
+        paso_actual: Paso global actual para calcular el progreso.
+        total_pasos: Pasos totales planeados (default: 20M).
+
+    Returns:
+        Diccionario con hiperparámetros para MaskablePPO.
+    """
+    progreso = min(paso_actual / total_pasos, 1.0)
+
+    # LR en 2 fases: no baja de 2e-4 antes de 10M pasos
+    if progreso < 0.5:
+        lr = 3e-4 + (2e-4 - 3e-4) * (progreso / 0.5)
+    else:
+        lr = 2e-4 + (1e-4 - 2e-4) * ((progreso - 0.5) / 0.5)
+
+    # ent_coef constante — la clave para evitar colapso de entropía
+    ent = 0.12
+
+    clip = 0.20 + (0.15 - 0.20) * progreso
+    epochs = int(4 + (3 - 4) * progreso)
+    vf_coef = 1.5 + (1.0 - 1.5) * progreso
+    max_grad_norm = 0.8
+    target_kl = 0.03 + (0.02 - 0.03) * progreso
+
+    if progreso < 0.25:
+        fase = "1 (exploración)"
+    elif progreso < 0.75:
+        fase = "2 (consolidación)"
+    else:
+        fase = "3 (fine-tuning)"
+
+    policy_kwargs = obtener_policy_kwargs()
+    return {
+        "policy": "MlpPolicy",
+        "learning_rate": lr,
+        "n_steps": 4096,
+        "batch_size": 512,
+        "n_epochs": epochs,
+        "gamma": 0.995,
+        "gae_lambda": 0.98,
+        "clip_range": clip,
+        "normalize_advantage": True,
+        "ent_coef": ent,
+        "vf_coef": vf_coef,
+        "max_grad_norm": max_grad_norm,
+        "target_kl": target_kl,
+        "policy_kwargs": policy_kwargs,
+        "verbose": 1,
+        "device": device,
+        "tensorboard_log": logdir,
+        "_fase": fase,
+    }
+
+
 def obtener_hiperparametros_v3(
     logdir: str,
     device: str,

@@ -58,7 +58,8 @@ class Hiperparametros:
     """Hiperparámetros del pipeline de entrenamiento (immutable)."""
     # Self-play
     prob_bot_start: float = 0.50
-    prob_bot_end: float = 0.30
+    # v19b: compromiso entre 0.30 (v18) y 0.15 (v19)
+    prob_bot_end: float = 0.20
     min_snapshot_steps: int = 500_000
     max_snapshots_pool: int = 50
 

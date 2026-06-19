@@ -28,7 +28,7 @@ from src.entorno.single_agent import CorazonesEnv
 from train_self_play import (
     DIRECTORIO_MODELOS_V6, DIRECTORIO_VECNORM_V6, DIRECTORIO_LOGS,
     MIN_SNAPSHOT_STEPS, MAX_SNAPSHOTS_POOL,
-    obtener_policy_kwargs, obtener_hiperparametros_v3,
+    obtener_policy_kwargs, obtener_hiperparametros_v6,
     _aplicar_snapshot_pruning, _extraer_paso_de_ruta,
     crear_entorno_self_play,
 )
@@ -89,7 +89,7 @@ def _configurar_dispositivo(device: str) -> str:
 # Constantes
 # ------------------------------------------------------------------
 PROB_BOT_START: float = 0.50
-PROB_BOT_END: float = 0.30
+PROB_BOT_END: float = 0.20  # v19b: compromiso entre 0.30 (v18) y 0.15 (v19)
 EVAL_PARTIDAS: int = 100
 ELO_PARTIDAS: int = 30
 ELO_MAX_SNAPSHOTS: int = 12
@@ -517,7 +517,7 @@ def entrenar_auto(
         )
 
         # Crear modelo desde cero (o inicializar desde BC preentrenado)
-        hp = obtener_hiperparametros_v3(
+        hp = obtener_hiperparametros_v6(
             DIRECTORIO_LOGS, device, 0, total_steps)
         policy_kwargs = hp.pop(
             "policy_kwargs", None) or obtener_policy_kwargs()
@@ -577,7 +577,7 @@ def entrenar_auto(
         # Calcular prob_bot y LR para esta fase
         pb = prob_bot_actual(paso_actual, total_steps,
                              prob_bot_start, prob_bot_end)
-        hp_actual = obtener_hiperparametros_v3(
+        hp_actual = obtener_hiperparametros_v6(
             DIRECTORIO_LOGS, device, paso_actual, total_steps)
         nueva_fase = hp_actual.pop("_fase", "?")
         hp_actual.pop("policy", None)
@@ -822,7 +822,7 @@ def main() -> None:
                         help=f"Guardar los N mejores snapshots tras cada torneo Elo (default: {BEST_TOP})")
     parser.add_argument("--obs-dim", type=int, default=220, choices=[194, 220],
                         help="Dimensión del vector de observación (default: 220)")
-    parser.add_argument("--prob-experto", type=float, default=0.05,
+    parser.add_argument("--prob-experto", type=float, default=0.10,
                         help="Probabilidad de usar BotExperto como oponente (default: 0.05)")
     parser.add_argument("--bc-pretrain", type=str, default=None,
                         help="Ruta al modelo BC preentrenado .zip para inicializar pesos")
