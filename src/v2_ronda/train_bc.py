@@ -158,10 +158,23 @@ def preentrenar_bc(
     )
 
     # --- Behavioral Cloning ---
+    es_soft = actions_all.ndim == 2 and actions_all.shape[1] == 52
+    if es_soft:
+        print(f"  [Soft labels] Scores (N,52) detectados. Usando MSE loss.")
+        # Convertir scores a target: -score (mayor = mejor), Inf → -100
+        scores = actions_all.copy()
+        scores[np.isinf(scores)] = 100.0  # ilegales → muy malos
+        targets = -scores  # (N, 52), mayor valor = mejor accion
+        # Normalizar a ~[-1, 1]
+        targets = np.clip(targets / 26.0, -4.0, 4.0)
+        targets_t = torch.from_numpy(targets.astype(np.float32))
+    else:
+        targets_t = torch.from_numpy(actions_all)
+
     print(f"  Entrenando BC ({epochs} epochs, batch={batch_size})...")
     dataset = TensorDataset(
         torch.from_numpy(obs_norm),
-        torch.from_numpy(actions_all),
+        targets_t,
     )
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
@@ -184,24 +197,27 @@ def preentrenar_bc(
 
             optimizer.zero_grad()
 
-            # Forward: obtener distribucion de acciones
-            # MaskableActorCriticPolicy.evaluate_actions devuelve
-            # (values, log_prob, entropy)
-            # Pero necesitamos solo la policy (action distribution)
-            # Usamos el feature extractor + action_net directamente
             features = modelo.policy.extract_features(batch_obs)
             latent = modelo.policy.mlp_extractor.policy_net(features)
             logits = modelo.policy.action_net(latent)
 
-            # Cross-entropy loss (maximizar prob de accion experta)
-            loss = F.cross_entropy(logits, batch_act)
+            if es_soft:
+                # MSE: acercar logits al target (mayor target = mejor accion)
+                loss = F.mse_loss(logits, batch_act)
+                # Accuracy: argmax de logits debe coincidir con argmax de target
+                pred = logits.argmax(dim=1)
+                true_best = batch_act.argmax(dim=1)
+                total_acc += (pred == true_best).sum().item()
+            else:
+                # Cross-entropy (formato antiguo)
+                loss = F.cross_entropy(logits, batch_act.long())
+                pred = logits.argmax(dim=1)
+                total_acc += (pred == batch_act).sum().item()
 
             loss.backward()
             optimizer.step()
 
             total_loss += loss.item()
-            pred = logits.argmax(dim=1)
-            total_acc += (pred == batch_act).sum().item()
             total_samples += len(batch_act)
 
         avg_loss = total_loss / n_batches

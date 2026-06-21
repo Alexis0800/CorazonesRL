@@ -57,7 +57,13 @@ Ejemplos:
         help="Usar MCTS multi-step en vez de PIMC one-step")
     parser.add_argument(
         "--mcts-sims", type=int, default=100,
-        help="Simulaciones MCTS por decisión (default: 100)")
+        help="Simulaciones MCTS por decision (default: 100)")
+    parser.add_argument(
+        "--soft-labels", action="store_true", default=False,
+        help="Generar scores para todas las acciones (N,52) en vez de solo la mejor (N,)")
+    parser.add_argument(
+        "--multi-agente", action="store_true", default=False,
+        help="Generar dataset desde las 4 posiciones (4x datos)")
     parser.add_argument(
         "--workers", type=int, default=4,
         help="Número de procesos paralelos (default: 4)")
@@ -79,6 +85,8 @@ Ejemplos:
     print(f"  Oponentes:    {args.oponentes}")
     print(f"  Oracle:       {'MCTS' if args.mcts else 'PIMC'} "
           f"({'{} sims'.format(args.mcts_sims) if args.mcts else '{} mundos'.format(args.mundos)})")
+    print(f"  Soft labels:  {args.soft_labels}")
+    print(f"  Multi-agente: {args.multi_agente}")
     print(f"  Workers:      {args.workers}")
     print(f"  Seed base:    {args.seed}")
     print(f"  Output:       {args.output}.npz + .json")
@@ -93,6 +101,8 @@ Ejemplos:
         seed=args.seed,
         use_mcts=args.mcts,
         mcts_simulaciones=args.mcts_sims,
+        soft_labels=args.soft_labels,
+        multi_agente=args.multi_agente,
     )
 
     guardar_dataset(args.output, obs, actions, meta)
