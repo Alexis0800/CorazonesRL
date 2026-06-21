@@ -13,7 +13,7 @@ Uso desde train_self_play.py:
     from src.evaluacion import evaluar_snapshot_callback, guardar_log_evaluacion
 
 Uso standalone:
-    python -m src.torneo.evaluacion --ruta modelos/v5/snapshots/snapshot_0002000000
+    python -m src.torneo.evaluacion --ruta models/v5/snapshots/snapshot_0002000000
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ from src.entorno.dimensiones import DIM_ENTORNO, DIM_V10
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _PROJECT_DIR = os.path.dirname(_THIS_DIR)
 _VECNORM_V5_DIR = os.path.join(_PROJECT_DIR, "vecnormalize", "v5")
-_MODELOS_V5_DIR = os.path.join(_PROJECT_DIR, "modelos", "v5", "snapshots")
+_MODELOS_V5_DIR = os.path.join(_PROJECT_DIR, "models", "v5", "snapshots")
 __all__ = [
     "_calcular_posicion", "_construir_metricas",
     "normalizar_obs_si_hay_stats", "_detectar_vecnorm", "evaluar_contra_bots",

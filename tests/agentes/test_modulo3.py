@@ -654,8 +654,8 @@ class TestQualityFilterSnapshots:
         ts = importlib.import_module("train_self_play")
 
         snaps = [
-            "modelos/v1_backup/snapshots/snapshot_0000150000",
-            "modelos/v2/snapshots/snapshot_0000250000",
+            "models/v1_backup/snapshots/snapshot_0000150000",
+            "models/v2/snapshots/snapshot_0000250000",
         ]
         filtrados = ts._filtrar_snapshots_por_calidad(snaps, min_steps=100000)
         # 150k >= 100k, 250k >= 100k → ambos pasan

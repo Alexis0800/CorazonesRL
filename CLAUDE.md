@@ -31,26 +31,26 @@ python -m pytest tests/torneo/test_elo.py::TestEloConvergente::test_elo_inicial 
 
 ```bash
 # Train from scratch
-python train.py --total-steps 20000000 --output-dir modelos/v9
+python train.py --total-steps 20000000 --output-dir models/v9
 
 # Resume from a checkpoint
-python train.py --resume modelos/v7_golden/snapshots/snapshot_0014900000 --total-steps 25000000 --output-dir modelos/v7_cont
+python train.py --resume models/v7_golden/snapshots/snapshot_0014900000 --total-steps 25000000 --output-dir models/v7_cont
 
 # With Intel Arc GPU
-python train.py --total-steps 20000000 --device dml --output-dir modelos/v9
+python train.py --total-steps 20000000 --device dml --output-dir models/v9
 ```
 
 ### Evaluation & Play
 
 ```bash
 # Elo tournament between snapshots
-python -m src.torneo.elo --directorio modelos/v8/elite --partidas 50 --elo-puro --incluir-bots
+python -m src.torneo.elo --directorio models/v8/elite --partidas 50 --elo-puro --incluir-bots
 
 # Evaluate win rate against bots
-python scripts/evaluar.py --modelo modelos/v8/elite/snapshot_0015000000.zip
+python scripts/evaluar.py --modelo models/v8/elite/snapshot_0015000000.zip
 
 # Play interactively against the model
-python scripts/jugar.py --modelo modelos/v8/elite/snapshot_0015000000.zip
+python scripts/jugar.py --modelo models/v8/elite/snapshot_0015000000.zip
 ```
 
 ## Architecture
@@ -88,7 +88,7 @@ python scripts/jugar.py --modelo modelos/v8/elite/snapshot_0015000000.zip
 **`src/entrenamiento/`** — Training plumbing.
 
 - `config.py`: SSOT for all paths and hyperparameters (`Hiperparametros` dataclass, `HP_DEFAULT`). Key v12 defaults: `vf_coef=0.25`, `max_grad_norm=0.3`, `dim_observacion=220`. Also provides `directorio_*_version(version)` path helpers.
-- `self_play.py`: `crear_entorno_self_play()` — builds a `CorazonesEnv` with mixed opponents (bots + historical snapshots loaded from `modelos/{version}/snapshots/`).
+- `self_play.py`: `crear_entorno_self_play()` — builds a `CorazonesEnv` with mixed opponents (bots + historical snapshots loaded from `models/{version}/snapshots/`).
 
 **`train.py`** — Main autonomous training pipeline. Manages the full loop: snapshot saving, VecNormalize, cosine decay of `prob_bot` (50%→20%), LR schedule (3 phases), async Elo tournaments, elite snapshot pruning.
 
@@ -126,7 +126,7 @@ All positions are **relative to the agent** (`(player_idx - agent_idx) % 4`).
 ### Model Storage Layout
 
 ```
-modelos/{version}/
+models/{version}/
 ├── config.json          # Version metadata
 ├── snapshots/           # Training checkpoints (snapshot_NNNNNNNNN.zip)
 ├── vecnorm/             # VecNormalize stats per snapshot (*_vecnorm.pkl)
@@ -134,7 +134,7 @@ modelos/{version}/
 └── torneos/             # Elo results (elo_paso_*.txt, eval_log.jsonl)
 ```
 
-Golden (frozen) baselines: `modelos/v5_golden/` (190-dim, ~1500 Elo) and `modelos/v7_golden/` (194-dim, 1723 Elo).
+Golden (frozen) baselines: `models/v5_golden/` (190-dim, ~1500 Elo) and `models/v7_golden/` (194-dim, 1723 Elo).
 
 ### Key Design Constraints
 

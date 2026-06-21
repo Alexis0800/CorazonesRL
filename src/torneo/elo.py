@@ -36,8 +36,8 @@ from src.entorno.dimensiones import DIM_ENTORNO
 # ------------------------------------------------------------------
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _PROJECT_DIR = os.path.dirname(_THIS_DIR)
-_MODELOS_V5_DIR = os.path.join(_PROJECT_DIR, "modelos", "v5", "snapshots")
-_MODELOS_V6_DIR = os.path.join(_PROJECT_DIR, "modelos", "v6", "snapshots")
+_MODELOS_V5_DIR = os.path.join(_PROJECT_DIR, "models", "v5", "snapshots")
+_MODELOS_V6_DIR = os.path.join(_PROJECT_DIR, "models", "v6", "snapshots")
 
 K_FACTOR: int = 32
 ELO_INICIAL: int = 1500

@@ -3,7 +3,7 @@
 Script de evaluación de modelos (entry point).
 
 Uso:
-    python scripts/evaluar.py --modelo modelos/v7/snapshots/snapshot_0014900000.zip
+    python scripts/evaluar.py --modelo models/v7/snapshots/snapshot_0014900000.zip
     python scripts/evaluar.py --modelo v5_golden.zip --partidas 500
 """
 import sys

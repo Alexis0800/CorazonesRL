@@ -20,6 +20,12 @@ from src.mcts.analisis import (
     ComparacionPoliticas,
     EstadisticasManos,
 )
+from src.mcts.dataset import (
+    generar_dataset_una_mano,
+    generar_dataset,
+    guardar_dataset,
+    cargar_dataset,
+)
 
 __all__ = [
     # PIMC básico
@@ -31,6 +37,11 @@ __all__ = [
     # Enumeración y PIMC exacto
     "enumerar_mundos",
     "pimc_exacto",
+    # Dataset BC
+    "generar_dataset_una_mano",
+    "generar_dataset",
+    "guardar_dataset",
+    "cargar_dataset",
     # Análisis
     "analizar_decision",
     "perfil_mano",

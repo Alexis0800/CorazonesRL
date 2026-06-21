@@ -76,7 +76,7 @@ corazones-neuralnetwork/
 │   ├── agentes/               # test_modulo3.py
 │   ├── torneo/                # test_elo.py, test_evaluacion.py, test_auto_v6.py
 │   └── cli/                   # test_asesor.py, test_asesor_partida.py, test_jugar_contra_modelo.py
-├── modelos/                   # Modelos entrenados (versionado)
+├── models/                   # Modelos entrenados (versionado)
 │   └── {version}/
 │       ├── config.json        # Metadatos de la versión
 │       ├── snapshots/         # Checkpoints de entrenamiento
@@ -129,13 +129,13 @@ corazones-neuralnetwork/
 
 `powershell
 # Desde cero
-python train_auto_v6.py --total-steps 20000000 --output-dir modelos/v9
+python train_auto_v6.py --total-steps 20000000 --output-dir models/v9
 
 # Reanudar desde snapshot
-python train_auto_v6.py --resume modelos/v8/elite/snapshot_0017900000 --total-steps 25000000 --output-dir modelos/v9
+python train_auto_v6.py --resume models/v8/elite/snapshot_0017900000 --total-steps 25000000 --output-dir models/v9
 
 # Con GPU Intel Arc
-python train_auto_v6.py --total-steps 20000000 --device dml --output-dir modelos/v9
+python train_auto_v6.py --total-steps 20000000 --device dml --output-dir models/v9
 `
 
 ### Evaluación
@@ -145,13 +145,13 @@ python train_auto_v6.py --total-steps 20000000 --device dml --output-dir modelos
 python scripts/evaluar.py --modelo v5_golden.zip --partidas 500
 
 # Torneo Elo entre snapshots
-python -m src.torneo.elo --directorio modelos/v8/elite --partidas 50 --elo-puro --incluir-bots
+python -m src.torneo.elo --directorio models/v8/elite --partidas 50 --elo-puro --incluir-bots
 `
 
 ### Jugar contra el modelo
 
 `powershell
-python scripts/jugar.py --modelo modelos/v8/elite/snapshot_0017900000.zip
+python scripts/jugar.py --modelo models/v8/elite/snapshot_0017900000.zip
 `
 
 ### Tests

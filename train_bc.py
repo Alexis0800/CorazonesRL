@@ -8,7 +8,7 @@ de partida para el fine-tuning RL (Phase 10).
 Uso:
     python train_bc.py \
         --dataset datasets/mcts_50k.npz \
-        --output modelos/bc_pretrain \
+        --output models/bc_pretrain \
         --epochs 30 --lr 1e-3 --batch 512 --obs-dim 220
 
 El archivo .zip resultante puede cargarse con MaskablePPO.load() para
@@ -221,7 +221,7 @@ def entrenar(
 def main():
     parser = argparse.ArgumentParser(description="Behavioral Cloning sobre dataset MCTS")
     parser.add_argument("--dataset", required=True, help="Ruta al .npz generado por generar_dataset_mcts.py")
-    parser.add_argument("--output", default="modelos/bc_pretrain", help="Directorio de salida")
+    parser.add_argument("--output", default="models/bc_pretrain", help="Directorio de salida")
     parser.add_argument("--obs-dim", type=int, default=220, choices=[194, 220])
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--lr", type=float, default=1e-3)

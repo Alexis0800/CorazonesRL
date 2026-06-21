@@ -3,8 +3,8 @@
 Script de entrenamiento autónomo (entry point).
 
 Uso:
-    python scripts/entrenar.py --total-steps 20000000 --output-dir modelos/v9
-    python scripts/entrenar.py --resume modelos/v8/elite/snapshot_XXX --total-steps 25000000
+    python scripts/entrenar.py --total-steps 20000000 --output-dir models/v9
+    python scripts/entrenar.py --resume models/v8/elite/snapshot_XXX --total-steps 25000000
 """
 from train import main
 import sys

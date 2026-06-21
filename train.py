@@ -12,14 +12,14 @@ Ejecuta un ciclo completo de entrenamiento con:
 
 Uso:
     # Desde cero
-    python train.py --total-steps 20000000 --output-dir modelos/v8
+    python train.py --total-steps 20000000 --output-dir models/v8
 
     # Reanudar desde golden
-    python train.py --resume modelos/v7_golden/snapshots/snapshot_0014900000 --total-steps 25000000 --output-dir modelos/v7_cont
+    python train.py --resume models/v7_golden/snapshots/snapshot_0014900000 --total-steps 25000000 --output-dir models/v7_cont
 
     # Con GPU Intel Arc
     pip install torch-directml
-    python train.py --total-steps 20000000 --device dml --output-dir modelos/v8
+    python train.py --total-steps 20000000 --device dml --output-dir models/v8
 """
 
 from __future__ import annotations
@@ -30,6 +30,7 @@ from train_self_play import (
     DIRECTORIO_MODELOS_V6, DIRECTORIO_VECNORM_V6, DIRECTORIO_LOGS,
     MIN_SNAPSHOT_STEPS, MAX_SNAPSHOTS_POOL,
     obtener_policy_kwargs, obtener_hiperparametros_v6,
+    obtener_hiperparametros_v23,
     _aplicar_snapshot_pruning, _extraer_paso_de_ruta,
     crear_entorno_self_play,
 )
@@ -90,7 +91,9 @@ def _configurar_dispositivo(device: str) -> str:
 # Constantes
 # ------------------------------------------------------------------
 PROB_BOT_START: float = 0.50
-PROB_BOT_END: float = 0.20  # v19b: compromiso entre 0.30 (v18) y 0.15 (v19)
+PROB_BOT_END: float = 0.30  # v23: 0.20→0.30 (más diversidad en fases tardías)
+PROB_EXPERTO_START: float = 0.10
+PROB_EXPERTO_END: float = 0.25  # v23: BotExperto crece con el tiempo
 EVAL_PARTIDAS: int = 100
 ELO_PARTIDAS: int = 30
 ELO_MAX_SNAPSHOTS: int = 12
@@ -402,17 +405,21 @@ def entrenar_auto(
     eval_partidas: int = EVAL_PARTIDAS,
     prob_bot_start: float = PROB_BOT_START,
     prob_bot_end: float = PROB_BOT_END,
-    prob_experto: float = 0.0,
+    prob_experto: float = PROB_EXPERTO_START,
+    prob_experto_end: float = PROB_EXPERTO_END,
     seed: int = 42,
     device: str = "cpu",
     resume_from: Optional[str] = None,
     output_dir: Optional[str] = None,
     best_top: int = BEST_TOP,
     obs_dim: int = DIM_ENTRENAMIENTO,
+    reward_mode: str = "v12",
     bc_pretrain: Optional[str] = None,
     eval_experto: bool = False,
     eval_experto_partidas: int = 30,
     elo_experto: bool = False,
+    early_stop_patience: int = 3,
+    hp_version: str = "v6",
 ) -> int:
     """Ejecuta entrenamiento autónomo completo desde cero o reanudando.
 
@@ -428,10 +435,12 @@ def entrenar_auto(
         seed: Semilla aleatoria.
         device: Dispositivo de cómputo (cpu, cuda, dml, xpu).
         resume_from: Ruta a snapshot .zip para reanudar.
-        output_dir: Directorio de salida (default: modelos/v6).
-        best_top: Cuántos mejores snapshots guardar tras cada torneo Elo (default 2).
-        obs_dim: Dimensión del vector de observación (194 o 220).
+        output_dir: Directorio de salida (default: models/v6).
+        best_top: Cuántos mejores snapshots guardar tras cada torneo Elo.
+        obs_dim: Dimensión del vector de observación.
         bc_pretrain: Ruta a modelo BC preentrenado .zip para inicializar pesos.
+        early_stop_patience: Evaluaciones sin mejora antes de parar (0=desactivado).
+        hp_version: Versión de hiperparámetros: 'v6' o 'v23'.
 
     Returns:
         Paso final alcanzado.
@@ -583,6 +592,17 @@ def entrenar_auto(
     # Lista de (proceso, output_file) para torneos Elo asíncronos
     procesos_elo: List[tuple] = []
 
+    # Early stopping: trackear win_rate_experto para detectar degradación
+    _mejor_wr_experto: float = -1.0
+    _mejor_wr_paso: int = 0
+    _contador_sin_mejora: int = 0
+
+    # Selector de versión de hiperparámetros
+    if hp_version == "v23":
+        _hp_func = obtener_hiperparametros_v23
+    else:
+        _hp_func = obtener_hiperparametros_v6
+
     t_start = time.time()
 
     # Bucle principal
@@ -590,7 +610,10 @@ def entrenar_auto(
         # Calcular prob_bot y LR para esta fase
         pb = prob_bot_actual(paso_actual, total_steps,
                              prob_bot_start, prob_bot_end)
-        hp_actual = obtener_hiperparametros_v6(
+        # prob_experto crece con el progreso (más BotExperto cuando el modelo mejora)
+        pexp = prob_bot_actual(paso_actual, total_steps,
+                               prob_experto, prob_experto_end)
+        hp_actual = _hp_func(
             DIRECTORIO_LOGS, device, paso_actual, total_steps)
         nueva_fase = hp_actual.pop("_fase", "?")
         hp_actual.pop("policy", None)
@@ -619,8 +642,9 @@ def entrenar_auto(
             agente_idx=0,
             seed=seed + paso_actual,
             prob_bot=pb,
-            prob_experto=prob_experto,
+            prob_experto=pexp,
             obs_dim=obs_dim,
+            reward_mode=reward_mode,
         )
         _env_ref = env_nuevo
         venv = DummyVecEnv([lambda: _env_ref])
@@ -735,6 +759,26 @@ def entrenar_auto(
                     }
                     with open(eval_log_path, "a", encoding="utf-8") as f:
                         f.write(json.dumps(entry_exp) + "\n")
+
+                    # --- Early stopping por win_rate_experto ---
+                    if early_stop_patience > 0:
+                        if wr_exp > _mejor_wr_experto:
+                            _mejor_wr_experto = wr_exp
+                            _mejor_wr_paso = paso_actual
+                            _contador_sin_mejora = 0
+                        else:
+                            _contador_sin_mejora += 1
+
+                        if _contador_sin_mejora >= early_stop_patience:
+                            print(
+                                f"\n  🛑 EARLY STOPPING: wr_experto no mejora "
+                                f"desde paso {_mejor_wr_paso:,} "
+                                f"(mejor={_mejor_wr_experto:.1%}, "
+                                f"actual={wr_exp:.1%}, "
+                                f"paciencia={early_stop_patience})")
+                            print(f"  ✅ Mejor snapshot: paso {_mejor_wr_paso:,}"
+                                  f" con wr_experto={_mejor_wr_experto:.1%}")
+                            break
                 except Exception as e:
                     print(f"  ⚠️  Error en eval vs Experto: {e}")
         # Torneo ELO periódico
@@ -839,13 +883,15 @@ def main() -> None:
     parser.add_argument("--resume", type=str, default=None,
                         help="Reanudar desde snapshot .zip existente")
     parser.add_argument("--output-dir", type=str, default=None,
-                        help="Directorio de salida para snapshots (default: modelos/v6)")
+                        help="Directorio de salida para snapshots (default: models/v6)")
     parser.add_argument("--best-top", type=int, default=BEST_TOP,
                         help=f"Guardar los N mejores snapshots tras cada torneo Elo (default: {BEST_TOP})")
     parser.add_argument("--obs-dim", type=int, default=220, choices=[194, 220],
                         help="Dimensión del vector de observación (default: 220)")
-    parser.add_argument("--prob-experto", type=float, default=0.10,
-                        help="Probabilidad de usar BotExperto como oponente (default: 0.05)")
+    parser.add_argument("--prob-experto", type=float, default=PROB_EXPERTO_START,
+                        help="Prob inicial de BotExperto como oponente (crece con progreso)")
+    parser.add_argument("--prob-experto-end", type=float, default=PROB_EXPERTO_END,
+                        help="Prob final de BotExperto (default: 0.25)")
     parser.add_argument("--bc-pretrain", type=str, default=None,
                         help="Ruta al modelo BC preentrenado .zip para inicializar pesos")
     parser.add_argument("--eval-experto", action="store_true", default=False,
@@ -854,6 +900,14 @@ def main() -> None:
                         help="Partidas contra 3× BotExperto (default: 30)")
     parser.add_argument("--elo-experto", action="store_true", default=False,
                         help="Incluir BotExperto como participante en torneos Elo")
+    parser.add_argument("--early-stop-patience", type=int, default=3,
+                        help="Evals sin mejora en wr_experto antes de parar (0=desactivado, default: 3)")
+    parser.add_argument("--hp-version", type=str, default="v6",
+                        choices=["v6", "v23"],
+                        help="Versión de hiperparámetros: v6 (legacy) o v23 (BC-aware)")
+    parser.add_argument("--reward-mode", type=str, default="v12",
+                        choices=["v12", "minimal"],
+                        help="Modo de recompensa: v12 (20 señales) o minimal (3 señales)")
     args = parser.parse_args()
 
     paso_final = entrenar_auto(
@@ -865,6 +919,7 @@ def main() -> None:
         prob_bot_start=args.prob_bot_start,
         prob_bot_end=args.prob_bot_end,
         prob_experto=args.prob_experto,
+        prob_experto_end=args.prob_experto_end,
         seed=args.seed,
         device=args.device,
         resume_from=args.resume,
@@ -875,6 +930,9 @@ def main() -> None:
         eval_experto=args.eval_experto,
         eval_experto_partidas=args.eval_experto_partidas,
         elo_experto=args.elo_experto,
+        early_stop_patience=args.early_stop_patience,
+        hp_version=args.hp_version,
+        reward_mode=args.reward_mode,
     )
     print(f"\nPaso final alcanzado: {paso_final:,}")
 

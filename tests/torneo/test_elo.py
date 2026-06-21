@@ -149,7 +149,7 @@ class TestTorneoConSnapshots:
         from src.torneo.elo import _listar_snapshots_torneo
         snaps = _listar_snapshots_torneo(
             [os.path.join(os.path.dirname(__file__), "..",
-                          "modelos", "v5", "snapshots")],
+                          "models", "v5", "snapshots")],
             min_paso=0,
             max_snapshots=10,
         )

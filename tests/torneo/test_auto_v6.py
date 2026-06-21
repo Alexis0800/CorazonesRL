@@ -269,8 +269,8 @@ class TestComandoELO:
     def test_comando_contiene_parametros_clave(self):
         """El comando debe contener todos los flags necesarios."""
         cmd = _comando_elo(
-            "modelos/v6/snapshots", 5_000_000, 10, 30, "v6/elo_out.txt")
-        assert "--directorio modelos/v6/snapshots" in cmd
+            "models/v6/snapshots", 5_000_000, 10, 30, "v6/elo_out.txt")
+        assert "--directorio models/v6/snapshots" in cmd
         assert "--partidas 30" in cmd
         assert "--min-paso 5000000" in cmd
         assert "--max-snapshots 10" in cmd

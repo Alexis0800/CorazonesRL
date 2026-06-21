@@ -460,9 +460,11 @@ def mcts_mejor_jugada(
     if rng is None:
         rng = np.random.default_rng()
     if crear_bots is None:
-        # Pre-compilar la factory para no recrear BotExperto en cada simulación
-        bots_base = crear_bots_rollout(tipo=rollout_tipo, rng=rng)
-        def crear_bots(): return bots_base  # noqa: E731
+        # Factory que crea bots FRESCOS en cada simulación.
+        # BotExperto tiene estado interno (vacios, sospecha_pozo) que
+        # se acumula entre simulaciones — NO se debe reutilizar.
+        def crear_bots():
+            return crear_bots_rollout(tipo=rollout_tipo, rng=rng)
 
     # Raíz del árbol
     raiz = _NodoMCTS()
@@ -474,9 +476,6 @@ def mcts_mejor_jugada(
         hijo = _NodoMCTS(carta=carta)
         raiz.hijos[carta.id] = hijo
 
-    # Bots de rollout (compartidos entre simulaciones para eficiencia)
-    bots_rollout = crear_bots()
-
     for _ in range(num_simulaciones):
         # 1. Determinizar: crear un mundo
         mundo = determinizar(motor, agente_idx, vacios=vacios, rng=rng)
@@ -484,14 +483,13 @@ def mcts_mejor_jugada(
         # 2. Seleccionar carta desde la raíz (exploración con UCB)
         carta_elegida = _seleccionar_mejor_hijo(raiz).carta
 
-        # 3. Simular (rollout) desde el mundo con esa carta
+        # 3. Simular (rollout) con bots FRESCOS por simulación
         clon = _clonar_motor(mundo)
+        bots_frescos = crear_bots()
         puntos = simular_resto_mano(
-            clon, agente_idx, carta_elegida, bots_rollout)
+            clon, agente_idx, carta_elegida, bots_frescos)
 
         # 4. Backpropagar: actualizar el valor como COSTE (menos = mejor)
-        # Puntuación de Hearts: 0 es perfecto, 26 es lo peor.
-        # Queremos MINIMIZAR, así que el valor es la puntuación directamente.
         hijo_nodo = raiz.hijos[carta_elegida.id]
         hijo_nodo.visitas += 1
         hijo_nodo.valor_total += puntos  # acumulamos coste (menor = mejor)

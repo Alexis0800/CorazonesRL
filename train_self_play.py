@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 DIRECTORIO_LOGS = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "logs")
 DIRECTORIO_MODELOS_V6 = os.path.join(os.path.dirname(
-    os.path.abspath(__file__)), "modelos", "v6")
+    os.path.abspath(__file__)), "models", "v6")
 DIRECTORIO_VECNORM_V6 = os.path.join(os.path.dirname(
     os.path.abspath(__file__)), "vecnormalize", "v6")
 
@@ -137,6 +137,7 @@ def crear_entorno_self_play(
     min_snapshot_steps: int = MIN_SNAPSHOT_STEPS,
     prob_experto: float = 0.0,
     obs_dim: int = DIM_ENTORNO,
+    reward_mode: str = "v12",
 ) -> CorazonesEnv:
     """Crea entorno Self-Play con snapshots del directorio especificado.
 
@@ -200,6 +201,7 @@ def crear_entorno_self_play(
         agente_idx=agente_idx,
         politicas_oponentes=politicas,
         obs_dim=obs_dim,
+        reward_mode=reward_mode,
     )
     if seed is not None:
         env.reset(seed=seed)
@@ -451,6 +453,77 @@ def obtener_hiperparametros_v6(
         fase = "1 (exploración)"
     elif progreso < 0.75:
         fase = "2 (consolidación)"
+    else:
+        fase = "3 (fine-tuning)"
+
+    policy_kwargs = obtener_policy_kwargs()
+    return {
+        "policy": "MlpPolicy",
+        "learning_rate": lr,
+        "n_steps": 4096,
+        "batch_size": 512,
+        "n_epochs": epochs,
+        "gamma": 0.995,
+        "gae_lambda": 0.98,
+        "clip_range": clip,
+        "normalize_advantage": True,
+        "ent_coef": ent,
+        "vf_coef": vf_coef,
+        "max_grad_norm": max_grad_norm,
+        "target_kl": target_kl,
+        "policy_kwargs": policy_kwargs,
+        "verbose": 1,
+        "device": device,
+        "tensorboard_log": logdir,
+        "_fase": fase,
+    }
+
+# ──────────────────────────────────────────────────────────────
+# Hiperparámetros v23 — BC-aware, LR más bajo al final
+# ──────────────────────────────────────────────────────────────
+
+
+def obtener_hiperparametros_v23(
+    logdir: str,
+    device: str,
+    paso_actual: int = 0,
+    total_pasos: int = 5_000_000,
+) -> Dict:
+    """Hiperparámetros PPO para v23 — igual que v6 pero para 5M pasos.
+
+    Mismo schedule que v6 (probado en v22 con snapshot dorado 1.9M/1632 Elo),
+    pero con total_steps más bajo (5M). El early stopping se encarga de parar
+    cuando el modelo alcance su pico.
+
+    Args:
+        logdir: Directorio para logs de TensorBoard.
+        device: Dispositivo de cómputo.
+        paso_actual: Paso global actual.
+        total_pasos: Pasos totales planeados (default: 5M).
+
+    Returns:
+        Diccionario con hiperparámetros para MaskablePPO.
+    """
+    progreso = min(paso_actual / total_pasos, 1.0)
+
+    # LR schedule idéntico a v6 (funcionó en v22)
+    if progreso < 0.5:
+        lr = 3e-4 + (2e-4 - 3e-4) * (progreso / 0.5)
+    else:
+        lr = 2e-4 + (1e-4 - 2e-4) * ((progreso - 0.5) / 0.5)
+
+    ent = 0.12
+    clip = 0.20 + (0.15 - 0.20) * progreso
+    epochs = int(4 + (3 - 4) * progreso)
+    # idéntico a v6: crítico para value head
+    vf_coef = 1.5 + (1.0 - 1.5) * progreso
+    max_grad_norm = 0.8                           # idéntico a v6
+    target_kl = 0.03 + (0.02 - 0.03) * progreso  # idéntico a v6
+
+    if progreso < 0.25:
+        fase = "1 (adaptacion BC→RL)"
+    elif progreso < 0.75:
+        fase = "2 (refinamiento)"
     else:
         fase = "3 (fine-tuning)"
 

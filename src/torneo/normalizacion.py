@@ -96,7 +96,7 @@ def detectar_vecnorm(ruta_snapshot: str, base_dir: Optional[str] = None) -> Opti
 
     Busca en orden:
         1. Per-snapshot: <ruta_snapshot>_vecnorm.pkl
-        2. Versión global: modelos/<version>/vecnorm/vecnorm.pkl
+        2. Versión global: models/<version>/vecnorm/vecnorm.pkl
 
     Args:
         ruta_snapshot: Ruta al snapshot (.zip opcional).

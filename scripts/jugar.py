@@ -3,7 +3,7 @@
 Script de juego interactivo (entry point).
 
 Uso:
-    python scripts/jugar.py --modelo modelos/v8/elite/snapshot_XXX.zip
+    python scripts/jugar.py --modelo models/v8/elite/snapshot_XXX.zip
 """
 import sys
 import os

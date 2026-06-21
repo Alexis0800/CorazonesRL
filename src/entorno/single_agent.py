@@ -82,11 +82,18 @@ class CorazonesEnv(gym.Env):
         """Acceso de instancia al RewardConfig (mismo SSOT que los class attrs)."""
         return self._calc.cfg
 
+    # ------------------------------------------------------------------
+    # Reward mode flag — Strategy Pattern
+    # ------------------------------------------------------------------
+    # "v12" (legacy 20 señales) o "minimal" (3 señales)
+    _reward_mode: str = "v12"
+
     def __init__(
         self,
         agente_idx: int = 0,
         politicas_oponentes: Optional[Dict[int, object]] = None,
         obs_dim: int = DIM_ENTORNO,
+        reward_mode: str = "v12",
     ) -> None:
         super().__init__()
 
@@ -96,12 +103,20 @@ class CorazonesEnv(gym.Env):
         if obs_dim not in DIMS_VALIDAS:
             raise ValueError(
                 f"obs_dim debe ser una de {DIMS_VALIDAS}, recibido {obs_dim}")
+        if reward_mode not in ("v12", "minimal"):
+            raise ValueError(
+                f"reward_mode debe ser 'v12' o 'minimal', recibido {reward_mode}")
 
         self.agente_idx: int = agente_idx
         self._obs_dim: int = obs_dim
+        self._reward_mode: str = reward_mode
 
-        # Calculadora de recompensas (SSOT — recompensas.py)
-        self._calc: CalculadoraRecompensas = CalculadoraRecompensas()
+        # Calculadora de recompensas según modo (Strategy Pattern)
+        if reward_mode == "minimal":
+            from src.entorno.recompensas_minimal import CalculadoraRecompensasMinimal
+            self._calc: Any = CalculadoraRecompensasMinimal()
+        else:
+            self._calc: CalculadoraRecompensas = CalculadoraRecompensas()
 
         # Builder de observación (SSOT — observacion.py)
         self._obs_builder: ObservacionBuilder = ObservacionBuilder(dim=obs_dim)
@@ -214,71 +229,76 @@ class CorazonesEnv(gym.Env):
         # Ejecutar la jugada del agente
         self._ejecutar_jugada(self.agente_idx, carta)
 
-        # --- PENALTY: liderar pica no-máxima con Q♠ activa ---
-        if (posicion_en_baza == 0
-                and self._dama_picas_en is None
-                and carta.palo == 2
-                and not carta.es_dama_de_picas):
-            picas_en_mano = [
-                c for c in self.motor.jugadores[self.agente_idx].mano
-                if c.palo == 2
-            ]
-            if picas_en_mano and carta.valor < max(c.valor for c in picas_en_mano):
-                self._recompensa_pendiente += self._calc.recompensa_liderar_pica(
-                    self.agente_idx, carta,
-                    self.motor.jugadores[self.agente_idx].mano,
-                    posicion_en_baza, self._dama_picas_en is None,
-                )
-
-        # --- REWARD: liderar máxima de palo seguro (♣/♦) ---
-        if (posicion_en_baza == 0
-                and carta.palo in (0, 1)
-                and self._es_maxima_en_mano(carta, self.agente_idx)):
-            self._recompensa_pendiente += self._calc.recompensa_quemar_maxima_palo_seguro(
-                posicion_en_baza, carta, True,
-            )
-
-        # --- PENALTY: liderar Q♠ en mal momento ---
-        if posicion_en_baza == 0 and carta.es_dama_de_picas:
-            soy_maxima_picas = self._es_maxima_en_mano(carta, self.agente_idx)
-            self._recompensa_pendiente += self._calc.recompensa_liderar_q_equivocado(
-                self.motor.numero_baza, carta, soy_maxima_picas,
-            )
-
-        # --- REWARD: liderar Q♠ como dump seguro (baza ≥BAZA_TARDIA, K♠/A♠ en circ.) ---
-        if posicion_en_baza == 0 and carta.es_dama_de_picas:
-            baza_tardia = self.motor.numero_baza >= self._cfg.BAZA_TARDIA
-            soy_maxima_picas = self._es_maxima_en_mano(carta, self.agente_idx)
-            if baza_tardia and not soy_maxima_picas:
-                cementerio_ids = set()
-                for j in range(4):
-                    for c in self.motor.jugadores[j].bazas_ganadas:
-                        cementerio_ids.add(c.id)
-                k_spades = next(
-                    (c for c in Carta._TODAS if c.palo == 2 and c.valor == 13), None)
-                a_spades = next(
-                    (c for c in Carta._TODAS if c.palo == 2 and c.valor == 14), None)
-                k_en_circulacion = k_spades and k_spades.id not in cementerio_ids
-                a_en_circulacion = a_spades and a_spades.id not in cementerio_ids
-                if k_en_circulacion or a_en_circulacion:
-                    self._recompensa_pendiente += self._calc.recompensa_liderar_q_dump(
-                        self.motor.numero_baza, carta, soy_maxima_picas,
-                        k_en_circulacion or a_en_circulacion,
+        # --- Recompensas tácticas (solo v12, NO en minimal) ---
+        if self._reward_mode == "v12":
+            # --- PENALTY: liderar pica no-máxima con Q♠ activa ---
+            if (posicion_en_baza == 0
+                    and self._dama_picas_en is None
+                    and carta.palo == 2
+                    and not carta.es_dama_de_picas):
+                picas_en_mano = [
+                    c for c in self.motor.jugadores[self.agente_idx].mano
+                    if c.palo == 2
+                ]
+                if picas_en_mano and carta.valor < max(c.valor for c in picas_en_mano):
+                    self._recompensa_pendiente += self._calc.recompensa_liderar_pica(
+                        self.agente_idx, carta,
+                        self.motor.jugadores[self.agente_idx].mano,
+                        posicion_en_baza, self._dama_picas_en is None,
                     )
 
-        # --- REWARD: quemar máxima forzada (siguiendo palo) ---
-        if (posicion_en_baza > 0
-                and self.motor.palo_de_salida is not None
-                and carta.palo == self.motor.palo_de_salida
-                and self._forzado_a_ganar(self.agente_idx)):
-            cartas_palo = [
-                c for c in self.motor.jugadores[self.agente_idx].mano
-                if c.palo == self.motor.palo_de_salida
-            ]
-            if not cartas_palo or carta.valor >= max(c.valor for c in cartas_palo):
-                self._recompensa_pendiente += self._calc.recompensa_quemar_maxima_forzada(
-                    posicion_en_baza, True, carta,
+            # --- REWARD: liderar máxima de palo seguro (♣/♦) ---
+            if (posicion_en_baza == 0
+                    and carta.palo in (0, 1)
+                    and self._es_maxima_en_mano(carta, self.agente_idx)):
+                self._recompensa_pendiente += self._calc.recompensa_quemar_maxima_palo_seguro(
+                    posicion_en_baza, carta, True,
                 )
+
+            # --- PENALTY: liderar Q♠ en mal momento ---
+            if posicion_en_baza == 0 and carta.es_dama_de_picas:
+                soy_maxima_picas = self._es_maxima_en_mano(
+                    carta, self.agente_idx)
+                self._recompensa_pendiente += self._calc.recompensa_liderar_q_equivocado(
+                    self.motor.numero_baza, carta, soy_maxima_picas,
+                )
+
+            # --- REWARD: liderar Q♠ como dump seguro (baza ≥BAZA_TARDIA, K♠/A♠ en circ.) ---
+            if posicion_en_baza == 0 and carta.es_dama_de_picas:
+                baza_tardia = self.motor.numero_baza >= self._cfg.BAZA_TARDIA
+                soy_maxima_picas = self._es_maxima_en_mano(
+                    carta, self.agente_idx)
+                if baza_tardia and not soy_maxima_picas:
+                    cementerio_ids = set()
+                    for j in range(4):
+                        for c in self.motor.jugadores[j].bazas_ganadas:
+                            cementerio_ids.add(c.id)
+                    k_spades = next(
+                        (c for c in Carta._TODAS if c.palo == 2 and c.valor == 13), None)
+                    a_spades = next(
+                        (c for c in Carta._TODAS if c.palo == 2 and c.valor == 14), None)
+                    k_en_circulacion = k_spades and k_spades.id not in cementerio_ids
+                    a_en_circulacion = a_spades and a_spades.id not in cementerio_ids
+                    if k_en_circulacion or a_en_circulacion:
+                        self._recompensa_pendiente += self._calc.recompensa_liderar_q_dump(
+                            self.motor.numero_baza, carta, soy_maxima_picas,
+                            k_en_circulacion or a_en_circulacion,
+                        )
+
+            # --- REWARD: quemar máxima forzada (siguiendo palo) ---
+            if (posicion_en_baza > 0
+                    and self.motor.palo_de_salida is not None
+                    and carta.palo == self.motor.palo_de_salida
+                    and self._forzado_a_ganar(self.agente_idx)):
+                cartas_palo = [
+                    c for c in self.motor.jugadores[self.agente_idx].mano
+                    if c.palo == self.motor.palo_de_salida
+                ]
+                if not cartas_palo or carta.valor >= max(c.valor for c in cartas_palo):
+                    self._recompensa_pendiente += self._calc.recompensa_quemar_maxima_forzada(
+                        posicion_en_baza, True, carta,
+                    )
+        # --- Fin recompensas tácticas v12 ---
 
         # Auto-jugar hasta que sea el turno del agente de nuevo
         self._autoplay_hasta_turno_agente()
@@ -467,82 +487,95 @@ class CorazonesEnv(gym.Env):
         puntos_baza = sum(c.puntos for c in cartas_en_mesa)
 
         # Calcular recompensa para el agente por esta baza
-        en_modo_pozo = self._pozo_viable()
-        if ganador == self.agente_idx:
-            r_baza = self._calc.recompensa_baza_ganada(
-                cartas_en_mesa, self.agente_idx, ganador,
-                pozo_viable=self._pozo_viable(),
-                numero_baza=numero_baza,
-                en_modo_pozo=en_modo_pozo,
-            )
+        if self._reward_mode == "minimal":
+            r_baza = self._calc.recompensa_baza(
+                cartas_en_mesa, self.agente_idx, ganador)
             self._recompensa_pendiente += r_baza
         else:
-            r_evitada = self._calc.recompensa_baza_evitada(
-                cartas_en_mesa, self.agente_idx, idx_agente_en_mesa,
-                numero_baza=numero_baza,
-            )
-            self._recompensa_pendiente += r_evitada
+            en_modo_pozo = self._pozo_viable()
+            if ganador == self.agente_idx:
+                r_baza = self._calc.recompensa_baza_ganada(
+                    cartas_en_mesa, self.agente_idx, ganador,
+                    pozo_viable=self._pozo_viable(),
+                    numero_baza=numero_baza,
+                    en_modo_pozo=en_modo_pozo,
+                )
+                self._recompensa_pendiente += r_baza
+            else:
+                r_evitada = self._calc.recompensa_baza_evitada(
+                    cartas_en_mesa, self.agente_idx, idx_agente_en_mesa,
+                    numero_baza=numero_baza,
+                )
+                self._recompensa_pendiente += r_evitada
 
-        # --- v9-v10: recompensas tácticas por baza (phase-gated: solo bazas ≥ BAZA_TARDIA) ---
-        if idx_agente_en_mesa is not None and numero_baza >= self._cfg.BAZA_TARDIA:
-            carta_agente = cartas_en_mesa[idx_agente_en_mesa]
+        # --- v9-v10: recompensas tácticas (SOLO en modo v12) ---
+        if self._reward_mode == "v12":
+            if idx_agente_en_mesa is not None and numero_baza >= self._cfg.BAZA_TARDIA:
+                carta_agente = cartas_en_mesa[idx_agente_en_mesa]
 
-            # REWARD: quemar alta (A/K) siguiendo palo en baza limpia
-            self._recompensa_pendiente += self._calc.recompensa_quemar_alta_siguiendo_palo(
-                puntos_baza, carta_agente,
-                palo_salida is not None and carta_agente.palo == palo_salida,
-            )
-
-            # REWARD: soltar Q♠ siguiendo picas (dump seguro)
-            self._recompensa_pendiente += self._calc.recompensa_dump_q_siguiendo_picas(
-                carta_agente, ganador != self.agente_idx, palo_salida, numero_baza,
-            )
-
-            # REWARD: descartar K♠/A♠ en baza limpia con Q♠ activa
-            es_descarte = (
-                palo_salida is not None and carta_agente.palo != palo_salida
-            )
-            self._recompensa_pendiente += self._calc.recompensa_descartar_k_a_picas(
-                carta_agente, puntos_baza,
-                self._dama_picas_en is None, es_descarte,
-            )
-
-            # PENALTY: ganar baza con puntos teniendo cartas perdedoras
-            if (ganador == self.agente_idx
-                    and puntos_baza > 0
-                    and palo_salida is not None
-                    and carta_agente.palo == palo_salida
-                    and not self._pozo_viable()):
-                self._recompensa_pendiente += self._calc.recompensa_ganar_baza_con_puntos_evitable(
-                    numero_baza, puntos_baza, self._pozo_viable(),
+                # REWARD: quemar alta (A/K) siguiendo palo en baza limpia
+                self._recompensa_pendiente += self._calc.recompensa_quemar_alta_siguiendo_palo(
+                    puntos_baza, carta_agente,
+                    palo_salida is not None and carta_agente.palo == palo_salida,
                 )
 
-            # --- v10 (Fase B): penalización ganar baza tardía sin puntos ---
-            if (ganador == self.agente_idx
-                    and puntos_baza == 0
-                    and palo_salida in (0, 1)
-                    and carta_agente.palo == palo_salida
-                    and self._es_maxima_en_mano(carta_agente, self.agente_idx)
-                    and carta_agente.valor >= 13):
-                self._recompensa_pendiente += self._calc.recompensa_ganar_baza_tardia(
-                    numero_baza, puntos_baza, palo_salida, carta_agente,
-                    self._es_maxima_en_mano(carta_agente, self.agente_idx),
+                # REWARD: soltar Q♠ siguiendo picas (dump seguro)
+                self._recompensa_pendiente += self._calc.recompensa_dump_q_siguiendo_picas(
+                    carta_agente, ganador != self.agente_idx, palo_salida, numero_baza,
                 )
 
-            # REWARD: descartar corazón en baza limpia con corazones rotos
-            self._recompensa_pendiente += self._calc.recompensa_descartar_corazon_bajo(
-                self.motor.corazones_rotos, carta_agente, es_descarte, puntos_baza,
-            )
+                # REWARD: descartar K♠/A♠ en baza limpia con Q♠ activa
+                es_descarte = (
+                    palo_salida is not None and carta_agente.palo != palo_salida
+                )
+                self._recompensa_pendiente += self._calc.recompensa_descartar_k_a_picas(
+                    carta_agente, puntos_baza,
+                    self._dama_picas_en is None, es_descarte,
+                )
+
+                # PENALTY: ganar baza con puntos teniendo cartas perdedoras
+                if (ganador == self.agente_idx
+                        and puntos_baza > 0
+                        and palo_salida is not None
+                        and carta_agente.palo == palo_salida
+                        and not self._pozo_viable()):
+                    self._recompensa_pendiente += self._calc.recompensa_ganar_baza_con_puntos_evitable(
+                        numero_baza, puntos_baza, self._pozo_viable(),
+                    )
+
+                # --- v10 (Fase B): penalización ganar baza tardía sin puntos ---
+                if (ganador == self.agente_idx
+                        and puntos_baza == 0
+                        and palo_salida in (0, 1)
+                        and carta_agente.palo == palo_salida
+                        and self._es_maxima_en_mano(carta_agente, self.agente_idx)
+                        and carta_agente.valor >= 13):
+                    self._recompensa_pendiente += self._calc.recompensa_ganar_baza_tardia(
+                        numero_baza, puntos_baza, palo_salida, carta_agente,
+                        self._es_maxima_en_mano(carta_agente, self.agente_idx),
+                    )
+
+                # REWARD: descartar corazón en baza limpia con corazones rotos
+                self._recompensa_pendiente += self._calc.recompensa_descartar_corazon_bajo(
+                    self.motor.corazones_rotos, carta_agente, es_descarte, puntos_baza,
+                )
 
     def _finalizar_mano(self) -> None:
         """Finaliza la mano actual: aplica puntuación, verifica pleno,
         y actualiza puntuaciones históricas."""
+        # Guardar puntuación ANTES para cálculo de distancia (modo minimal)
+        puntuacion_antes = list(self._puntuacion_historica)
+
         puntos_crudos = [j.contar_puntos_bazas() for j in self.motor.jugadores]
         for i, pts in enumerate(puntos_crudos):
             if pts == 26:
                 self._pleno_jugador = i
                 if i == self.agente_idx:
-                    self._recompensa_pendiente += self._cfg.REWARD_SHOOTING_MOON
+                    if self._reward_mode == "minimal":
+                        self._recompensa_pendiente += self._calc.recompensa_shooting_moon(
+                            self.agente_idx, i)
+                    else:
+                        self._recompensa_pendiente += self._cfg.REWARD_SHOOTING_MOON
                 break
 
         puntuaciones_mano = self.motor.aplicar_puntuacion()
@@ -550,11 +583,17 @@ class CorazonesEnv(gym.Env):
         for i in range(4):
             self._puntuacion_historica[i] = self.motor.jugadores[i].puntuacion_historica
 
-        # Recompensa de fin de mano (delegada a CalculadoraRecompensas)
-        r_fin_mano = self._calc.recompensa_fin_mano(
-            self.agente_idx, puntuaciones_mano, self._pleno_jugador,
-        )
-        self._recompensa_pendiente += r_fin_mano
+        # Recompensa de fin de mano según modo
+        if self._reward_mode == "minimal":
+            # Distancia ponderada
+            r_dist = self._calc.recompensa_distancia(
+                puntuacion_antes, list(self._puntuacion_historica), self.agente_idx)
+            self._recompensa_pendiente += r_dist
+        else:
+            r_fin_mano = self._calc.recompensa_fin_mano(
+                self.agente_idx, puntuaciones_mano, self._pleno_jugador,
+            )
+            self._recompensa_pendiente += r_fin_mano
 
     def _juego_terminado(self) -> bool:
         """Determina si la partida ha terminado (algún jugador >= 100 puntos)."""

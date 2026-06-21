@@ -42,11 +42,11 @@ Write-Host "$destino listo"
 
 | Carpeta | ¿Transferir? | Motivo |
 |---|---|---|
-| `modelos/v5_golden/` | ❌ No | Baseline congelado, solo referencia |
-| `modelos/v6/` | ❌ No | Archivada |
-| `modelos/v7/` | ❌ No | Archivada |
-| `modelos/{version}/snapshots/` | ❌ No | Solo necesitás elite/ (mejores) |
-| `modelos/{version}/vecnorm/` | ✅ Sí | Necesario para normalizar |
+| `models/v5_golden/` | ❌ No | Baseline congelado, solo referencia |
+| `models/v6/` | ❌ No | Archivada |
+| `models/v7/` | ❌ No | Archivada |
+| `models/{version}/snapshots/` | ❌ No | Solo necesitás elite/ (mejores) |
+| `models/{version}/vecnorm/` | ✅ Sí | Necesario para normalizar |
 | `logs/` | ❌ No | Se regeneran |
 | `torneos/` | ❌ No | Histórico, no esencial |
 
@@ -92,13 +92,13 @@ python -m pytest tests/ -q
 
 ```powershell
 # Reanudar desde el último snapshot elite:
-python train_auto_v6.py --resume modelos/v8/elite/snapshot_0017900000.zip --total-steps 25000000 --output-dir modelos/v9
+python train_auto_v6.py --resume models/v8/elite/snapshot_0017900000.zip --total-steps 25000000 --output-dir models/v9
 
 # Desde cero (nueva versión):
-python train_auto_v6.py --total-steps 20000000 --output-dir modelos/v9
+python train_auto_v6.py --total-steps 20000000 --output-dir models/v9
 
 # Con GPU Intel Arc:
-python train_auto_v6.py --total-steps 20000000 --device dml --output-dir modelos/v9
+python train_auto_v6.py --total-steps 20000000 --device dml --output-dir models/v9
 ```
 
 ---
@@ -108,7 +108,7 @@ python train_auto_v6.py --total-steps 20000000 --device dml --output-dir modelos
 Si preferís entrenar desde cero sin transferir modelos:
 
 ```powershell
-python train_auto_v6.py --total-steps 20000000 --output-dir modelos/v9
+python train_auto_v6.py --total-steps 20000000 --output-dir models/v9
 ```
 
 Esto crea un modelo nuevo con pesos aleatorios y entrena con Fictitious Self-Play (decaimiento coseno 50%→20% bots).
@@ -134,8 +134,8 @@ Métricas clave a vigilar:
 
 ```powershell
 # Win rate contra bots
-python scripts/evaluar.py --modelo modelos/v8/elite/snapshot_*.zip --partidas 500
+python scripts/evaluar.py --modelo models/v8/elite/snapshot_*.zip --partidas 500
 
 # Torneo Elo entre snapshots
-python -m src.torneo.elo --directorio modelos/v8/elite --partidas 50 --elo-puro --incluir-bots
+python -m src.torneo.elo --directorio models/v8/elite --partidas 50 --elo-puro --incluir-bots
 ```

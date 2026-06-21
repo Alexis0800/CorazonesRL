@@ -36,7 +36,7 @@ src/
 │   └── evaluar.py             # Evaluación standalone
 └── __init__.py                # Re-exports públicos
 
-modelos/                       # Estructura estandarizada por versión
+models/                       # Estructura estandarizada por versión
 ├── {version}/
 │   ├── config.json            # Metadatos de la versión
 │   ├── snapshots/             # Checkpoints de entrenamiento
@@ -107,8 +107,8 @@ train_self_play.py             # Pipeline Self-Play
 
 - [x] `--output-dir` en `train_auto_v6.py` (entrena en cualquier directorio)
 - [x] Cosine decay prob_bot 50%→20%
-- [x] Golden checkpoints congelados (`modelos/v5_golden/` y `modelos/v7_golden/`)
-- [x] **Refactorización 2026-06-15**: src/ aplanado (sin stubs ni corazones/), tests/ reorganizado en 5 subdirectorios, modelos/ estandarizado, docs/ curado, 10 stubs eliminados
+- [x] Golden checkpoints congelados (`models/v5_golden/` y `models/v7_golden/`)
+- [x] **Refactorización 2026-06-15**: src/ aplanado (sin stubs ni corazones/), tests/ reorganizado en 5 subdirectorios, models/ estandarizado, docs/ curado, 10 stubs eliminados
 - [x] Tests: 286/286 pasando
 
 ---
@@ -141,8 +141,8 @@ Mejora continua, sin signos de estancamiento.
 
 | Directorio | Modelo | Elo | Estado |
 |---|---|---|---|
-| `modelos/v5_golden/` | v5_best | ~1500 | ❄️ Congelado (baseline 190-dim) |
-| `modelos/v7_golden/` | v7_14.9M | 1723 | ❄️ Congelado (baseline 194-dim) |
+| `models/v5_golden/` | v5_best | ~1500 | ❄️ Congelado (baseline 190-dim) |
+| `models/v7_golden/` | v7_14.9M | 1723 | ❄️ Congelado (baseline 194-dim) |
 
 ### Win rates contra bots (métrica complementaria)
 
@@ -199,17 +199,17 @@ Mejora continua, sin signos de estancamiento.
 .venv\Scripts\Activate.ps1
 
 # Entrenar
-python train_auto_v6.py --total-steps 20000000 --output-dir modelos/v9
-python train_auto_v6.py --resume MODELO.zip --total-steps 20000000 --output-dir modelos/v9
+python train_auto_v6.py --total-steps 20000000 --output-dir models/v9
+python train_auto_v6.py --resume MODELO.zip --total-steps 20000000 --output-dir models/v9
 
 # Torneo Elo
-python -m src.torneo.elo --directorio modelos/v8/elite --partidas 50 --elo-puro --incluir-bots
+python -m src.torneo.elo --directorio models/v8/elite --partidas 50 --elo-puro --incluir-bots
 
 # Evaluar win rate
 python scripts/evaluar.py --modelo MODELO.zip
 
 # Jugar contra el modelo
-python scripts/jugar.py --modelo modelos/v8/elite/snapshot_*.zip
+python scripts/jugar.py --modelo models/v8/elite/snapshot_*.zip
 
 # Tests
 python -m pytest tests/ -q

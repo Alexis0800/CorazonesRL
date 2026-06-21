@@ -22,7 +22,7 @@ from src.entorno.dimensiones import DIM_ENTRENAMIENTO
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _PROJECT_DIR = os.path.dirname(os.path.dirname(_THIS_DIR))
 
-DIRECTORIO_MODELOS = os.path.join(_PROJECT_DIR, "modelos")
+DIRECTORIO_MODELOS = os.path.join(_PROJECT_DIR, "models")
 DIRECTORIO_LOGS = os.path.join(_PROJECT_DIR, "logs")
 
 
