@@ -181,7 +181,8 @@ def jugar_partida(
             motor = MotorCorazones()
             while max(puntuacion) < 100:
                 motor.repartir()
-                motor.jugar_mano(lambda m, idx, leg: bots_pool[idx % 3](m, idx, leg))
+                motor.jugar_mano(
+                    lambda m, idx, leg: bots_pool[idx % 3](m, idx, leg))
                 puntuaciones = motor.aplicar_puntuacion()
                 for i in range(4):
                     puntuacion[i] = motor.jugadores[i].puntuacion_historica
@@ -240,8 +241,10 @@ def _crear_politica_modelo_oponente(jug: JugadorV2) -> Any:
         obs_raw = builder.construir(
             motor, idx,
             vacios=[set() for _ in range(4)],
-            puntuacion_historica=[j.puntuacion_historica for j in motor.jugadores],
-            puntos_mano_actual=[j.contar_puntos_bazas() for j in motor.jugadores],
+            puntuacion_historica=[
+                j.puntuacion_historica for j in motor.jugadores],
+            puntos_mano_actual=[j.contar_puntos_bazas()
+                                for j in motor.jugadores],
             dama_picas_en=None,
         )
 
