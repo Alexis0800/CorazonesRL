@@ -5,7 +5,7 @@ Validan:
   - Gymnasium API compliance
   - Action masking correcto
   - Ciclo completo de episodio (reset → step → done)
-  - Forma de observacion (250,)
+  - Forma de observacion (260,)
   - Valores de observacion en rango valido
   - Recompensas (no NaN, magnitudes razonables)
   - Hooks MCTS opcionales

@@ -83,6 +83,7 @@ class CorazonesEnvV3(gym.Env):
         self._puntos_mano_actual: List[int] = [0, 0, 0, 0]
         self._dama_picas_en: Optional[int] = None
         self._ultima_carta_agente: Optional[Carta] = None
+        self._picas_agente_antes_de_jugar: list = []
         self._recompensa_pendiente: float = 0.0
         self._mano_terminada: bool = False
 
@@ -133,6 +134,11 @@ class CorazonesEnvV3(gym.Env):
             )
 
         carta = Carta._TODAS[action]
+
+        # ── Hook MCTS Oracle: recolectar (obs, acción_óptima) ──
+        if self._oracle_buffer is not None and self._oracle_rng is not None:
+            self._recolectar_dato_oraculo(action)
+
         recompensa = self._ejecutar_jugada_agente(carta)
 
         if self._mano_terminada:
@@ -175,6 +181,7 @@ class CorazonesEnvV3(gym.Env):
         self._puntos_mano_actual = [0, 0, 0, 0]
         self._dama_picas_en = None
         self._ultima_carta_agente = None
+        self._picas_agente_antes_de_jugar = []
         self._recompensa_pendiente = 0.0
         self._mano_terminada = False
 
@@ -182,8 +189,43 @@ class CorazonesEnvV3(gym.Env):
         if self.motor.obtener_jugador_actual() != self.agente_idx:
             self._jugar_oponentes()
 
+    def _recolectar_dato_oraculo(self, accion_agente: int) -> None:
+        """Invoca el oráculo PIMC en bazas altas y guarda (obs, acción_óptima)
+        en el buffer si la enumeración es viable (≤100K mundos)."""
+        from src.v3.train_mcts import evaluar_y_guardar_batch
+
+        baza_actual = self.motor.numero_baza
+        # Solo en baza ≥10 donde PIMC exacto es viable
+        if baza_actual < 10:
+            return
+
+        legales = self.motor.obtener_jugadas_legales(self.agente_idx)
+        if len(legales) <= 1:
+            return  # Sin decisión que aprender
+
+        # Construir observación actual para el agente
+        obs = self._obs_builder.construir(
+            self.motor, self.agente_idx,
+            self._vacios, [0, 0, 0, 0],
+            self._puntos_mano_actual, self._dama_picas_en,
+        )
+
+        evaluar_y_guardar_batch(
+            motor=self.motor,
+            agente_idx=self.agente_idx,
+            legales=legales,
+            buffer=self._oracle_buffer,
+            obs=obs,
+            rng=self._oracle_rng,
+        )
+
     def _ejecutar_jugada_agente(self, carta: Carta) -> float:
         """Ejecuta la jugada del agente y retorna recompensa acumulada."""
+        # Capturar ♠ del agente ANTES de jugar (para penalización Q♠ preventivo)
+        self._picas_agente_antes_de_jugar = [
+            c for c in self.motor.jugadores[self.agente_idx].mano
+            if c.palo == 2  # PICA
+        ]
         self._ultima_carta_agente = carta
 
         idx = self.motor.obtener_jugador_actual()
@@ -254,6 +296,9 @@ class CorazonesEnvV3(gym.Env):
         puntos_en_baza = sum(c.puntos for c in cartas_baza)
         ganador = self.motor.resolver_baza()
 
+        # Capturar si Q♠ estaba activa ANTES de actualizar _dama_picas_en
+        qs_activa = self._dama_picas_en is None
+
         # Actualizar puntos de la mano
         for i, jug in enumerate(self.motor.jugadores):
             self._puntos_mano_actual[i] = jug.contar_puntos_bazas()
@@ -277,7 +322,14 @@ class CorazonesEnvV3(gym.Env):
                 palo_salida,
                 ganador,
             )
+            # ── Q♠ preventive penalty ──
+            recompensa += self._calc.recompensa_qs_preventivo(
+                self._ultima_carta_agente,
+                self._picas_agente_antes_de_jugar,
+                qs_activa,
+            )
         self._ultima_carta_agente = None
+        self._picas_agente_antes_de_jugar = []
 
         # ── Moon block ──
         corazones_rivales = [

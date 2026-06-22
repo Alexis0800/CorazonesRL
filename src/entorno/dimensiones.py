@@ -18,8 +18,8 @@ from typing import Tuple
 DIM_V5: int = 190   # features básicas + flags estratégicos (pozo_viable, etc.)
 DIM_V6: int = 194   # + all_void por palo (obsoleto, solo referencia histórica)
 DIM_V10: int = 220  # + bloque avanzado (conteo, prob Q♠, alertas) ← ESTÁNDAR
-# + 30 features enriquecidas (v3): cartas_restantes, peligro_qs, etc.
-DIM_V3: int = 250
+# + 40 features enriquecidas (v3): cartas_restantes, peligro_qs, liderazgo, etc.
+DIM_V3: int = 265
 
 # --- Defaults ---
 DIM_ENTRENAMIENTO: int = DIM_V10  # usado por train.py

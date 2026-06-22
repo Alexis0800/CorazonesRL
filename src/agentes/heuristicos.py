@@ -12,6 +12,7 @@ Esto permite intercambiarlos sin modificar el código que los consume
 """
 
 from __future__ import annotations
+from src.agentes.bot_castigador import BotCastigador
 
 from typing import Callable, List
 from src.dominio.carta import Carta
@@ -78,11 +79,12 @@ def bot_evasivo(
 
 # Pool de bots disponibles
 BOTS_DISPONIBLES: List[PoliticaJuego] = [
-    bot_conservador, bot_agresivo, bot_evasivo]
-BOT_NOMBRES: List[str] = ["conservador", "agresivo", "evasivo"]
+    bot_conservador, bot_agresivo, bot_evasivo, BotCastigador()]
+BOT_NOMBRES: List[str] = ["conservador", "agresivo", "evasivo", "castigador"]
 
 __all__ = [
     "PoliticaJuego",
     "bot_conservador", "bot_agresivo", "bot_evasivo",
+    "BotCastigador",
     "BOTS_DISPONIBLES", "BOT_NOMBRES",
 ]

@@ -16,4 +16,4 @@ Uso:
 """
 # Re-export para acceso rápido
 from src.dominio import Carta, Baraja, Jugador, MotorCorazones
-from src.agentes import bot_conservador, bot_agresivo, bot_evasivo
+from src.agentes import bot_conservador, bot_agresivo, bot_evasivo, BotCastigador

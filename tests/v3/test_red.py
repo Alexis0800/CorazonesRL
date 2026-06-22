@@ -28,9 +28,9 @@ class TestTransformerFeatureExtractor:
     """Suite de tests para el extractor Transformer de v3."""
 
     @pytest.fixture
-    def obs_space_250(self) -> spaces.Box:
-        """Observation space con 250 dims (v3)."""
-        return spaces.Box(low=0.0, high=26.0, shape=(250,), dtype=np.float32)
+    def obs_space_260(self) -> spaces.Box:
+        """Observation space con 260 dims (v3)."""
+        return spaces.Box(low=0.0, high=26.0, shape=(260,), dtype=np.float32)
 
     @pytest.fixture
     def obs_space_220(self) -> spaces.Box:
@@ -41,39 +41,39 @@ class TestTransformerFeatureExtractor:
     # Tests de dimensionalidad
     # ------------------------------------------------------------------
 
-    def test_output_shape(self, obs_space_250) -> None:
+    def test_output_shape(self, obs_space_260) -> None:
         """El output debe tener features_dim (256)."""
         extractor = TransformerFeatureExtractor(
-            obs_space_250, features_dim=256)
-        x = torch.randn(4, 250)  # batch de 4
+            obs_space_260, features_dim=256)
+        x = torch.randn(4, 260)  # batch de 4
         out = extractor(x)
         assert out.shape == (
             4, 256), f"Esperado (4, 256), obtenido {out.shape}"
 
-    def test_output_shape_custom_dim(self, obs_space_250) -> None:
+    def test_output_shape_custom_dim(self, obs_space_260) -> None:
         """Debe respetar features_dim personalizado."""
         extractor = TransformerFeatureExtractor(
-            obs_space_250, features_dim=128)
-        x = torch.randn(2, 250)
+            obs_space_260, features_dim=128)
+        x = torch.randn(2, 260)
         out = extractor(x)
         assert out.shape == (2, 128)
 
-    def test_batch_independence(self, obs_space_250) -> None:
+    def test_batch_independence(self, obs_space_260) -> None:
         """Diferentes batches deben producir diferentes outputs."""
         extractor = TransformerFeatureExtractor(
-            obs_space_250, features_dim=256)
-        x1 = torch.randn(1, 250)
-        x2 = torch.randn(1, 250)
+            obs_space_260, features_dim=256)
+        x1 = torch.randn(1, 260)
+        x2 = torch.randn(1, 260)
         out1 = extractor(x1)
         out2 = extractor(x2)
         assert not torch.allclose(out1, out2)
 
-    def test_deterministic_eval_mode(self, obs_space_250) -> None:
+    def test_deterministic_eval_mode(self, obs_space_260) -> None:
         """En modo eval, mismo input → mismo output."""
         extractor = TransformerFeatureExtractor(
-            obs_space_250, features_dim=256)
+            obs_space_260, features_dim=256)
         extractor.eval()
-        x = torch.randn(1, 250)
+        x = torch.randn(1, 260)
         out1 = extractor(x)
         out2 = extractor(x)
         assert torch.allclose(out1, out2)
@@ -86,11 +86,11 @@ class TestTransformerFeatureExtractor:
         out = extractor(x)
         assert out.shape == (4, 256)
 
-    def test_gradient_flow(self, obs_space_250) -> None:
+    def test_gradient_flow(self, obs_space_260) -> None:
         """Los gradientes deben fluir a través del extractor."""
         extractor = TransformerFeatureExtractor(
-            obs_space_250, features_dim=256)
-        x = torch.randn(4, 250, requires_grad=True)
+            obs_space_260, features_dim=256)
+        x = torch.randn(4, 260, requires_grad=True)
         out = extractor(x)
         loss = out.sum()
         loss.backward()

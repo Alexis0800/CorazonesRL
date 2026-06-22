@@ -1,0 +1,22 @@
+manos: 10000
+muestras: 99230
+seed: 42
+dim_obs: 265
+oponentes: 40% Experto + 20% c/u conservador/agresivo/evasivo
+pimc_mundos: 10/20/40 adaptativo
+baza_1: 6800
+baza_2: 9225
+baza_3: 9027
+baza_4: 8725
+baza_5: 8511
+baza_6: 8343
+baza_7: 8040
+baza_8: 8056
+baza_9: 8170
+baza_10: 8069
+baza_11: 8129
+baza_12: 8135
+baza_13: 0
+sit_liderar: 27901
+sit_seguir: 45956
+sit_descartar: 25373

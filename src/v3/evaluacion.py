@@ -68,6 +68,22 @@ class EvaluacionEstandar:
 # Construccion del campo estandar
 # ------------------------------------------------------------------
 
+
+def _pad_vecnorm_stats(stats: np.ndarray, target_dim: int, pad_value: float = 0.0) -> np.ndarray:
+    """Asegura que las stats de VecNormalize tengan target_dim elementos.
+
+    Si las stats son mas cortas (modelo antiguo con menos dims),
+    rellena con pad_value las nuevas dimensiones.
+    - mean: pad_value=0 (sin desplazamiento en nuevas dims)
+    - var: pad_value=1 (sin escalado en nuevas dims)
+    """
+    if stats.shape[0] >= target_dim:
+        return stats[:target_dim].copy()
+    padded = np.full(target_dim, pad_value, dtype=stats.dtype)
+    padded[:stats.shape[0]] = stats
+    return padded
+
+
 def _construir_oponentes_estandar(
     agente_idx: int,
     seed: int,
@@ -168,6 +184,10 @@ def evaluar_estandar(
                     vn = pickle.load(f)
                 obs_mean = vn.obs_rms.mean
                 obs_var = vn.obs_rms.var
+                # Compatibilidad: pad a DIM_V3 si son de version anterior
+                from src.entorno.dimensiones import DIM_V3
+                obs_mean = _pad_vecnorm_stats(obs_mean, DIM_V3, pad_value=0.0)
+                obs_var = _pad_vecnorm_stats(obs_var, DIM_V3, pad_value=1.0)
 
     # ── Jugar manos ──
     victorias = 0
@@ -266,6 +286,11 @@ def _predecir_modelo(
     mask = np.zeros(52, dtype=np.bool_)
     for c in legales:
         mask[c.id] = True
+
+    # Truncar obs al espacio del modelo si es mas pequeno (compatibilidad cross-gen)
+    model_dim = modelo.observation_space.shape[0]
+    if obs.shape[0] > model_dim:
+        obs = obs[:model_dim]
 
     action, _ = modelo.predict(
         obs, action_masks=mask, deterministic=True,

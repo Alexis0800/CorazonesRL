@@ -1,7 +1,7 @@
 """
-Constructor de observación enriquecida para v3 (250 dimensiones).
+Constructor de observación enriquecida para v3 (260 dimensiones).
 
-Extiende el ObservacionBuilder base (220-d) con 30 features explícitas
+Extiende el ObservacionBuilder base (220-d) con 40 features explícitas
 de tracking que el MLP no puede inferir por sí mismo:
 
     [220:224] cartas_restantes — Cartas sin jugar por palo (valor raw, 0-13)
@@ -12,6 +12,11 @@ de tracking que el MLP no puede inferir por sí mismo:
     [240:244] oportunidad_descarte — ¿Puedo vaciarme de este palo esta baza?
     [244]     bazas_restantes — 13 - baza_actual
     [245:249] puntos_rivales — Puntos acumulados esta mano por cada jugador (rel)
+    [249]     peligro_qs_inminente — 1.0 si tengo Q♠ + otra ♠ (riesgo de jugarla)
+    [250]     soy_lider — 1.0 si la mesa está vacía (agente lidera)
+    [251]     lidero_picas_forzado — 1.0 si debo liderar y solo tengo ♠
+    [252:256] maxima_absoluta_palo — 1.0 si tengo la carta más alta viva del palo
+    [256:260] puedo_quemar_palo — 1.0 si liderar mi máxima da baza limpia (0 pts)
 
 Estas features resuelven parcialmente el problema de "risk_assessment"
 que el diagnóstico PIMC identificó como la causa raíz #1 (46% de errores).
@@ -27,17 +32,17 @@ from src.entorno.observacion import ObservacionBuilder
 from src.entorno.dimensiones import DIM_V10
 
 # --- Dimensionalidad v3 ---
-DIM_V3: int = 250  # 220 base + 30 features enriquecidas
+DIM_V3: int = 265  # 220 base + 30 enriquecidas + 10 liderazgo + 4 prob_qs + 1 forzado
 
 
 class ObservacionBuilderV3(ObservacionBuilder):
     """Constructor de observación enriquecida para v3.
 
-    Extiende ObservacionBuilder (220-d) añadiendo 30 dimensiones con
-    features de tracking explícito. Total: 250 dimensiones.
+    Extiende ObservacionBuilder (220-d) añadiendo 40 dimensiones con
+    features de tracking explícito. Total: 260 dimensiones.
 
     Las features base [0:220] se construyen exactamente igual que en v1/v2,
-    usando la herencia de ObservacionBuilder. Las features [220:250] son
+    usando la herencia de ObservacionBuilder. Las features [220:260] son
     nuevas y específicas de v3.
     """
 
@@ -113,7 +118,7 @@ class ObservacionBuilderV3(ObservacionBuilder):
             Array np.float32 de shape (250,).
         """
         obs = super().construir_desde_motor(motor, jugador_idx)
-        # Rellenar con ceros las 30 dims extra
+        # Rellenar con ceros las 40 dims extra
         # (ya están en cero porque np.zeros las inicializa)
         return obs
 
@@ -164,9 +169,171 @@ class ObservacionBuilderV3(ObservacionBuilder):
         # [245:249] Puntos de cada jugador esta mano (relativo al agente)
         self._fill_puntos_rivales(obs, a, puntos_mano_actual)
 
+        # [249] Peligro inminente de Q♠: 1.0 si tengo Q♠ + otra ♠
+        self._fill_peligro_qs_inminente(obs, a, motor,
+                                        dama_picas_en)
+
+        # [250:260] Features de liderazgo (PIMC P2a)
+        self._construir_bloque_liderazgo(
+            obs, a, motor, dama_picas_en,
+        )
+
+        # [260:264] Probabilidad Q♠ por jugador (relativo al agente)
+        self._fill_prob_qs_por_jugador(
+            obs, a, motor, vacios, dama_picas_en,
+        )
+
+        # [264] Forzado: 1.0 si el agente no tiene alternativa (1 sola carta legal)
+        self._fill_forzado(obs, a, motor)
+
     # ------------------------------------------------------------------
     # Sub-funciones de filling
     # ------------------------------------------------------------------
+
+    def _fill_peligro_qs_inminente(
+        self,
+        obs: np.ndarray,
+        a: int,
+        motor,
+        dama_picas_en: Optional[int],
+    ) -> None:
+        """[249] Peligro inminente de Q♠: 1.0 si el agente tiene Q♠ y otra ♠.
+
+        Indicador binario del error #1 del PIMC: jugar Q♠ voluntariamente
+        cuando hay alternativas seguras en el mismo palo. Solo se activa
+        cuando Q♠ está en la mano del agente Y tiene al menos otra ♠.
+
+        0.0 en todos los demás casos (Q♠ capturada, agente no tiene Q♠,
+        o Q♠ es su única ♠).
+        """
+        _PICA = 2
+
+        # Q♠ ya capturada → sin peligro inminente
+        if dama_picas_en is not None:
+            obs[249] = 0.0
+            return
+
+        # Verificar si el agente tiene Q♠
+        mi_mano = motor.jugadores[a].mano
+        tiene_qs = any(c.es_dama_de_picas for c in mi_mano)
+
+        if not tiene_qs:
+            obs[249] = 0.0
+            return
+
+        # Verificar si tiene otra ♠ además de Q♠
+        otras_picas = [
+            c for c in mi_mano
+            if c.palo == _PICA and not c.es_dama_de_picas
+        ]
+        obs[249] = 1.0 if len(otras_picas) >= 1 else 0.0
+
+    def _fill_prob_qs_por_jugador(
+        self,
+        obs: np.ndarray,
+        a: int,
+        motor,
+        vacios: List[set],
+        dama_picas_en: Optional[int],
+    ) -> None:
+        """[260:264] Probabilidad de que cada jugador (relativo al agente) tenga Q♠.
+
+        Orden: [agente, rival_1, rival_2, rival_3].
+
+        Lógica:
+        - Q♠ capturada → todos 0.0
+        - Q♠ en mesa → el jugador que la jugó = 1.0
+        - Q♠ en mi mano → agente = 1.0
+        - Q♠ desconocida → distribución proporcional a ♠ restantes
+          en manos de cada jugador (excluyendo voids conocidos).
+
+        Feature clave para reducir captura de Q♠ (error #1 del PIMC,
+        modelos RL capturan 35-42% vs BotExperto 31%).
+        """
+        _PICA = 2
+        OFFSET = 260
+
+        # Q♠ ya capturada → sin incertidumbre
+        if dama_picas_en is not None:
+            for i in range(4):
+                obs[OFFSET + i] = 0.0
+            return
+
+        # ¿Q♠ en mi mano?
+        mi_mano = motor.jugadores[a].mano
+        if any(c.es_dama_de_picas for c in mi_mano):
+            obs[OFFSET + 0] = 1.0  # agente
+            for i in range(1, 4):
+                obs[OFFSET + i] = 0.0
+            return
+
+        # ¿Q♠ en la mesa actual?
+        for jug_idx, c in motor.mesa:
+            if c.es_dama_de_picas:
+                rel = (jug_idx - a) % 4
+                for i in range(4):
+                    obs[OFFSET + i] = 1.0 if i == rel else 0.0
+                return
+
+        # Q♠ está en un rival desconocido → distribuir probabilidad
+        # basada en cuántas ♠ puede tener cada jugador
+        # Contar ♠ vistas (cementerio + mesa)
+        picas_vistas = 0
+        for j in range(4):
+            for c in motor.jugadores[j].bazas_ganadas:
+                if c.palo == _PICA:
+                    picas_vistas += 1
+        for _, c in motor.mesa:
+            if c.palo == _PICA:
+                picas_vistas += 1
+        # ♠ en mi mano
+        picas_en_mi_mano = sum(1 for c in mi_mano if c.palo == _PICA)
+        # ♠ restantes (desconocidas)
+        picas_restantes = 13 - picas_vistas - picas_en_mi_mano
+
+        # Contar ♠ que cada rival puede tener (espacio en su mano)
+        rivales = [(a + i) % 4 for i in range(1, 4)]
+        capacidad = []
+        for r in rivales:
+            # Cartas que puede tener: tamaño de su mano
+            n_cartas = len(motor.jugadores[r].mano)
+            # Si es void en ♠, capacidad 0
+            if r in vacios and _PICA in vacios[r]:
+                capacidad.append(0)
+            else:
+                capacidad.append(max(0, n_cartas))
+
+        total_cap = sum(capacidad)
+        if total_cap > 0 and picas_restantes > 0:
+            for i, cap in enumerate(capacidad):
+                obs[OFFSET + i + 1] = cap / total_cap
+        else:
+            # Distribución uniforme entre los 3 rivales
+            for i in range(1, 4):
+                obs[OFFSET + i] = 1.0 / 3.0
+
+        obs[OFFSET + 0] = 0.0  # agente no tiene Q♠ (ya verificado)
+        _PICA = 2
+
+        # Q♠ ya capturada → sin peligro inminente
+        if dama_picas_en is not None:
+            obs[249] = 0.0
+            return
+
+        # Verificar si el agente tiene Q♠
+        mi_mano = motor.jugadores[a].mano
+        tiene_qs = any(c.es_dama_de_picas for c in mi_mano)
+
+        if not tiene_qs:
+            obs[249] = 0.0
+            return
+
+        # Verificar si tiene otra ♠ además de Q♠
+        otras_picas = [
+            c for c in mi_mano
+            if c.palo == _PICA and not c.es_dama_de_picas
+        ]
+        obs[249] = 1.0 if len(otras_picas) >= 1 else 0.0
 
     def _fill_cartas_restantes(
         self, obs: np.ndarray, a: int, motor
@@ -354,6 +521,28 @@ class ObservacionBuilderV3(ObservacionBuilder):
     # Utilidades
     # ------------------------------------------------------------------
 
+    def _fill_forzado(
+        self,
+        obs: np.ndarray,
+        a: int,
+        motor,
+    ) -> None:
+        """[264] Indicador de jugada forzada: 1.0 si solo hay 1 carta legal.
+
+        Feature clave para credit assignment: cuando el agente no tiene
+        alternativa, los castigos por capturar puntos no deberian
+        penalizarlo igual que cuando eligio mal teniendo opciones.
+
+        El modelo puede aprender a ignorar/discountear recompensas
+        negativas cuando esta feature esta activa.
+        """
+        legales = motor.obtener_jugadas_legales(a)
+        obs[264] = 1.0 if len(legales) <= 1 else 0.0
+
+    # ------------------------------------------------------------------
+    # Utilidades
+    # ------------------------------------------------------------------
+
     @staticmethod
     def _contar_altas_restantes(motor) -> List[int]:
         """Cuenta J/Q/K/A que quedan sin jugar por palo.
@@ -377,6 +566,125 @@ class ObservacionBuilderV3(ObservacionBuilder):
                 altas_totales[c.palo] -= 1
 
         return [max(0, x) for x in altas_totales]
+
+    # ------------------------------------------------------------------
+    # Bloque liderazgo [250:260]
+    # ------------------------------------------------------------------
+
+    def _construir_bloque_liderazgo(
+        self,
+        obs: np.ndarray,
+        a: int,
+        motor,
+        dama_picas_en,
+    ) -> None:
+        """Añade 10 features de liderazgo [250:260].
+
+        Args:
+            obs: Array de observación a modificar in-place.
+            a: Índice del agente.
+            motor: Instancia de MotorCorazones.
+            dama_picas_en: Índice del jugador con Q♠, o None si activa.
+        """
+        # [250] soy_lider
+        self._fill_soy_lider(obs, motor)
+
+        # [251] lidero_picas_forzado
+        self._fill_lidero_picas_forzado(obs, a, motor)
+
+        # [252:256] maxima_absoluta_palo
+        self._fill_maxima_absoluta_palo(obs, a, motor)
+
+        # [256:260] puedo_quemar_palo
+        self._fill_puedo_quemar_palo(obs, a, motor, dama_picas_en)
+
+    # ── [250] soy_lider ──
+
+    def _fill_soy_lider(
+        self, obs: np.ndarray, motor
+    ) -> None:
+        """[250] 1.0 si la mesa está vacía → el agente lidera esta baza."""
+        obs[250] = 1.0 if not motor.mesa else 0.0
+
+    # ── [251] lidero_picas_forzado ──
+
+    def _fill_lidero_picas_forzado(
+        self, obs: np.ndarray, a: int, motor
+    ) -> None:
+        """[251] 1.0 si el agente debe liderar y solo tiene ♠ en mano."""
+        _PICA = 2
+        if motor.mesa:
+            obs[251] = 0.0
+            return
+
+        mi_mano = motor.jugadores[a].mano
+        palos_en_mano = {c.palo for c in mi_mano}
+        obs[251] = 1.0 if palos_en_mano == {_PICA} else 0.0
+
+    # ── [252:256] maxima_absoluta_palo ──
+
+    def _fill_maxima_absoluta_palo(
+        self, obs: np.ndarray, a: int, motor
+    ) -> None:
+        """[252:256] 1.0 si el agente tiene la carta más alta viva del palo.
+
+        Determina, para cada palo, si la carta más alta que queda sin jugar
+        está en la mano del agente. Solo se consideran cartas en manos
+        (ni bazas_ganadas ni mesa — ésas ya no están vivas).
+        """
+        # Encontrar la máxima viva por palo (solo en manos)
+        max_viva = [-1, -1, -1, -1]  # valor máximo por palo
+        poseedor_max = [-1, -1, -1, -1]  # quién la tiene
+
+        for j in range(4):
+            for c in motor.jugadores[j].mano:
+                if c.valor > max_viva[c.palo]:
+                    max_viva[c.palo] = c.valor
+                    poseedor_max[c.palo] = j
+
+        for palo in range(4):
+            obs[252 + palo] = 1.0 if poseedor_max[palo] == a else 0.0
+
+    # ── [256:260] puedo_quemar_palo ──
+
+    def _fill_puedo_quemar_palo(
+        self,
+        obs: np.ndarray,
+        a: int,
+        motor,
+        dama_picas_en,
+    ) -> None:
+        """[256:260] 1.0 si liderar mi máxima del palo da baza limpia (0 pts).
+
+        Condiciones:
+          - Tengo la máxima absoluta del palo (entre cartas vivas en manos).
+          - El palo no tiene puntos en juego (♥=1pt, Q♠=13pt).
+          - Para ♠: Q♠ debe estar capturada (no activa).
+        """
+        _PICA = 2
+
+        # Determinar máxima por palo (solo cartas en manos)
+        max_viva = [-1, -1, -1, -1]
+        poseedor_max = [-1, -1, -1, -1]
+        for j in range(4):
+            for c in motor.jugadores[j].mano:
+                if c.valor > max_viva[c.palo]:
+                    max_viva[c.palo] = c.valor
+                    poseedor_max[c.palo] = j
+
+        qs_capturada = dama_picas_en is not None
+
+        for palo in range(4):
+            # ¿Tengo la máxima?
+            tengo_max = poseedor_max[palo] == a
+
+            # ¿El palo es seguro? (sin puntos)
+            if palo == _PICA:
+                palo_seguro = qs_capturada  # ♠ solo seguro si Q♠ capturada
+            else:
+                palo_seguro = True  # ♣/♦ no tienen puntos
+
+            obs[256 + palo] = 1.0 if (tengo_max and palo_seguro) else 0.0
 
 
 __all__ = ["ObservacionBuilderV3", "DIM_V3"]

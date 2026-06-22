@@ -15,6 +15,7 @@ import numpy as np
 from src.dominio.carta import Carta
 from src.entorno.dimensiones import DIM_ENTORNO
 from src.agentes.heuristicos import bot_conservador, bot_agresivo, bot_evasivo
+from src.agentes.bot_castigador import BotCastigador
 from src.torneo.normalizacion import normalizar_obs_desde_archivo
 
 # ----------------------------------------------------------------
@@ -77,7 +78,7 @@ def ejecutar_juego(
     print(f"Cargando modelo: {modelo_path}")
     model = MaskablePPO.load(modelo_path)
 
-    bots = [bot_conservador, bot_agresivo, bot_evasivo]
+    bots = [bot_conservador, bot_agresivo, bot_evasivo, BotCastigador()]
     humano_idx = 0
 
     politicas = {}

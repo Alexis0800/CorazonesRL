@@ -54,7 +54,7 @@ class MCTSBuffer:
         Si el buffer está lleno, sobrescribe el más antiguo (FIFO circular).
 
         Args:
-            obs: Vector de observación (250-d, float32).
+            obs: Vector de observación (DIM_V3, float32).
             action: Acción óptima (índice 0-51).
         """
         obs_arr = np.asarray(obs, dtype=np.float32)
@@ -189,15 +189,19 @@ def evaluar_y_guardar_batch(
     legales: List[Carta],
     buffer: MCTSBuffer,
     obs: np.ndarray,
-    num_mundos: int = 100,
+    num_mundos: int = 50,
     rng: Optional[np.random.Generator] = None,
     forzar: bool = False,
 ) -> Optional[Carta]:
-    """Wrapper para entrenamiento: evalúa con oráculo y guarda.
+    """Wrapper para entrenamiento: evalúa con oráculo (sampling PIMC) y guarda.
+
+    Usa SIEMPRE sampling (determinización) en vez de enumeración exacta,
+    para mantener el costo computacional acotado (~50 mundos → ~1s por
+    llamada, vs ~12min con enumeración exacta a 34K mundos en baza 10).
 
     Solo ejecuta el oráculo si:
     - forzar=True, o
-    - La baza es ≥ 10 y hay ≤ 100K mundos (condición de viabilidad).
+    - La baza es ≥ 10.
 
     Args:
         motor: Estado actual.
@@ -205,29 +209,29 @@ def evaluar_y_guardar_batch(
         legales: Cartas legales.
         buffer: Buffer donde guardar.
         obs: Observación actual.
-        num_mundos: Mundos de sampling.
+        num_mundos: Mundos de sampling (default 50, balance velocidad/calidad).
         rng: Generador aleatorio.
         forzar: Si True, ejecuta siempre (útil para testing).
 
     Returns:
         Carta óptima si se ejecutó el oráculo, None si se saltó.
     """
-    from src.mcts.analisis import _num_mundos_posibles
+    from src.mcts.pimc import _puntaje_esperado_por_carta
 
     if not forzar:
         if motor.numero_baza < 10:
             return None
-        n = _num_mundos_posibles(motor, agente_idx)
-        if n > 100_000:
-            return None
 
-    mejor, _ = evaluar_con_oraculo(
+    if rng is None:
+        rng = np.random.default_rng()
+
+    scores = _puntaje_esperado_por_carta(
         motor, agente_idx, legales,
         num_mundos=num_mundos,
         rng=rng,
-        buffer=buffer,
-        obs=obs,
     )
+    mejor = min(legales, key=lambda c: scores[c.id])
+    buffer.add(obs, mejor.id)
     return mejor
 
 
@@ -263,9 +267,171 @@ def calcular_bc_loss(
     return float(loss.item())
 
 
+def entrenar_bc_epoch(
+    model,  # MaskablePPO
+    buffer: MCTSBuffer,
+    batch_size: int = 256,
+    lr: float = 5e-4,
+    max_batches: Optional[int] = None,
+    vecnorm: Optional[Any] = None,
+) -> float:
+    """Ejecuta un epoch de Behavioral Cloning fine-tuning sobre el buffer.
+
+    Itera el buffer completo una vez (o hasta max_batches) usando un
+    optimizador Adam temporal con cross-entropy loss sobre las acciones
+    del oráculo. No modifica el optimizer del modelo PPO.
+
+    Args:
+        model: Modelo MaskablePPO entrenado.
+        buffer: Buffer con experiencias del oráculo.
+        batch_size: Tamaño de batch.
+        lr: Learning rate para el optimizador BC.
+        max_batches: Límite de batches (None = buffer completo).
+        vecnorm: VecNormalize para normalizar observaciones crudas
+                 antes de pasarlas a la política (opcional pero
+                 recomendado si el modelo se entrenó con VecNormalize).
+
+    Returns:
+        Pérdida promedio del epoch.
+    """
+    import torch
+
+    if buffer.is_empty():
+        return 0.0
+
+    n_total = len(buffer)
+    n_batches = (n_total + batch_size - 1) // batch_size
+    if max_batches is not None:
+        n_batches = min(n_batches, max_batches)
+
+    device = model.device if hasattr(model, 'device') else 'cpu'
+    policy = model.policy.to(device)
+
+    # Optimizador temporal solo para este fine-tuning
+    optimizer = torch.optim.Adam(policy.parameters(), lr=lr)
+    loss_total = 0.0
+
+    indices = np.random.default_rng().permutation(n_total)
+    obs_raw = np.stack([buffer._obs[i] for i in indices])
+    act_arr = np.array([buffer._actions[i]
+                       for i in indices], dtype=np.int64)
+
+    # Normalizar si hay VecNormalize (las obs del buffer son crudas)
+    if vecnorm is not None:
+        obs_raw = vecnorm.normalize_obs(obs_raw)
+
+    for b in range(n_batches):
+        start = b * batch_size
+        end = min(start + batch_size, n_total)
+        obs_batch = torch.from_numpy(obs_raw[start:end]).to(device)
+        act_batch = torch.from_numpy(act_arr[start:end]).to(device)
+
+        optimizer.zero_grad()
+
+        # SB3 ActorCriticPolicy: extract_features → policy_net → action_net
+        # El mlp_extractor.policy_net reduce features_dim → last_net_arch_dim
+        # (ej. Transformer: 256 → 128), necesario para que action_net(128→52)
+        # reciba la dimensión correcta.
+        features = policy.extract_features(obs_batch)
+        if (policy.mlp_extractor is not None
+                and policy.mlp_extractor.policy_net is not None):
+            latent_pi = policy.mlp_extractor.policy_net(features)
+        else:
+            latent_pi = features
+        logits = policy.action_net(latent_pi)
+
+        loss = torch.nn.functional.cross_entropy(logits, act_batch)
+        loss.backward()
+        optimizer.step()
+
+        loss_total += loss.item()
+
+    avg_loss = loss_total / n_batches if n_batches > 0 else 0.0
+    return avg_loss
+
+
+def entrenar_bc_dataset(
+    model,
+    dataset_path: str,
+    epochs: int = 5,
+    batch_size: int = 256,
+    lr: float = 1e-3,
+) -> List[float]:
+    """Pre-entrena el modelo con un dataset offline de (obs, all_scores).
+
+    Carga el dataset generado por _generar_dataset.py (v2).
+    all_scores es una matriz (N, 52) donde cada fila tiene el score
+    esperado de CADA carta (o -1 si no es legal en ese estado).
+    La accion optima es argmax(all_scores).
+
+    Args:
+        model: Modelo MaskablePPO.
+        dataset_path: Ruta al archivo .npz del dataset.
+        epochs: Numero de epochs completos.
+        batch_size: Tamaño de batch.
+        lr: Learning rate.
+
+    Returns:
+        Lista de perdidas por epoch.
+    """
+    import torch
+
+    data = np.load(dataset_path)
+    obs_all = data["observations"]
+    scores_all = data["all_scores"]  # (N, 52) — score esperado, menor=mejor
+
+    # Accion optima = argmin de scores validos (excluyendo -1 = no disponible)
+    masked_scores = np.where(scores_all >= 0, scores_all, np.inf)
+    act_all = np.argmin(masked_scores, axis=1).astype(np.int64)
+
+    device = model.device if hasattr(model, 'device') else 'cpu'
+    policy = model.policy.to(device)
+    optimizer = torch.optim.Adam(policy.parameters(), lr=lr)
+
+    n_total = len(obs_all)
+    epoch_losses = []
+
+    for epoch in range(epochs):
+        indices = np.random.default_rng().permutation(n_total)
+        loss_total = 0.0
+        n_batches = 0
+
+        for start in range(0, n_total, batch_size):
+            end = min(start + batch_size, n_total)
+            batch_idx = indices[start:end]
+
+            obs_batch = torch.from_numpy(obs_all[batch_idx]).to(device)
+            act_batch = torch.from_numpy(act_all[batch_idx]).to(device)
+
+            optimizer.zero_grad()
+            features = policy.extract_features(obs_batch)
+            if (policy.mlp_extractor is not None
+                    and policy.mlp_extractor.policy_net is not None):
+                latent_pi = policy.mlp_extractor.policy_net(features)
+            else:
+                latent_pi = features
+            logits = policy.action_net(latent_pi)
+
+            loss = torch.nn.functional.cross_entropy(logits, act_batch)
+            loss.backward()
+            optimizer.step()
+
+            loss_total += loss.item()
+            n_batches += 1
+
+        avg_loss = loss_total / max(n_batches, 1)
+        epoch_losses.append(avg_loss)
+        logger.info("BC dataset epoch %d/%d: loss=%.4f",
+                    epoch + 1, epochs, avg_loss)
+
+    return epoch_losses
+
+
 __all__ = [
     "MCTSBuffer",
     "evaluar_con_oraculo",
     "evaluar_y_guardar_batch",
     "calcular_bc_loss",
+    "entrenar_bc_epoch",
+    "entrenar_bc_dataset",
 ]

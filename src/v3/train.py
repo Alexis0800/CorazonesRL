@@ -22,12 +22,13 @@ Uso:
 """
 
 from __future__ import annotations
-from src.v3.train_mcts import MCTSBuffer, evaluar_y_guardar_batch
+from src.v3.train_mcts import MCTSBuffer, entrenar_bc_epoch
 from src.v3.red import obtener_policy_kwargs_transformer
 from src.v3.entorno import CorazonesEnvV3
 from src.entorno.dimensiones import DIM_V3
 from src.agentes.heuristicos import BOTS_DISPONIBLES
 
+import glob
 import json
 import math
 import os
@@ -51,14 +52,16 @@ if _proyecto not in sys.path:
 # Constantes v3
 # ------------------------------------------------------------------
 PROB_BOT_START: float = 0.50
-PROB_BOT_END: float = 0.20
+PROB_BOT_END: float = 0.05
 PROB_EXPERTO: float = 0.10
 EVAL_PARTIDAS: int = 200
 ELO_PARTIDAS: int = 30
 ELO_MAX_SNAPSHOTS: int = 12
 BEST_TOP: int = 2
-MIN_SNAPSHOT_STEPS: int = 500_000
+MIN_SNAPSHOT_STEPS: int = 100_000
 MAX_SNAPSHOTS_POOL: int = 50
+MIN_BC_SAMPLES: int = 100
+MCTS_FREQUENCY: float = 0.40
 
 
 # ------------------------------------------------------------------
@@ -244,6 +247,9 @@ def log_eval(
     avg_score: float,
     num_partidas: int,
     prob_bot: float,
+    posiciones: Optional[List[int]] = None,
+    scores_por_jugador: Optional[Dict[str, float]] = None,
+    **kwargs,
 ) -> None:
     """Registra resultado de evaluacion estandarizada en formato JSONL.
 
@@ -257,8 +263,11 @@ def log_eval(
         avg_score: Puntuacion promedio del agente.
         num_partidas: Numero de partidas por evaluacion.
         prob_bot: prob_bot usado en el entrenamiento.
+        posiciones: Lista [1°, 2°, 3°, 4°] con conteo de posiciones del modelo.
+        scores_por_jugador: Dict con avg score desglosado por tipo de jugador
+            (modelo, experto_1, experto_2, bot).
     """
-    entry = {
+    entry: Dict[str, Any] = {
         "timestamp": datetime.now().isoformat(),
         "paso": paso,
         "wr": round(wr, 4),
@@ -266,14 +275,170 @@ def log_eval(
         "num_partidas": num_partidas,
         "prob_bot": round(prob_bot, 4),
     }
+    if posiciones is not None:
+        entry["posiciones"] = [int(p) for p in posiciones]
+        # Calcular top1 y top2 rates desde posiciones si no se pasaron
+        total = sum(posiciones)
+        if total > 0:
+            if "top1_rate" not in kwargs:
+                entry["top1_rate"] = round(posiciones[0] / total, 4)
+            if "top2_rate" not in kwargs:
+                entry["top2_rate"] = round(
+                    (posiciones[0] + posiciones[1]) / total, 4)
+    # Permitir override explícito de top1_rate y top2_rate + formato
+    for key in ("top1_rate", "top2_rate", "formato"):
+        if key in kwargs and kwargs[key] is not None:
+            entry[key] = kwargs[key]
+    if scores_por_jugador is not None:
+        entry["scores_por_jugador"] = {
+            k: round(v, 2) for k, v in scores_por_jugador.items()
+        }
+    os.makedirs(os.path.dirname(log_path) or ".", exist_ok=True)
+    with open(log_path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(entry) + "\n")
+
+
+def log_bc_loss(
+    log_path: str,
+    paso: int,
+    bc_loss: float,
+    buffer_size: int,
+) -> None:
+    """Registra pérdida de BC fine-tuning en el eval_log.
+
+    Args:
+        log_path: Ruta al archivo .jsonl de evaluación.
+        paso: Paso de entrenamiento.
+        bc_loss: Pérdida de cross-entropy del BC epoch.
+        buffer_size: Tamaño del buffer MCTS usado.
+    """
+    entry = {
+        "timestamp": datetime.now().isoformat(),
+        "tipo": "bc_finetune",
+        "paso": paso,
+        "bc_loss": round(bc_loss, 6),
+        "buffer_size": buffer_size,
+    }
     os.makedirs(os.path.dirname(log_path) or ".", exist_ok=True)
     with open(log_path, "a", encoding="utf-8") as f:
         f.write(json.dumps(entry) + "\n")
 
 
 # ------------------------------------------------------------------
-# Factory: self-play para v3
+# Utilidad: carga VecNormalize cross-dim (250 → 260)
 # ------------------------------------------------------------------
+
+def _pad_vecnorm_stats(stats: np.ndarray, target_dim: int, pad_value: float = 0.0) -> np.ndarray:
+    """Asegura que las stats tengan target_dim elementos.
+
+    Si son más cortas (modelo antiguo con menos dims),
+    rellena con pad_value las nuevas dimensiones.
+    """
+    if stats.shape[0] >= target_dim:
+        return stats[:target_dim].copy()
+    padded = np.full(target_dim, pad_value, dtype=stats.dtype)
+    padded[:stats.shape[0]] = stats
+    return padded
+
+
+def _cargar_vecnorm_compatible(
+    pkl_path: str,
+    make_env_fn,
+    target_dim: int = DIM_V3,
+):
+    """Carga VecNormalize con compatibilidad cross-dim (250 → 260).
+
+    Si el VecNormalize guardado tiene menos dimensiones que el entorno
+    actual, rellena las nuevas dimensiones con mean=0, var=1.
+
+    Args:
+        pkl_path: Ruta al archivo .pkl de VecNormalize.
+        make_env_fn: Función factory para crear el entorno (dim actual).
+        target_dim: Dimensión objetivo de la observación.
+
+    Returns:
+        VecNormalize con stats compatibles.
+    """
+    import pickle
+    from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
+
+    # Crear VecNormalize nuevo con el env actual (dim correcta)
+    venv_new = DummyVecEnv([make_env_fn])
+    vn = VecNormalize(
+        venv_new, norm_obs=True, norm_reward=True,
+        clip_obs=10.0, clip_reward=10.0, gamma=0.995, epsilon=1e-8,
+    )
+
+    # Cargar stats guardadas del disco
+    with open(pkl_path, "rb") as f:
+        old_vn = pickle.load(f)
+
+    # Transferir stats de recompensa (no cambian de dimensión)
+    if hasattr(old_vn, "ret_rms"):
+        vn.ret_rms = old_vn.ret_rms
+
+    # Transferir stats de observación con padding
+    old_mean = old_vn.obs_rms.mean
+    old_var = old_vn.obs_rms.var
+    vn.obs_rms.mean = _pad_vecnorm_stats(old_mean, target_dim, pad_value=0.0)
+    vn.obs_rms.var = _pad_vecnorm_stats(old_var, target_dim, pad_value=1.0)
+    # Preservar el contador para no reiniciar la normalización
+    if hasattr(old_vn.obs_rms, "count"):
+        vn.obs_rms.count = old_vn.obs_rms.count
+
+    return vn
+
+
+# ------------------------------------------------------------------
+# Factory: self-play para v3 (con snapshots históricos)
+# ------------------------------------------------------------------
+
+def _cargar_snapshots_v3(
+    snaps_dir: str,
+    min_steps: int,
+    max_snapshots: int,
+) -> list:
+    """Carga snapshots históricos para Fictitious Self-Play.
+
+    Args:
+        snaps_dir: Directorio de snapshots (ej: models/v3_mcts/snapshots).
+        min_steps: Pasos mínimos para considerar un snapshot.
+        max_snapshots: Máximo de snapshots en el pool.
+
+    Returns:
+        Lista de modelos MaskablePPO cargados en cpu.
+    """
+    from sb3_contrib import MaskablePPO
+
+    if not os.path.exists(snaps_dir):
+        return []
+
+    archivos = glob.glob(os.path.join(snaps_dir, "snapshot_*.zip"))
+    archivos_validos = []
+    for a in archivos:
+        nombre = os.path.basename(a).replace(".zip", "")
+        try:
+            paso = int(nombre.replace("snapshot_", ""))
+            if paso >= min_steps:
+                archivos_validos.append((paso, a))
+        except ValueError:
+            continue
+
+    # Ordenar por paso, tomar los max_snapshots más recientes
+    archivos_validos.sort(key=lambda x: x[0])
+    if len(archivos_validos) > max_snapshots:
+        archivos_validos = archivos_validos[-max_snapshots:]
+
+    snapshots = []
+    for _, path in archivos_validos:
+        try:
+            model = MaskablePPO.load(path, device="cpu")
+            snapshots.append(model)
+        except Exception:
+            continue
+
+    return snapshots
+
 
 def crear_entorno_self_play_v3(
     version: str = "v3",
@@ -282,42 +447,56 @@ def crear_entorno_self_play_v3(
     max_snapshots: int = MAX_SNAPSHOTS_POOL,
     agente_idx: int = 0,
     modelo_actual: Optional[Any] = None,
+    oracle_buffer: Optional[object] = None,
+    oracle_rng: Optional[np.random.Generator] = None,
 ) -> CorazonesEnvV3:
     """Crea un entorno CorazonesEnvV3 con oponentes mixtos (self-play).
 
     Los oponentes son una mezcla de:
     - Bots heurísticos (prob_bot): conservador, agresivo, evasivo
-    - BotExperto (10% fijo): para elevar el nivel de juego
+    - Snapshots históricos (1 - prob_bot): Fictitious Self-Play real
+    - BotExperto (fallback): cuando no hay snapshots disponibles aún
 
     Args:
-        version: Versión del modelo (ej: 'v3').
+        version: Versión del modelo (ej: 'v3_mcts').
         prob_bot: Probabilidad de usar bot heurístico.
-        min_steps: Pasos mínimos para un snapshot (no usado por ahora).
-        max_snapshots: Máximo de snapshots en pool (no usado por ahora).
+        min_steps: Pasos mínimos para un snapshot.
+        max_snapshots: Máximo de snapshots en pool.
         agente_idx: Índice del agente en el entorno (0-3).
-        modelo_actual: Instancia MaskablePPO actual (no usado por ahora).
+        modelo_actual: Instancia MaskablePPO actual (no usado).
+        oracle_buffer: Buffer MCTS para recolectar datos del oráculo.
+        oracle_rng: Generador aleatorio para el oráculo.
 
     Returns:
         Instancia de CorazonesEnvV3 configurada para self-play.
     """
     from src.agentes.bot_experto import BotExperto
+    from src.agentes.politica_rl import PoliticaSB3
 
-    # ── Seleccionar oponentes según prob_bot ──
-    # prob_bot alta (inicio) → +bots fáciles
-    # prob_bot baja (final) → +BotExperto (rivales fuertes)
-    prob_experto_efectiva = max(0.05, min(0.80, 1.0 - prob_bot))
+    # ── Cargar pool de snapshots históricos ──
+    snaps_dir = os.path.join("models", version, "snapshots")
+    snapshots = _cargar_snapshots_v3(snaps_dir, min_steps, max_snapshots)
 
+    # ── Asignar oponentes ──
     politicas: Dict[int, object] = {}
     for offset in (1, 2, 3):
         rival_idx = (agente_idx + offset) % 4
-        if random.random() < prob_experto_efectiva:
-            politicas[rival_idx] = BotExperto()
-        else:
+        if random.random() < prob_bot:
+            # Bot heurístico aleatorio
             politicas[rival_idx] = random.choice(BOTS_DISPONIBLES)
+        elif snapshots:
+            # Snapshot histórico (Fictitious Self-Play real)
+            snap = random.choice(snapshots)
+            politicas[rival_idx] = PoliticaSB3(snap, rival_idx)
+        else:
+            # Fallback: BotExperto (sin snapshots aún)
+            politicas[rival_idx] = BotExperto()
 
     return CorazonesEnvV3(
         agente_idx=agente_idx,
         politicas_oponentes=politicas,
+        oracle_buffer=oracle_buffer,
+        oracle_rng=oracle_rng,
     )
 
 
@@ -359,7 +538,7 @@ def _evaluar_estandar(
     modelo: Any,
     num_partidas: int = EVAL_PARTIDAS,
     seed: int = 42,
-) -> Tuple[float, float]:
+) -> Tuple[float, float, List[int], Dict[str, float], float, float]:
     """Evalua win rate contra el campo estandar [Experto, Experto, BotRotativo].
 
     Formato canonico:
@@ -372,7 +551,13 @@ def _evaluar_estandar(
         seed: Semilla base.
 
     Returns:
-        Tuple (wr, avg_score).
+        Tuple (wr, avg_score, posiciones, scores_por_jugador, top1_rate, top2_rate).
+        - wr: Win rate estandar (score modelo <= 8).
+        - avg_score: Puntuacion promedio del modelo.
+        - posiciones: [1°, 2°, 3°, 4°].
+        - scores_por_jugador: Avg score por tipo.
+        - top1_rate: Fraccion de 1° puesto.
+        - top2_rate: Fraccion de 1° o 2° puesto.
     """
     from src.v3.evaluacion import _construir_oponentes_estandar
     from src.v3.observacion import ObservacionBuilderV3, DIM_V3
@@ -381,6 +566,10 @@ def _evaluar_estandar(
 
     victorias = 0
     scores: list[float] = []
+    posiciones = [0, 0, 0, 0]  # 1st, 2nd, 3rd, 4th
+    scores_por_tipo: Dict[str, list] = {
+        "modelo": [], "experto_1": [], "experto_2": [], "bot": [],
+    }
     builder = ObservacionBuilderV3(dim=DIM_V3)
 
     for i in range(num_partidas):
@@ -404,16 +593,128 @@ def _evaluar_estandar(
                 obs, action_masks=mask, deterministic=True)
             obs, reward, terminated, truncated, info = env.step(action)
 
-        puntos_agente = info.get("puntos_agente", 26)
+        # Puntuaciones de los 4 jugadores
+        puntos_mano = env.motor.calcular_puntuacion_mano()
+        puntos_agente = puntos_mano[agente_idx]
         scores.append(puntos_agente)
         if puntos_agente <= 8:
             victorias += 1
+
+        # Determinar posicion (1° = menor puntuacion)
+        ranking = sorted(enumerate(puntos_mano), key=lambda x: x[1])
+        for pos, (jug, _) in enumerate(ranking):
+            if jug == agente_idx:
+                posiciones[pos] += 1
+
+        # Acumular scores por tipo de jugador
+        # Mapear indices a tipos: agente=modelo, oponentes=experto_1, experto_2, bot
+        scores_por_tipo["modelo"].append(puntos_agente)
+        # Los oponentes estan en politicas[offset]; el orden es experto_1, experto_2, bot
+        oponentes_ordenados = sorted(politicas.keys())
+        for j, op_idx in enumerate(oponentes_ordenados):
+            if j == 0:
+                scores_por_tipo["experto_1"].append(puntos_mano[op_idx])
+            elif j == 1:
+                scores_por_tipo["experto_2"].append(puntos_mano[op_idx])
+            else:
+                scores_por_tipo["bot"].append(puntos_mano[op_idx])
 
         env.close()
 
     wr = victorias / num_partidas
     avg_score = float(np.mean(scores))
-    return wr, avg_score
+    top1_rate = posiciones[0] / num_partidas
+    top2_rate = (posiciones[0] + posiciones[1]) / num_partidas
+    avg_por_tipo = {
+        k: float(np.mean(v)) if v else 0.0
+        for k, v in scores_por_tipo.items()
+    }
+    return wr, avg_score, posiciones, avg_por_tipo, top1_rate, top2_rate
+
+
+def _evaluar_facil(
+    modelo: Any,
+    num_partidas: int = 50,
+    seed: int = 42,
+) -> Tuple[float, float, List[int], Dict[str, float], float, float]:
+    """Evalua contra campo facil [Experto, Bot, Bot].
+
+    Formato:
+        Mesa: [Modelo, BotExperto, BotHeuristico, BotHeuristico]
+        Solo 1 BotExperto (rival fuerte). Los otros 2 son bots heuristicos.
+
+    Util para medir progreso cuando el formato estandar (2 Expertos)
+    es demasiado dificil y el modelo aun no llega a ese nivel.
+
+    Returns:
+        Igual que _evaluar_estandar: (wr, avg_score, pos, scores_pj, top1, top2).
+    """
+    from src.v3.evaluacion import _construir_oponentes_estandar
+    from src.v3.observacion import ObservacionBuilderV3, DIM_V3
+    from src.agentes.heuristicos import BOTS_DISPONIBLES
+    from src.agentes.bot_experto import BotExperto
+    import random as _random
+
+    victorias = 0
+    scores: list[float] = []
+    posiciones = [0, 0, 0, 0]
+    scores_por_tipo: Dict[str, list] = {
+        "modelo": [], "experto": [], "bot_1": [], "bot_2": [],
+    }
+    builder = ObservacionBuilderV3(dim=DIM_V3)
+
+    for i in range(num_partidas):
+        agente_idx = i % 4
+        rng = np.random.default_rng(seed + i)
+
+        # Campo facil: [Experto, Bot, Bot]
+        politicas: Dict[int, object] = {}
+        oponentes = [(agente_idx + d) % 4 for d in (1, 2, 3)]
+        politicas[oponentes[0]] = BotExperto()
+        politicas[oponentes[1]] = _random.choice(BOTS_DISPONIBLES)
+        politicas[oponentes[2]] = _random.choice(BOTS_DISPONIBLES)
+
+        env = CorazonesEnvV3(
+            agente_idx=agente_idx,
+            politicas_oponentes=politicas,
+        )
+        obs, _ = env.reset(seed=int(rng.integers(0, 2**31)))
+        terminated = False
+        truncated = False
+
+        while not terminated and not truncated:
+            mask = env.action_masks()
+            action, _ = modelo.predict(
+                obs, action_masks=mask, deterministic=True)
+            obs, reward, terminated, truncated, info = env.step(action)
+
+        puntos_mano = env.motor.calcular_puntuacion_mano()
+        puntos_agente = puntos_mano[agente_idx]
+        scores.append(puntos_agente)
+        if puntos_agente <= 8:
+            victorias += 1
+
+        ranking = sorted(enumerate(puntos_mano), key=lambda x: x[1])
+        for pos, (jug, _) in enumerate(ranking):
+            if jug == agente_idx:
+                posiciones[pos] += 1
+
+        scores_por_tipo["modelo"].append(puntos_agente)
+        scores_por_tipo["experto"].append(puntos_mano[oponentes[0]])
+        scores_por_tipo["bot_1"].append(puntos_mano[oponentes[1]])
+        scores_por_tipo["bot_2"].append(puntos_mano[oponentes[2]])
+
+        env.close()
+
+    wr = victorias / num_partidas
+    avg_score = float(np.mean(scores))
+    top1_rate = posiciones[0] / num_partidas
+    top2_rate = (posiciones[0] + posiciones[1]) / num_partidas
+    avg_por_tipo = {
+        k: float(np.mean(v)) if v else 0.0
+        for k, v in scores_por_tipo.items()
+    }
+    return wr, avg_score, posiciones, avg_por_tipo, top1_rate, top2_rate
 
 
 # ------------------------------------------------------------------
@@ -469,6 +770,8 @@ def entrenar_auto(
     os.makedirs(dir_best, exist_ok=True)
 
     eval_log_path = os.path.join(output_dir, "eval_log.jsonl")
+    # "v3_mcts" from "models/v3_mcts"
+    version_name = os.path.basename(output_dir)
 
     step_counter = 0
     snapshot_count = 0
@@ -493,13 +796,14 @@ def entrenar_auto(
 
         def _make_env():
             return crear_entorno_self_play_v3(
+                version=version_name,
                 prob_bot=prob_bot_actual(
                     step_counter, total_steps, prob_bot_start, prob_bot_end),
                 agente_idx=0,
             )
 
         if os.path.exists(vn_path):
-            venv = VecNormalize.load(vn_path, DummyVecEnv([_make_env]))
+            venv = _cargar_vecnorm_compatible(vn_path, _make_env)
         else:
             venv = DummyVecEnv([_make_env])
             venv = VecNormalize(venv, norm_obs=True, norm_reward=True,
@@ -520,7 +824,9 @@ def entrenar_auto(
         )
 
         def _make_env():
-            return crear_entorno_self_play_v3(prob_bot=prob_bot_start, agente_idx=0)
+            return crear_entorno_self_play_v3(
+                version=version_name,
+                prob_bot=prob_bot_start, agente_idx=0)
 
         venv = DummyVecEnv([_make_env])
         venv = VecNormalize(venv, norm_obs=True, norm_reward=True,
@@ -550,10 +856,25 @@ def entrenar_auto(
         pb = prob_bot_actual(step_counter, total_steps,
                              prob_bot_start, prob_bot_end)
 
+        # ── Decidir si este chunk recolecta datos del oráculo ──
+        enviar_oraculo = (
+            mcts_enabled
+            and mcts_buffer is not None
+            and random.random() < mcts_frequency
+        )
+
         # Recrear env interno con prob_bot actualizado, preservando VecNormalize
         # Reset explícito para sincronizar _last_obs con el nuevo entorno
         def _make_env_dyn():
-            return crear_entorno_self_play_v3(prob_bot=pb, agente_idx=0)
+            return crear_entorno_self_play_v3(
+                version=version_name,
+                prob_bot=pb, agente_idx=0,
+                oracle_buffer=mcts_buffer if enviar_oraculo else None,
+                oracle_rng=(
+                    np.random.default_rng(seed + step_counter)
+                    if enviar_oraculo else None
+                ),
+            )
 
         env_actual = modelo.get_env()
         if isinstance(env_actual, VecNormalize):
@@ -583,6 +904,24 @@ def entrenar_auto(
         pasos_restantes -= chunk
         snapshot_count += 1
 
+        # ── BC fine-tuning con datos del oráculo ──
+        if (mcts_enabled and mcts_buffer is not None
+                and len(mcts_buffer) >= MIN_BC_SAMPLES):
+            env_actual = modelo.get_env()
+            vn = env_actual if isinstance(env_actual, VecNormalize) else None
+            try:
+                bc_loss = entrenar_bc_epoch(
+                    modelo, mcts_buffer,
+                    batch_size=256, lr=1e-3, vecnorm=vn,
+                )
+                buf_size = len(mcts_buffer)
+                log_bc_loss(eval_log_path, step_counter, bc_loss, buf_size)
+                if bc_loss > 0:
+                    print(f"   🧠 BC fine-tune: loss={bc_loss:.4f} "
+                          f"| buffer={buf_size}")
+            except Exception as e:
+                print(f"   ⚠️  BC fine-tune falló: {e}")
+
         elapsed = time.time() - start_time
         steps_per_sec = step_counter / elapsed if elapsed > 0 else 0
 
@@ -606,15 +945,33 @@ def entrenar_auto(
         _guardar_snapshot(modelo, step_counter, dir_snapshots,
                           vecnorm_pkl if os.path.exists(vecnorm_pkl) else None)
 
-        # ── Evaluar win rate (formato estandar) ──
+        # ── Evaluar win rate (formato estandar + facil) ──
         if step_counter > 0 and step_counter % eval_every == 0:
-            print(f"\n📈 Evaluando win rate ({eval_partidas} manos, "
-                  f"formato [Modelo, Experto, Experto, Bot])...")
-            wr, score = _evaluar_estandar(
+            print(f"\n📈 Evaluando ({eval_partidas} manos)...")
+
+            # Formato dificil: [Modelo, Experto, Experto, Bot]
+            wr, score, pos, spj, t1, t2 = _evaluar_estandar(
                 modelo, eval_partidas, seed + step_counter)
             log_eval(eval_log_path, step_counter,
-                     wr, score, eval_partidas, pb)
-            print(f"   WR estandar: {wr:.2%} | Score: {score:.1f}")
+                     wr, score, eval_partidas, pb,
+                     posiciones=pos, scores_por_jugador=spj,
+                     top1_rate=t1, top2_rate=t2, formato="dificil")
+            pos_str = " > ".join(f"{p}×{c}" for p, c in zip(
+                ["1°", "2°", "3°", "4°"], pos))
+            print(
+                f"   DIFICIL [M,E,E,B]: WR≤8={wr:.0%} Top1={t1:.0%} Top2={t2:.0%} Score={score:.1f} | {pos_str}")
+
+            # Formato facil: [Modelo, Experto, Bot, Bot]
+            wr2, score2, pos2, spj2, t1_2, t2_2 = _evaluar_facil(
+                modelo, eval_partidas // 2, seed + step_counter + 1)
+            log_eval(eval_log_path, step_counter,
+                     wr2, score2, eval_partidas // 2, pb,
+                     posiciones=pos2, scores_por_jugador=spj2,
+                     top1_rate=t1_2, top2_rate=t2_2, formato="facil")
+            pos_str2 = " > ".join(f"{p}×{c}" for p, c in zip(
+                ["1°", "2°", "3°", "4°"], pos2))
+            print(
+                f"   FACIL   [M,E,b,b]: WR≤8={wr2:.0%} Top1={t1_2:.0%} Top2={t2_2:.0%} Score={score2:.1f} | {pos_str2}")
 
         # ── Torneo Elo (asíncrono) ──
         if snapshot_count % elo_every == 0 and snapshot_count > 0:
@@ -666,7 +1023,7 @@ def _extraer_paso_de_ruta(ruta: str) -> int:
 # ------------------------------------------------------------------
 
 HP_DEFAULT: Dict[str, Any] = {
-    "learning_rate": 4e-5,
+    "learning_rate": 1e-4,
     "n_steps": 2048,
     "batch_size": 256,
     "n_epochs": 10,
@@ -709,7 +1066,7 @@ if __name__ == "__main__":
                         help="Semilla aleatoria")
     parser.add_argument("--mcts", action="store_true",
                         help="Activar MCTS oracle guidance")
-    parser.add_argument("--mcts-frequency", type=float, default=0.05,
+    parser.add_argument("--mcts-frequency", type=float, default=MCTS_FREQUENCY,
                         help="Fracción de episodios con MCTS (default: 0.05)")
 
     args = parser.parse_args()

@@ -26,6 +26,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
+from src.entorno.dimensiones import DIM_V3
+
 # Asegurar que el proyecto esta en el path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__)))))
@@ -78,6 +80,25 @@ class JugadorV3:
                 vn = pickle.load(f)
             self._obs_mean = vn.obs_rms.mean
             self._obs_var = vn.obs_rms.var
+            # Compatibilidad: pad a DIM_V3 si las stats son de una version anterior
+            self._obs_mean = _pad_vecnorm_stats(self._obs_mean, pad_value=0.0)
+            self._obs_var = _pad_vecnorm_stats(self._obs_var, pad_value=1.0)
+
+
+def _pad_vecnorm_stats(stats: np.ndarray, pad_value: float = 0.0) -> np.ndarray:
+    """Asegura que las stats de VecNormalize tengan DIM_V3 elementos.
+
+    Si las stats son mas cortas (modelo antiguo con menos dims),
+    rellena con pad_value las nuevas dimensiones.
+    - mean: pad_value=0 (sin desplazamiento en nuevas dims)
+    - var: pad_value=1 (sin escalado en nuevas dims)
+    """
+    target = DIM_V3
+    if stats.shape[0] >= target:
+        return stats[:target].copy()
+    padded = np.full(target, pad_value, dtype=stats.dtype)
+    padded[:stats.shape[0]] = stats
+    return padded
 
 
 # ------------------------------------------------------------------
@@ -258,6 +279,11 @@ def _elegir_carta_modelo_sin_historial(
     mask = np.zeros(52, dtype=np.bool_)
     for c in legales:
         mask[c.id] = True
+
+    # Truncar obs al espacio del modelo si es mas pequeno (compatibilidad cross-gen)
+    model_dim = jug._modelo.observation_space.shape[0]
+    if obs.shape[0] > model_dim:
+        obs = obs[:model_dim]
 
     action, _ = jug._modelo.predict(
         obs, action_masks=mask, deterministic=True,

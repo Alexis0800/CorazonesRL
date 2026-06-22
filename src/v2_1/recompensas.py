@@ -8,6 +8,7 @@ que enseñan comportamientos estratégicos del BotExperto:
   2. Moon block: +15 cuando ganas baza con puntos y un rival tiene ≥6♥
   3. Early safe burn: +1.5 por ganar baza con 0 puntos en bazas 1-7
   4. Liability hold: -5 tras baza 7 si retienes A♠/K♠ con Q♠ activa
+  5. Q♠ preventive: -5 cuando juegas Q♠ teniendo alternativas seguras en ♠
 
 Las señales base (v2_ronda) se mantienen intactas. Las nuevas son aditivas.
 """
@@ -32,15 +33,22 @@ class RewardConfigV21:
     REWARD_MEJOR_MANO: float = 5.0
     REWARD_PEOR_MANO: float = -5.0
 
-    # --- Señales tácticas nuevas (v2_1) ---
-    # Dump Q♠ en rival cuando somos void en palo de salida
-    REWARD_QS_DUMP: float = 12.0
-    # Bloquear pozo ajeno: ganar baza con puntos cuando rival tiene ≥6♥
-    REWARD_MOON_BLOCK: float = 15.0
-    # Quemar palos temprano: ganar baza con 0 pts en bazas 1-7
-    REWARD_EARLY_SAFE_BURN: float = 1.5
+    # --- Señales tácticas (v2.1 → v4: reducidas para que domine reward terminal) ---
+    # Dump Q♠ en rival: reducido 12→5 para no distorsionar objetivo principal
+    REWARD_QS_DUMP: float = 5.0
+    # Bloquear pozo ajeno: reducido 15→4 para no distorsionar
+    REWARD_MOON_BLOCK: float = 4.0
+    # Quemar palos temprano: ganar baza con 0 pts
+    # +1.0 en bazas 1-4, +0.5 en bazas 5-7 (reducido para priorizar score final)
+    REWARD_EARLY_SAFE_BURN: float = 1.0  # legacy
+    REWARD_EARLY_BURN_HIGH: float = 1.0   # bazas 1-4
+    REWARD_EARLY_BURN_LOW: float = 0.5    # bazas 5-7
     # Penalización por retener A♠/K♠ con Q♠ activa tras baza 7
     REWARD_LIABILITY_HOLD: float = -5.0
+
+    # Penalización preventiva por jugar Q♠ teniendo alternativas seguras
+    # Aumentado de -5.0 a -8.0 (análisis PIMC: modelos capturan Q♠ 35-42%)
+    REWARD_QS_PREVENTIVO: float = -8.0
 
     # Umbral para detección de moon block
     MOON_BLOCK_CORAZONES_UMBRAL: int = 6
@@ -55,6 +63,42 @@ class CalculadoraRecompensasV21:
 
     def __init__(self, config: Optional[RewardConfigV21] = None):
         self.cfg = config or RewardConfigV21()
+
+    # ------------------------------------------------------------------
+    # NEW: Q♠ preventive penalty
+    # ------------------------------------------------------------------
+
+    def recompensa_qs_preventivo(
+        self,
+        carta_jugada,  # Carta
+        cartas_del_palo: list,  # List[Carta] — cartas de ♠ en mano del agente
+        qs_activa: bool,
+    ) -> float:
+        """Penalización preventiva por jugar Q♠ cuando hay alternativas seguras.
+
+        Evita que el modelo juegue Q♠ voluntariamente en bazas tempranas
+        cuando tiene cartas más bajas de ♠ disponibles. El análisis PIMC
+        mostró que este es el error #1 del modelo v3 (coste +15.2 pts).
+
+        Args:
+            carta_jugada: La carta que el agente acaba de jugar.
+            cartas_del_palo: Lista de cartas de ♠ que el agente tenía en mano
+                            ANTES de jugar (incluye la carta jugada).
+            qs_activa: True si Q♠ sigue en circulación (no capturada aún).
+
+        Returns:
+            REWARD_QS_PREVENTIVO si el agente jugó Q♠ teniendo alternativas
+            seguras, 0.0 en cualquier otro caso.
+        """
+        if not qs_activa:
+            return 0.0
+        if not carta_jugada.es_dama_de_picas:
+            return 0.0
+        if len(cartas_del_palo) <= 1:
+            # Q♠ es la única carta de ♠ — está forzado, no penalizar
+            return 0.0
+        # Tiene alternativas seguras en ♠ → penalizar
+        return self.cfg.REWARD_QS_PREVENTIVO
 
     # ------------------------------------------------------------------
     # Per-baza (base, sin cambios)
@@ -197,9 +241,11 @@ class CalculadoraRecompensasV21:
             return 0.0
         if puntos_en_baza > 0:
             return 0.0
-        if numero_baza > 7:
-            return 0.0
-        return self.cfg.REWARD_EARLY_SAFE_BURN
+        if numero_baza <= 4:
+            return self.cfg.REWARD_EARLY_BURN_HIGH
+        if numero_baza <= 7:
+            return self.cfg.REWARD_EARLY_BURN_LOW
+        return 0.0
 
     # ------------------------------------------------------------------
     # NEW: Liability hold penalty
