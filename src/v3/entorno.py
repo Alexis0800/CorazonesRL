@@ -1,12 +1,13 @@
 """
-Entorno Gymnasium single-hand para Corazones (v3).
+Entorno Gymnasium single-hand para Corazones v3.
 
-Una mano = un episodio. Sin puntajes historicos en la observacion
-(compatible con v2), pero con soporte planificado para contexto
-multi-mano en la recompensa.
+Una mano = un episodio. Sin puntajes históricos, sin contexto multi-mano.
 
-Importa componentes compartidos de src.dominio (logica pura),
-src.agentes (bots), src.entorno.observacion y src.entorno.dimensiones.
+Mejoras sobre v2_1:
+  - Observación enriquecida a 250 dims (ObservacionBuilderV3)
+  - Recompensas v2_1 (8 señales: 4 base + 4 tácticas)
+  - Hooks para MCTS-guided training (oráculo PIMC)
+  - Compatible con TransformerFeatureExtractor y LSTM
 """
 
 from __future__ import annotations
@@ -20,79 +21,76 @@ from gymnasium import spaces
 
 from src.dominio.carta import Carta
 from src.dominio.motor import MotorCorazones
-from src.entorno.observacion import ObservacionBuilder
-from src.entorno.dimensiones import DIM_ENTORNO, DIMS_VALIDAS
-from src.v3.recompensas import (
-    CalculadoraRecompensasScore,
-    RewardConfigScore,
-)
+from src.entorno.dimensiones import DIM_V3
+from src.v3.observacion import ObservacionBuilderV3
+from src.v2_1.recompensas import CalculadoraRecompensasV21, RewardConfigV21
 
 
-class CorazonesEnvSingleHand(gym.Env):
-    """Entorno Gymnasium para UNA mano de Corazones.
+class CorazonesEnvV3(gym.Env):
+    """Entorno Gymnasium para UNA mano de Corazones (v3).
 
     Cada episodio es exactamente una mano (13 bazas, max 52 pasos del agente).
-    No hay puntuacion historica (todos empiezan en 0).
-    No hay contexto de partida multi-mano.
+    No hay puntuación histórica (todos empiezan en 0).
 
-    Observation space: Box(220,) float32 (mismas dimensiones que v1/v2).
-    Action space: Discrete(52) con Action Masking.
+    Novedades v3:
+    - Observation space: Box(250,) float32 (30 features extra sobre v2)
+    - Rewards: 8 señales (4 base + 4 tácticas v2_1)
+    - Hooks para MCTS oráculo (evaluar_y_guardar_batch)
+    - Action space: Discrete(52) con Action Masking
     """
 
     def __init__(
         self,
         agente_idx: int = 0,
         politicas_oponentes: Optional[Dict[int, object]] = None,
-        obs_dim: int = DIM_ENTORNO,
+        oracle_buffer: Optional[object] = None,
+        oracle_rng: Optional[np.random.Generator] = None,
     ) -> None:
         super().__init__()
 
         if not (0 <= agente_idx <= 3):
             raise ValueError(
                 f"agente_idx debe estar entre 0 y 3, recibido {agente_idx}")
-        if obs_dim not in DIMS_VALIDAS:
-            raise ValueError(
-                f"obs_dim debe ser una de {DIMS_VALIDAS}, recibido {obs_dim}")
 
         self.agente_idx: int = agente_idx
-        self._obs_dim: int = obs_dim
 
-        # Calculadora de recompensas score-based
-        self._calc: CalculadoraRecompensasScore = CalculadoraRecompensasScore()
+        # Calculadora de recompensas v2_1 (8 señales)
+        self._calc: CalculadoraRecompensasV21 = CalculadoraRecompensasV21()
 
-        # Builder de observacion (compartido con v1/v2)
-        self._obs_builder: ObservacionBuilder = ObservacionBuilder(dim=obs_dim)
+        # Builder de observación v3 (250 dims)
+        self._obs_builder: ObservacionBuilderV3 = ObservacionBuilderV3()
 
-        # Politicas de oponentes
-        self._politicas_oponentes: Dict[int,
-                                        object] = politicas_oponentes or {}
+        # Políticas de oponentes
+        self._politicas_oponentes: Dict[int, object] = (
+            politicas_oponentes or {}
+        )
+
+        # MCTS oracle
+        self._oracle_buffer = oracle_buffer
+        self._oracle_rng = oracle_rng
 
         # Espacios Gymnasium
         self.observation_space = spaces.Box(
-            low=0.0, high=1.0, shape=(obs_dim,), dtype=np.float32,
+            low=0.0, high=26.0, shape=(DIM_V3,), dtype=np.float32,
         )
         self.action_space = spaces.Discrete(52)
 
-        # Motor de juego (logica pura, compartido)
+        # Motor de juego
         self.motor: MotorCorazones = MotorCorazones()
 
         # Estado por mano
         self._vacios: List[set] = [set(), set(), set(), set()]
-        self._dama_picas_en: Optional[int] = None
         self._puntos_mano_actual: List[int] = [0, 0, 0, 0]
-        self._pleno_jugador: Optional[int] = None
-
-        # Recompensa acumulada pendiente
+        self._dama_picas_en: Optional[int] = None
+        self._ultima_carta_agente: Optional[Carta] = None
         self._recompensa_pendiente: float = 0.0
-
-        # Flag de mano terminada
         self._mano_terminada: bool = False
 
-        # RNG para reproducibilidad
+        # RNG
         self._rng: random.Random = random.Random()
 
     # ------------------------------------------------------------------
-    # Ciclo de vida Gymnasium
+    # Gymnasium API
     # ------------------------------------------------------------------
 
     def reset(
@@ -101,11 +99,7 @@ class CorazonesEnvSingleHand(gym.Env):
         seed: Optional[int] = None,
         options: Optional[Dict[str, Any]] = None,
     ) -> Tuple[np.ndarray, Dict[str, Any]]:
-        """Reinicia el entorno: nueva mano desde cero.
-
-        Returns:
-            Tupla (observacion_inicial, info).
-        """
+        """Reinicia el entorno: nueva mano desde cero."""
         super().reset(seed=seed)
 
         if seed is not None:
@@ -113,243 +107,289 @@ class CorazonesEnvSingleHand(gym.Env):
             np.random.seed(seed)
             random.seed(seed)
 
-        # Iniciar mano fresca
         self._iniciar_mano()
-
-        obs = self._construir_observacion()
-        info: Dict[str, Any] = {
-            "agente_idx": self.agente_idx,
-            "puntos_mano": list(self._puntos_mano_actual),
-            "numero_baza": self.motor.numero_baza,
-        }
-
-        return obs, info
+        obs = self._obs_builder.construir(
+            self.motor, self.agente_idx,
+            self._vacios, [0, 0, 0, 0],
+            self._puntos_mano_actual, self._dama_picas_en,
+        )
+        return obs, {}
 
     def step(
         self, action: int
     ) -> Tuple[np.ndarray, float, bool, bool, Dict[str, Any]]:
-        """Ejecuta una accion (carta) del agente.
+        """Ejecuta una acción del agente y avanza la mano.
 
         Args:
-            action: ID de la carta a jugar (0-51).
+            action: Índice de la carta (0-51).
 
         Returns:
-            Tupla (obs, reward, terminated, truncated, info).
+            (obs, reward, terminated, truncated, info)
         """
         if self._mano_terminada:
-            return (
-                self._construir_observacion(),
-                0.0,
-                True,
-                False,
-                {"agente_idx": self.agente_idx, "puntos_mano": [0, 0, 0, 0],
-                 "numero_baza": 14},
+            raise RuntimeError(
+                "step() llamado en un episodio ya terminado. "
+                "Llama a reset() primero."
             )
 
-        # Convertir accion a carta
         carta = Carta._TODAS[action]
+        recompensa = self._ejecutar_jugada_agente(carta)
 
-        # Ejecutar la jugada del agente
-        self._ejecutar_jugada(self.agente_idx, carta)
+        if self._mano_terminada:
+            obs = np.zeros(DIM_V3, dtype=np.float32)
+            return obs, recompensa, True, False, self._info_final()
 
-        # Auto-jugar hasta que sea el turno del agente de nuevo
-        self._autoplay_hasta_turno_agente()
+        recompensa += self._jugar_oponentes()
 
-        # Construir observacion y recolectar recompensa
-        obs = self._construir_observacion()
-        reward = self._recompensa_pendiente
-        self._recompensa_pendiente = 0.0
+        if self._mano_terminada:
+            obs = np.zeros(DIM_V3, dtype=np.float32)
+            return obs, recompensa, True, False, self._info_final()
 
-        # Determinar si la mano termino
-        terminated = self._mano_terminada
-        truncated = False
-
-        info: Dict[str, Any] = {
-            "agente_idx": self.agente_idx,
-            "puntos_mano": list(self._puntos_mano_actual),
-            "numero_baza": self.motor.numero_baza,
-        }
-
-        return obs, reward, terminated, truncated, info
+        obs = self._obs_builder.construir(
+            self.motor, self.agente_idx,
+            self._vacios, [0, 0, 0, 0],
+            self._puntos_mano_actual, self._dama_picas_en,
+        )
+        return obs, recompensa, False, False, self._info_parcial()
 
     def action_masks(self) -> np.ndarray:
-        """Retorna la mascara de acciones legales para el agente.
-
-        Returns:
-            Array booleano de shape (52,) donde True indica accion legal.
-        """
+        """Máscara de acciones legales para el agente."""
         if self._mano_terminada:
-            return np.zeros(52, dtype=np.bool_)
-
-        actual = self.motor.obtener_jugador_actual()
-        if actual != self.agente_idx:
-            return np.zeros(52, dtype=np.bool_)
+            return np.zeros(52, dtype=bool)
 
         legales = self.motor.obtener_jugadas_legales(self.agente_idx)
-        mask = np.zeros(52, dtype=np.bool_)
+        mascara = np.zeros(52, dtype=bool)
         for c in legales:
-            mask[c.id] = True
-        return mask
+            mascara[c.id] = True
+        return mascara
 
     # ------------------------------------------------------------------
-    # Logica interna
+    # Estado interno
     # ------------------------------------------------------------------
 
     def _iniciar_mano(self) -> None:
-        """Inicia una mano nueva: reparte y resetea estado."""
+        """Prepara una mano nueva."""
         self.motor = MotorCorazones()
         self.motor.repartir()
         self._vacios = [set(), set(), set(), set()]
-        self._dama_picas_en = None
         self._puntos_mano_actual = [0, 0, 0, 0]
-        self._pleno_jugador = None
+        self._dama_picas_en = None
+        self._ultima_carta_agente = None
         self._recompensa_pendiente = 0.0
         self._mano_terminada = False
 
-        # Si no es turno del agente, auto-jugar hasta que lo sea
+        # Auto-jugar hasta que sea el turno del agente
         if self.motor.obtener_jugador_actual() != self.agente_idx:
-            self._autoplay_hasta_turno_agente()
+            self._jugar_oponentes()
+
+    def _ejecutar_jugada_agente(self, carta: Carta) -> float:
+        """Ejecuta la jugada del agente y retorna recompensa acumulada."""
+        self._ultima_carta_agente = carta
+
+        idx = self.motor.obtener_jugador_actual()
+        self._ejecutar_jugada(idx, carta)
+
+        recompensa = 0.0
+        if len(self.motor.mesa) == 4:
+            recompensa += self._resolver_baza()
+            if all(len(j.mano) == 0 for j in self.motor.jugadores):
+                recompensa += self._finalizar_mano()
+
+        return recompensa
+
+    def _jugar_oponentes(self) -> float:
+        """Juega las cartas de los oponentes hasta el turno del agente."""
+        recompensa = 0.0
+
+        while not self._mano_terminada:
+            idx = self.motor.obtener_jugador_actual()
+            if idx == self.agente_idx:
+                break
+
+            legales = self.motor.obtener_jugadas_legales(idx)
+            if not legales:
+                break
+
+            carta = self._seleccionar_carta_oponente(idx, legales)
+            self._ejecutar_jugada(idx, carta)
+
+            if len(self.motor.mesa) == 4:
+                recompensa += self._resolver_baza()
+                if all(len(j.mano) == 0 for j in self.motor.jugadores):
+                    recompensa += self._finalizar_mano()
+                    break
+
+        return recompensa
 
     def _ejecutar_jugada(self, jugador_idx: int, carta: Carta) -> None:
-        """Ejecuta una jugada y actualiza tracking de vacios."""
+        """Ejecuta una jugada y actualiza tracking de vacíos."""
         if self.motor.mesa and self.motor.palo_de_salida is not None:
             if carta.palo != self.motor.palo_de_salida:
                 self._vacios[jugador_idx].add(self.motor.palo_de_salida)
         self.motor.jugar_carta(jugador_idx, carta)
 
-    def _autoplay_hasta_turno_agente(self) -> None:
-        """Auto-juega rivales hasta que sea el turno del agente
-        o termine la mano."""
-        while True:
-            # Resolver baza si esta completa
-            if len(self.motor.mesa) == 4:
-                self._resolver_baza()
-                if self.motor.numero_baza > 13:
-                    # Mano terminada (13 bazas resueltas)
-                    self._finalizar_mano()
-                    return
-
-            # Si es turno del agente, detener
-            if self.motor.obtener_jugador_actual() == self.agente_idx:
-                return
-
-            # Jugar para el rival
-            actual = self.motor.obtener_jugador_actual()
-            legales = self.motor.obtener_jugadas_legales(actual)
-            if not legales:
-                return
-
-            if actual in self._politicas_oponentes:
-                politica = self._politicas_oponentes[actual]
-                try:
-                    obs_completa = self._construir_observacion_desde(actual)
-                    carta = politica(
-                        self.motor, actual, legales,
-                        obs=obs_completa, deterministic=False,
-                    )
-                except TypeError:
-                    try:
-                        carta = politica(
-                            self.motor, actual, legales,
-                            obs=obs_completa,
-                        )
-                    except TypeError:
-                        carta = politica(self.motor, actual, legales)
-            else:
-                carta = self._rng.choice(legales)
-
-            self._ejecutar_jugada(actual, carta)
+    def _seleccionar_carta_oponente(
+        self, idx: int, legales: List[Carta]
+    ) -> Carta:
+        """Selecciona carta para un oponente usando su política."""
+        if idx in self._politicas_oponentes:
+            politica = self._politicas_oponentes[idx]
+            obs = self._obs_builder.construir_desde_motor(
+                self.motor, idx,
+            )
+            try:
+                return politica(self.motor, idx, legales, obs=obs)
+            except TypeError:
+                return politica(self.motor, idx, legales)
+        return self._rng.choice(legales)
 
     # ------------------------------------------------------------------
-    # Resolucion de bazas
+    # Resolución de bazas y fin de mano
     # ------------------------------------------------------------------
 
-    def _resolver_baza(self) -> None:
-        """Resuelve la baza actual y asigna recompensa per-baza."""
-        cartas_en_mesa = [c for _, c in self.motor.mesa]
-
-        # Determinar ganador
-        ganador_idx = self.motor.resolver_baza()
+    def _resolver_baza(self) -> float:
+        """Resuelve la baza actual y retorna recompensa."""
+        cartas_baza = [c for _, c in self.motor.mesa]
+        palo_salida = self.motor.palo_de_salida
+        puntos_en_baza = sum(c.puntos for c in cartas_baza)
+        ganador = self.motor.resolver_baza()
 
         # Actualizar puntos de la mano
         for i, jug in enumerate(self.motor.jugadores):
             self._puntos_mano_actual[i] = jug.contar_puntos_bazas()
 
         # Tracking Dama de Picas
-        for c in cartas_en_mesa:
+        for c in cartas_baza:
             if c.es_dama_de_picas:
-                self._dama_picas_en = ganador_idx
+                self._dama_picas_en = ganador
                 break
 
-        # Recompensa per-baza (score-based)
-        r_baza = self._calc.recompensa_baza(
-            cartas_en_mesa, self.agente_idx, ganador_idx,
+        # ── Recompensa base per-baza ──
+        recompensa = self._calc.recompensa_baza(
+            cartas_baza, self.agente_idx, ganador,
         )
-        self._recompensa_pendiente += r_baza
 
-    def _finalizar_mano(self) -> None:
-        """Aplica recompensas de fin de mano."""
+        # ── Q♠ dump on rival ──
+        if self._ultima_carta_agente is not None:
+            recompensa += self._calc.recompensa_qs_dump(
+                self.agente_idx,
+                self._ultima_carta_agente,
+                palo_salida,
+                ganador,
+            )
+        self._ultima_carta_agente = None
+
+        # ── Moon block ──
+        corazones_rivales = [
+            sum(1 for c in self.motor.jugadores[i].bazas_ganadas
+                if c.es_corazon)
+            for i in range(4) if i != self.agente_idx
+        ]
+        recompensa += self._calc.recompensa_moon_block(
+            self.agente_idx, ganador, puntos_en_baza, corazones_rivales,
+        )
+
+        # ── Early safe burn ──
+        recompensa += self._calc.recompensa_early_safe_burn(
+            self.agente_idx, ganador, puntos_en_baza,
+            self.motor.numero_baza - 1,
+        )
+
+        # ── Liability hold penalty (tras baza 7+) ──
+        if self.motor.numero_baza >= 8:
+            q_activa = self._dama_picas_en is None
+            if q_activa:
+                if not any(c.es_dama_de_picas for _, c in self.motor.mesa):
+                    mano_agente = self.motor.jugadores[self.agente_idx].mano
+                    recompensa += self._calc.recompensa_liability_hold(
+                        list(mano_agente), q_activa,
+                        self.motor.numero_baza,
+                    )
+
+        return recompensa
+
+    def _finalizar_mano(self) -> float:
+        """Finaliza la mano y retorna recompensa final."""
+        self._mano_terminada = True
+
         # Detectar shooting moon
         for i, jug in enumerate(self.motor.jugadores):
             if jug.contar_puntos_bazas() == 26:
-                self._pleno_jugador = i
                 if i == self.agente_idx:
-                    self._recompensa_pendiente += \
+                    return (
                         self._calc.recompensa_shooting_moon(
                             self.agente_idx, i,
                         )
+                        + self._calc.recompensa_fin_mano(
+                            self._puntos_mano_actual[self.agente_idx],
+                        )
+                        + self._calc.recompensa_posicion(
+                            self.agente_idx,
+                            list(self._puntos_mano_actual),
+                        )
+                    )
                 break
-
-        # Aplicar puntuacion (solo para consistencia, no se usa fuera)
-        self.motor.aplicar_puntuacion()
 
         # Recompensa de fin de mano: 26 - mis_puntos
         mis_puntos = self._puntos_mano_actual[self.agente_idx]
-        r_fin = self._calc.recompensa_fin_mano(mis_puntos)
-        self._recompensa_pendiente += r_fin
-
-        # Bonus de posicion
-        r_pos = self._calc.recompensa_posicion(
-            self.agente_idx, list(self._puntos_mano_actual),
+        return (
+            self._calc.recompensa_fin_mano(mis_puntos)
+            + self._calc.recompensa_posicion(
+                self.agente_idx, list(self._puntos_mano_actual),
+            )
         )
-        self._recompensa_pendiente += r_pos
-
-        # Marcar mano como terminada
-        self._mano_terminada = True
 
     # ------------------------------------------------------------------
-    # Construccion de observacion
+    # Info dicts
     # ------------------------------------------------------------------
 
-    def _construir_observacion(self) -> np.ndarray:
-        """Construye el vector de observacion para el agente."""
-        return self._construir_observacion_desde(self.agente_idx)
+    def _info_parcial(self) -> Dict[str, Any]:
+        return {
+            "baza": self.motor.numero_baza,
+            "puntos_mano": list(self._puntos_mano_actual),
+            "mano_terminada": False,
+        }
 
-    def _construir_observacion_desde(self, jugador_idx: int) -> np.ndarray:
-        """Construye observacion desde la perspectiva de un jugador.
+    def _info_final(self) -> Dict[str, Any]:
+        return {
+            "baza": self.motor.numero_baza,
+            "puntos_mano": list(self._puntos_mano_actual),
+            "puntos_agente": self._puntos_mano_actual[self.agente_idx],
+            "mano_terminada": True,
+        }
 
-        En v3, la observacion es identica a v2 (puntuacion_historica=[0,0,0,0]).
-        El contexto multi-mano se codifica en la recompensa, no en la obs.
-        """
+    # ------------------------------------------------------------------
+    # Utilidades
+    # ------------------------------------------------------------------
+
+    def get_observation(self) -> np.ndarray:
+        """Retorna la observación actual sin avanzar el estado."""
+        if self._mano_terminada:
+            return np.zeros(DIM_V3, dtype=np.float32)
         return self._obs_builder.construir(
-            motor=self.motor,
-            agente_idx=jugador_idx,
-            vacios=self._vacios,
-            puntuacion_historica=[0, 0, 0, 0],  # sin historial
-            puntos_mano_actual=self._puntos_mano_actual,
-            dama_picas_en=self._dama_picas_en,
-            pozo_viable=self._pozo_viable(jugador_idx),
-            debo_arriesgar=False,
-            puedo_alimentar=False,
+            self.motor, self.agente_idx,
+            self._vacios, [0, 0, 0, 0],
+            self._puntos_mano_actual, self._dama_picas_en,
         )
 
-    def _pozo_viable(self, jugador_idx: int) -> bool:
-        """Determina si shooting the moon es viable para un jugador.
+    @property
+    def mano_terminada(self) -> bool:
+        return self._mano_terminada
 
-        Condiciones: tiene Q♠ + al menos 8 corazones en mano,
-        y no se han jugado cartas altas que lo impidan.
-        """
-        mano = self.motor.jugadores[jugador_idx].mano
-        tiene_q = any(c.es_dama_de_picas for c in mano)
-        corazones_en_mano = sum(1 for c in mano if c.es_corazon)
-        return tiene_q and corazones_en_mano >= 8
+
+def crear_entorno_v3(
+    agente_idx: int = 0,
+    politicas_oponentes: Optional[Dict[int, object]] = None,
+    oracle_buffer: Optional[object] = None,
+    oracle_rng: Optional[np.random.Generator] = None,
+) -> CorazonesEnvV3:
+    """Factory function para crear un entorno v3."""
+    return CorazonesEnvV3(
+        agente_idx=agente_idx,
+        politicas_oponentes=politicas_oponentes,
+        oracle_buffer=oracle_buffer,
+        oracle_rng=oracle_rng,
+    )
+
+
+__all__ = ["CorazonesEnvV3", "crear_entorno_v3"]

@@ -4,6 +4,8 @@
 > Comparten únicamente `src/dominio/` (lógica pura del juego), `src/agentes/` (bots),
 > `src/entorno/observacion.py` y `src/entorno/dimensiones.py`.
 > Si una versión no convence, se elimina su carpeta sin afectar a las demás.
+>
+> **Modelos legacy:** `models/v1_antiguo/` contiene snapshots de v1 (v5_golden..v28).
 
 ---
 
@@ -15,21 +17,22 @@
 | **Episodio** | Partida completa (múltiples manos hasta 100 pts) |
 | **Recompensas** | 20 señales tácticas por baza + posición final |
 | **Observación** | 220-dim con contexto de partida |
-| **Estado** | ✅ **Estable.** Mejor snapshot: v22 (1632 Elo, 33% wr_experto) |
+| **Estado** | ✅ **Congelada.** Mejor snapshot: v22 (1632 Elo, 33% wr_experto) |
 | **Problema conocido** | Value head colapsa ~1.5M pasos (20 señales → regresión compleja) |
 
 ---
 
-## v2 — Ronda, Score Puro (← AHORA)
+## v2 — Ronda, Score Puro (← ACTUAL)
 
 | Aspecto | Valor |
 |---------|-------|
-| **Ubicación** | `src/v2_ronda/` |
+| **Ubicación** | `src/v2_ronda/`, `src/v2_1/` |
 | **Episodio** | **Una sola mano** (max 52 steps) |
-| **Recompensas** | 4 señales: per-baza (-1 ♡, -13 Q♠), fin de mano (`26 - mis_puntos`), pozo (+78), posición (±5) |
+| **Recompensas** | v2_ronda: 4 señales base. v2_1: +4 tácticas (Q♠ dump, moon block, early burn, liability) |
 | **Observación** | 220-dim (dims de partida en 0: sin contexto multi-mano) |
-| **Hipótesis** | "Minimizar puntos propios sin ruido de rivales → política más robusta que v1" |
-| **Métrica objetivo** | wr_experto ≥ 33% (igualar v22), sin colapso de value head |
+| **Arquitectura** | MLP [512,512,256] sin memoria entre bazas |
+| **Estado** | ✅ Mejor snapshot: v2_1 (1535 Elo, ~30% wr_experto) |
+| **Problema raíz** | **~45% error rate.** MLP no trackea fallos, no planifica, no gestiona Q♠ |
 
 ### Diseño de recompensa v2
 
@@ -43,67 +46,119 @@ REWARD_PEOR_MANO    = -5     (fin de mano, penalty posicional)
 reward_fin_mano = (26 - mis_puntos)   # rango [0, 26]
 ```
 
-Tabla de rewards netos por mano:
+### Diagnóstico PIMC (16 manos exhaustivas, seed=42)
 
-| Mano | Per-baza | Fin mano | Posición | **Neto** |
-|------|----------|----------|----------|----------|
-| 0 pts, mejor | 0 | +26 | +5 | **+31** |
-| 3♡, medio | -3 | +23 | 0 | **+20** |
-| Q♠+2♡, peor | -15 | +11 | -5 | **-9** |
-| Pozo exitoso | -26 | +78 | — | **+52** |
-| 26 pts sin pozo | -26 | 0 | -5 | **-31** |
+| Métrica | v2_1 |
+|---------|------|
+| Error rate global | **44.9%** (71/158 decisiones) |
+| Coste total | 156.2 pts en 16 manos |
+| Error rate early (bazas 1-4) | ~48%, coste medio 2.96 pts/error |
+| Error rate mid (bazas 5-8) | ~46%, coste medio 4.84 pts/error |
+| Error rate late (bazas 9-13) | ~30%, coste medio 1.71 pts/error |
+| Error #1 | **LIDERAR mal** — jugar Q♠ cuando hay opción segura |
+| Causas raíz | `planning` (33%), `risk_assessment` (46%), `card_counting` (17%) |
 
----
-
-## v3 — Ronda, Score + Delta (planificado)
-
-| Aspecto | Valor |
-|---------|-------|
-| **Ubicación** | `src/v3_ronda_delta/` |
-| **Episodio** | Una sola mano con puntajes históricos **simulados** |
-| **Recompensas** | Base v2 + bonos por diferencial de puntos |
-| **Hipótesis** | "El contexto de partida (diferenciales, near-100) mejora la estrategia multi-mano" |
-
-### Señales adicionales planeadas
-
-```
-Bonus:  +X si bajo mi posición relativa vs el líder
-Penalty: -X si alguien está cerca de 100 y le doy puntos
-Penalty: -X si voy ganando por mucho y arriesgo innecesariamente
-```
-
-Las features [172:198] del vector de observación se activan con valores simulados.
+**Conclusión:** Errores tempranos son MÁS costosos que tardíos. MLP sin memoria
+no puede trackear fallos entre bazas ni planificar a largo plazo.
 
 ---
 
-## v4 — Ronda, Suma Cero (planificado)
+## v3 — Arquitectura con Memoria + Observación Enriquecida (← AHORA)
 
 | Aspecto | Valor |
 |---------|-------|
-| **Ubicación** | `src/v4_ronda_zero_sum/` |
-| **Episodio** | Una sola mano con puntajes históricos **simulados** |
+| **Ubicación** | `src/v3/` |
+| **Episodio** | Una sola mano (hereda de v2) |
+| **Recompensas** | v2_1 (8 señales: 4 base + 4 tácticas) — sin cambios |
+| **Objetivo** | Corregir las 3 causas raíz del diagnóstico |
+
+### Tres mejoras simultáneas
+
+#### A) Transformer Feature Extractor — Memoria entre bazas
+
+Reemplaza el MLP `[512,512,256]` por un Transformer Encoder que procesa
+la secuencia de 13 bazas como tokens temporales.
+
+```
+Observation(220) → Linear(256) → TransformerEncoder(4 layers, 4 heads, d=256)
+                                 → Mean Pooling → Linear(256) → features_dim(256)
+```
+
+- **Memoria contextual**: Cada baza ve las anteriores vía self-attention.
+- **Resuelve `planning`**: El modelo puede atender a bazas pasadas para decidir.
+- **Resuelve `card_counting`**: El attention trackea qué cartas se jugaron.
+- **Resuelve `void_tracking`**: Patrones de fallos visibles en la secuencia.
+
+#### B) MCTS-Guided Training — Expert Iteration
+
+Entrena con targets del oráculo PIMC en bazas clave (≥8) para mejorar
+la calidad de decisiones tardías sin costo de inferencia en producción.
+
+```
+Para cada episodio:
+  1. Self-play normal (modelo actual)
+  2. Si baza ≥ 8: ejecutar PIMC exacto → obtener acción óptima
+  3. Guardar (obs, acción_optima_pimc) en buffer BC
+  4. Cada N pasos: BC fine-tuning con buffer + RL normal
+```
+
+- **Corrige `risk_assessment`**: PIMC ve todos los desenlaces posibles.
+- **Sin costo en inferencia**: Solo se usa en entrenamiento.
+- **Parámetros**: `pimc_every=4` bazas, `bc_weight=0.3`, buffer size=100K.
+
+#### C) Observación Enriquecida — Features de tracking explícito
+
+Añade 30 dimensiones al vector de observación (220 → 250) con features
+que el MLP actual no puede inferir:
+
+| Rango | Feature | Descripción |
+|-------|---------|-------------|
+| [220:224] | `cartas_restantes` | Cartas sin jugar por palo (valor real, no /13) |
+| [224:228] | `peligro_qs` | Probabilidad Q♠ × peligrosidad del palo |
+| [228:232] | `cartas_altas_mano` | J/Q/K/A en mi mano por palo |
+| [232:236] | `riesgo_baza` | Puntos esperados si gano esta baza |
+| [236:240] | `control_palo` | ¿Soy dominante en este palo? (#altas en mano / #altas restantes) |
+| [240:244] | `oportunidad_descarte` | ¿Puedo vaciarme de un palo esta baza? |
+| [244] | `bazas_restantes` | 13 - baza_actual |
+| [245:249] | `puntos_rivales` | Puntos acumulados esta mano por cada rival |
+
+- **Resuelve `risk_assessment` parcialmente**: Features explícitas de riesgo.
+- **Ayuda al Transformer**: Features precomputadas = menos carga de inferencia.
+
+### Métricas objetivo v3
+
+| Métrica | v2_1 (actual) | v3 (objetivo) |
+|---------|---------------|---------------|
+| wr_experto | ~30% | ≥ **50%** |
+| Elo | 1535 | ≥ **1700** |
+| Error rate PIMC | 45% | ≤ **25%** |
+| Error rate late (bazas 9-13) | 30% | ≤ **12%** |
+| Coste medio/mano | 9.8 pts | ≤ **5 pts** |
+
+---
+
+## v4 — Ronda, Suma Cero + Contexto Multi-Mano (planificado)
+
+| Aspecto | Valor |
+|---------|-------|
+| **Ubicación** | `src/v4/` |
+| **Episodio** | Partida multi-mano con memoria entre manos |
 | **Recompensas** | Suma cero estricta: `mi_reward = -(suma rewards rivales)` |
-| **Hipótesis** | "La simetría matemática de suma cero produce políticas más robustas que score-only" |
-
-### Nota sobre suma cero
-
-En Hearts real:
-
-- El pozo mete 26 pts a cada rival → diferencial de +78 para el agente, -78 total para rivales
-- Una mano de 0 pts da ~8.7 de ventaja promedio sobre cada rival
-- La suma cero fuerza que el modelo internalice que "mi ganancia = pérdida de rivales"
+| **Hipótesis** | "Si v3 domina una mano, v4 aprende estrategia de partida completa" |
 
 ---
 
 ## Comparativa rápida
 
-| | v1 (partida) | v2 (score) | v3 (delta) | v4 (zero-sum) |
+| | v1 (partida) | v2 (score) | v3 (memoria) | v4 (zero-sum) |
 |---|---|---|---|---|
-| Episodio | Multi-mano | 1 mano | 1 mano | 1 mano |
-| Nº señales | 20 | 4 | 6-8 | 4 |
-| Ruido rivales | Alto (tácticas) | Ninguno | Bajo | Ninguno |
-| Value head | Colapsa | ¿Estable? | ¿Estable? | ¿Estable? |
-| Complejidad | Alta | **Mínima** | Media | Media |
+| Episodio | Multi-mano | 1 mano | 1 mano | Multi-mano |
+| Nº señales | 20 | 4-8 | 8 | 8+zero-sum |
+| Arquitectura | MLP | MLP | **Transformer** | Transformer |
+| Observación | 220 | 220 | **250** | 250+contexto |
+| MCTS-guided | No | No | **Sí** | Sí |
+| Value head | Colapsa | Estable | Estable | Estable |
+| wr_experto | 33% | 30% | **≥50%** | ≥55% |
 
 ---
 
@@ -124,3 +179,4 @@ Cada versión debe superar a la anterior en **al menos uno** de estos:
 - El dataset BC se regenera si el reward cambia (necesita acciones alineadas)
 - Los torneos Elo siempre incluyen bots como baseline fijo
 - Early stopping: 3 evaluaciones consecutivas con wr_experto bajando → detener
+- **Nuevo:** PIMC como oráculo de diagnóstico cada 500k pasos (eval_log.jsonl)

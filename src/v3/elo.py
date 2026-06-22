@@ -1,13 +1,15 @@
-"""
-Torneo Elo para v3 — Por rondas independientes.
+"""Torneo Elo para v3 — Duelos directos con 2 BotExpertos de filler.
 
-Juega N manos individuales (cada una desde cero, sin acumular puntuacion)
-usando modelos v3 (single-hand) + bots + BotExperto. Calcula rating Elo
-para medir progreso real.
+Formato de cada enfrentamiento:
+    Mesa: [A, B, BotExperto, BotExperto]
+    - A y B rotan asientos entre manos para eliminar sesgo de posicion.
+    - Los 2 BotExpertos son independientes (cada uno decide por su cuenta).
+    - Metrica: en cada mano, A "gana" si score(A) < score(B).
 
-A diferencia de la version original de v2_ronda, este torneo evalua
-manos independientes (no partidas multi-mano), respetando que el modelo
-fue entrenado con puntuacion_historica = [0,0,0,0].
+Ventajas sobre el diseno anterior (1 vs 3 clones):
+    - Comparacion directa y simetrica: A y B comparten la misma mesa.
+    - Sin clonacion: cada BotExperto toma decisiones independientes.
+    - Elo significativo: mide habilidad relativa real entre pares.
 
 Uso:
     python -m src.v3.elo --directorio models/v3/snapshots --manos 50
@@ -99,94 +101,124 @@ def _crear_bot_politica(nombre: str) -> Any:
 
 
 # ------------------------------------------------------------------
-# Evaluacion por manos independientes (CORREGIDO)
+# Duelo directo: A vs B con 2 BotExpertos de filler
 # ------------------------------------------------------------------
 
-def jugar_manos_1v3(
-    jugador_principal: JugadorV3,
-    oponentes: List[JugadorV3],
+def jugar_duelo(
+    jugador_a: JugadorV3,
+    jugador_b: JugadorV3,
     num_manos: int = 50,
     seed_base: int = 0,
 ) -> Dict[str, float]:
-    """Juega N manos INDEPENDIENTES: 1 modelo vs 3 oponentes.
+    """Juega N manos con mesa [A, B, Experto, Experto].
 
-    Cada mano es desde cero: MotorCorazones fresco, sin puntuacion
-    historica. Esto respeta el entrenamiento del modelo v2/v3 que
-    siempre vio puntuacion_historica = [0,0,0,0].
+    En cada mano, A y B se comparan directamente en la misma mesa,
+    con 2 BotExpertos independientes como fillers. Los asientos
+    rotan entre manos para eliminar sesgo de posicion.
 
     Args:
-        jugador_principal: Modelo a evaluar.
-        oponentes: 3 oponentes (bots o BotExperto).
+        jugador_a: Jugador A.
+        jugador_b: Jugador B.
         num_manos: Manos independientes a jugar.
         seed_base: Semilla base.
 
     Returns:
-        Dict con pct_primero, pct_top2, pct_cuarto, avg_score, etc.
+        Dict con:
+          - pct_a_gana: fraccion de manos donde score(A) < score(B)
+          - pct_b_gana: fraccion de manos donde score(B) < score(A)
+          - pct_empate: fraccion de manos donde score(A) == score(B)
+          - avg_score_a, avg_score_b: puntuacion promedio
+          - num_manos: total de manos jugadas
     """
     from src.agentes.heuristicos import bot_conservador, bot_agresivo, bot_evasivo
+    from src.agentes.bot_experto import BotExperto
     from src.dominio.motor import MotorCorazones
     from src.dominio.carta import Carta
 
-    # Cargar modelo principal
-    jugador_principal.cargar()
+    # Cargar modelos si es necesario
+    jugador_a.cargar()
+    jugador_b.cargar()
 
-    posiciones: List[int] = []
-    puntuaciones: List[int] = []
-
-    # Preparar oponentes
-    bots_pool = [bot_conservador, bot_agresivo, bot_evasivo]
-    politicas_base: Dict[int, Any] = {}
-    for i, op in enumerate(oponentes):
-        idx = i + 1  # oponentes ocupan slots 1, 2, 3
-        if op.es_experto:
-            from src.agentes.bot_experto import BotExperto
-            politicas_base[idx] = BotExperto()
+    # ── Preparar politicas ──
+    def _politica(jug: JugadorV3):
+        if jug.es_experto:
+            return BotExperto()
+        elif jug.es_bot:
+            bots_pool = [bot_conservador, bot_agresivo, bot_evasivo]
+            return bots_pool[jug.bot_idx % 3]
         else:
-            politicas_base[idx] = bots_pool[op.bot_idx % 3]
+            return None  # modelo → usar _elegir_carta_*
+
+    pol_a = _politica(jugador_a)
+    pol_b = _politica(jugador_b)
+    pol_e1 = BotExperto()
+    pol_e2 = BotExperto()
+
+    # ── Jugar manos ──
+    a_gana = 0
+    b_gana = 0
+    empates = 0
+    scores_a: List[float] = []
+    scores_b: List[float] = []
 
     for h in range(num_manos):
         seed = seed_base + h
-
-        # ── Nueva mano desde cero ──
         motor = MotorCorazones()
         motor.repartir()
+
+        # Asignar asientos con rotacion (4 posiciones)
+        # A y B ocupan 2 de las 4 posiciones, E1 y E2 las otras 2
+        # Rotacion para eliminar sesgo: A toma (h % 4), B toma ((h+2) % 4)
+        seat_a = h % 4
+        seat_b = (h + 2) % 4  # opuesto a A en la mesa
+        # Las 2 posiciones restantes para los Expertos
+        seats_expertos = [s for s in range(4) if s not in (seat_a, seat_b)]
+
+        # Mapear seat → politica
+        politicas = {
+            seat_a: (pol_a, jugador_a, "a"),
+            seat_b: (pol_b, jugador_b, "b"),
+            seats_expertos[0]: (pol_e1, None, "e1"),
+            seats_expertos[1]: (pol_e2, None, "e2"),
+        }
 
         # Jugar las 13 bazas
         for _ in range(13):
             for _ in range(4):
                 idx = motor.obtener_jugador_actual()
                 legales = motor.obtener_jugadas_legales(idx)
+                pol, jug, tag = politicas[idx]
 
-                if idx == 0:
-                    # Modelo principal
-                    carta = _elegir_carta_modelo_sin_historial(
-                        jugador_principal, motor, 0, legales, seed)
-                elif idx in politicas_base:
-                    carta = politicas_base[idx](motor, idx, legales)
+                if pol is not None:
+                    carta = pol(motor, idx, legales)
                 else:
-                    carta = legales[0]
+                    carta = _elegir_carta_modelo_sin_historial(
+                        jug, motor, idx, legales, seed)
 
                 motor.jugar_carta(idx, carta)
             motor.resolver_baza()
 
-        # Evaluar resultado de ESTA mano (sin acumular)
-        mi_score = motor.jugadores[0].contar_puntos_bazas()
-        rivales = [motor.jugadores[i].contar_puntos_bazas()
-                   for i in range(1, 4)]
-        todas = [mi_score] + rivales
-        ranking = sorted(range(4), key=lambda i: todas[i])
-        pos = ranking.index(0)  # 0 = mejor (menos puntos)
-        posiciones.append(pos)
-        puntuaciones.append(mi_score)
+        # Resultado de esta mano
+        score_a_mano = motor.jugadores[seat_a].contar_puntos_bazas()
+        score_b_mano = motor.jugadores[seat_b].contar_puntos_bazas()
 
-    arr = np.array(puntuaciones, dtype=np.float64)
+        scores_a.append(float(score_a_mano))
+        scores_b.append(float(score_b_mano))
+
+        if score_a_mano < score_b_mano:
+            a_gana += 1
+        elif score_b_mano < score_a_mano:
+            b_gana += 1
+        else:
+            empates += 1
+
     return {
         "num_manos": num_manos,
-        "pct_primero": sum(1 for p in posiciones if p == 0) / num_manos,
-        "pct_top2": sum(1 for p in posiciones if p in (0, 1)) / num_manos,
-        "pct_cuarto": sum(1 for p in posiciones if p == 3) / num_manos,
-        "avg_score": float(np.mean(arr)),
-        "median_score": float(np.median(arr)),
+        "pct_a_gana": a_gana / num_manos,
+        "pct_b_gana": b_gana / num_manos,
+        "pct_empate": empates / num_manos,
+        "avg_score_a": float(np.mean(scores_a)),
+        "avg_score_b": float(np.mean(scores_b)),
     }
 
 
@@ -202,15 +234,14 @@ def _elegir_carta_modelo_sin_historial(
     CORREGIDO: El modelo v2/v3 fue entrenado sin contexto multi-mano,
     asi que la observacion debe tener puntuacion_historica cero.
     """
-    from src.entorno.observacion import ObservacionBuilder
-    from src.entorno.dimensiones import DIM_ENTRENAMIENTO
+    from src.v3.observacion import ObservacionBuilderV3, DIM_V3
     from src.dominio.carta import Carta
 
-    builder = ObservacionBuilder(dim=DIM_ENTRENAMIENTO)
+    builder = ObservacionBuilderV3(dim=DIM_V3)
     obs_raw = builder.construir(
         motor, idx,
         vacios=[set() for _ in range(4)],
-        puntuacion_historica=[0, 0, 0, 0],  # ← CORREGIDO
+        puntuacion_historica=[0, 0, 0, 0],  # ← CORREGIDO: modelo single-hand
         puntos_mano_actual=[j.contar_puntos_bazas() for j in motor.jugadores],
         dama_picas_en=None,
     )
@@ -283,6 +314,8 @@ def main() -> None:
                         help="Incluir bots heuristicos.")
     parser.add_argument("--incluir-experto", action="store_true", default=True,
                         help="Incluir BotExperto.")
+    parser.add_argument("--output", type=str, default=None,
+                        help="Archivo de salida para resultados.")
 
     args = parser.parse_args()
 
@@ -292,9 +325,6 @@ def main() -> None:
         for f in sorted(os.listdir(args.directorio)):
             if f.startswith("snapshot_") and f.endswith(".zip"):
                 snaps.append(os.path.join(args.directorio, f))
-
-    # Limitar a los mas recientes
-    snaps = snaps[-10:] if len(snaps) > 10 else snaps
 
     if not snaps:
         print("No se encontraron snapshots.")
@@ -330,13 +360,15 @@ def main() -> None:
 
     nombres = list(jugadores.keys())
 
-    # Round-robin: 1v3
+    # Round-robin: duelos directos A vs B con 2 Expertos de filler
     resultados: List[Tuple[str, str, float]] = []
     n = len(nombres)
     total_enfrentamientos = n * (n - 1) // 2
     count = 0
 
-    print(f"\n  Jugando {total_enfrentamientos} enfrentamientos...")
+    print(f"\n  Jugando {total_enfrentamientos} duelos directos...")
+    print(f"  Formato: [A, B, BotExperto, BotExperto] — asientos rotados\n")
+
     for i in range(n):
         for j in range(i + 1, n):
             count += 1
@@ -345,26 +377,20 @@ def main() -> None:
             a = jugadores[a_name]
             b = jugadores[b_name]
 
-            # A vs B: A como principal, B como 3 oponentes
-            oponentes_b = [
-                JugadorV3(nombre=b_name, es_bot=b.es_bot,
-                          es_experto=b.es_experto, bot_idx=b.bot_idx,
-                          modelo_path=b.modelo_path)
-                for _ in range(3)
-            ]
-
             print(f"\r  {count}/{total_enfrentamientos}: {a_name} vs {b_name}...",
                   end="", flush=True)
 
-            res = jugar_manos_1v3(a, oponentes_b,
-                                  num_manos=args.manos,
-                                  seed_base=count * 1000)
+            res = jugar_duelo(a, b,
+                              num_manos=args.manos,
+                              seed_base=count * 1000)
 
-            score_a = res["pct_primero"]
+            # score_a = fraccion de manos donde A supera a B
+            score_a = res["pct_a_gana"] + 0.5 * res["pct_empate"]
             resultados.append((a_name, b_name, score_a))
 
             print(f"\r  {count}/{total_enfrentamientos}: {a_name} vs {b_name}: "
-                  f"WR={score_a:.1%} | Avg={res['avg_score']:.1f}")
+                  f"A={res['pct_a_gana']:.1%} B={res['pct_b_gana']:.1%} "
+                  f"AvgA={res['avg_score_a']:.1f} AvgB={res['avg_score_b']:.1f}")
 
     # Calcular Elo
     print("\n  Calculando ratings Elo...")
@@ -386,6 +412,27 @@ def main() -> None:
         baseline = rating
 
     print("=" * 60)
+
+    # Guardar resultados a archivo si se solicitó
+    if args.output:
+        os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
+        with open(args.output, "w", encoding="utf-8") as f:
+            f.write("=" * 60 + "\n")
+            f.write("  TORNEO ELO v3 — Manos independientes\n")
+            f.write("=" * 60 + "\n")
+            f.write(f"  Snapshots: {len(snaps)}\n")
+            f.write(f"  Manos por enfrentamiento: {args.manos}\n")
+            f.write("-" * 60 + "\n")
+            f.write(f"  {'Pos':<4} {'Jugador':<35} {'Elo':>6}  {'Diff':>6}\n")
+            f.write("  " + "-" * 55 + "\n")
+            baseline_out = ELO_INICIAL
+            for pos, (nombre, rating) in enumerate(ranking, 1):
+                diff = rating - baseline_out
+                f.write(
+                    f"  {pos:<4} {nombre:<35} {rating:>6.0f}  {diff:>+6.0f}\n")
+                baseline_out = rating
+            f.write("=" * 60 + "\n")
+        print(f"   Resultados guardados en: {args.output}")
 
 
 if __name__ == "__main__":

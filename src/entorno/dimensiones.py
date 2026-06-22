@@ -18,13 +18,15 @@ from typing import Tuple
 DIM_V5: int = 190   # features básicas + flags estratégicos (pozo_viable, etc.)
 DIM_V6: int = 194   # + all_void por palo (obsoleto, solo referencia histórica)
 DIM_V10: int = 220  # + bloque avanzado (conteo, prob Q♠, alertas) ← ESTÁNDAR
+# + 30 features enriquecidas (v3): cartas_restantes, peligro_qs, etc.
+DIM_V3: int = 250
 
 # --- Defaults ---
 DIM_ENTRENAMIENTO: int = DIM_V10  # usado por train.py
 DIM_ENTORNO: int = DIM_V10        # usado por CorazonesEnv (estándar actual)
 
 # --- Dimensiones aceptadas (220 es el estándar; 194 solo retrocompatibilidad) ---
-DIMS_VALIDAS: Tuple[int, ...] = (DIM_V6, DIM_V10)
+DIMS_VALIDAS: Tuple[int, ...] = (DIM_V6, DIM_V10, DIM_V3)
 
 # --- Mapeo para referencia humana ---
 DIM_NOMBRES = {
@@ -37,6 +39,7 @@ __all__ = [
     "DIM_V5",
     "DIM_V6",
     "DIM_V10",
+    "DIM_V3",
     "DIM_ENTRENAMIENTO",
     "DIM_ENTORNO",
     "DIMS_VALIDAS",
