@@ -53,12 +53,12 @@ class TestDimensionalidadNuevasFeatures:
     def builder(self) -> ObservacionBuilderV3:
         return ObservacionBuilderV3()
 
-    def test_dim_v3_es_260(self) -> None:
-        """DIM_V3 debe ser 260 (220 base + 40 enriquecidas)."""
-        assert DIM_V3 == 260, f"DIM_V3 cambió: {DIM_V3}"
+    def test_dim_v3_es_265(self) -> None:
+        """DIM_V3 debe ser 265 (220 base + 30 enriquecidas + 10 liderazgo + 4 prob_qs + 1 forzado)."""
+        assert DIM_V3 == 265, f"DIM_V3 cambió: {DIM_V3}"
 
-    def test_output_shape_es_260(self, builder, motor) -> None:
-        """La observación completa debe ser (260,)."""
+    def test_output_shape_es_265(self, builder, motor) -> None:
+        """La observación completa debe ser (265,)."""
         vacios = [set() for _ in range(4)]
         obs = builder.construir(
             motor=motor, agente_idx=0, vacios=vacios,
@@ -66,7 +66,7 @@ class TestDimensionalidadNuevasFeatures:
             puntos_mano_actual=[0, 0, 0, 0],
             dama_picas_en=None,
         )
-        assert obs.shape == (260,), f"Shape: {obs.shape}"
+        assert obs.shape == (265,), f"Shape: {obs.shape}"
         assert obs.dtype == np.float32
 
 

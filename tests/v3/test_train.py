@@ -568,10 +568,10 @@ class TestHyperparamsV3:
     # ── HP_DEFAULT ──────────────────────────────────────────
 
     def test_hp_default_learning_rate_agresivo(self):
-        """lr debe ser 1e-4 para aprendizaje más rápido."""
+        """lr debe ser 5e-5 (reducido para estabilidad tras diagnóstico)."""
         from src.v3.train import HP_DEFAULT
-        assert HP_DEFAULT["learning_rate"] == 1e-4, (
-            f"Esperado lr=1e-4, obtenido {HP_DEFAULT['learning_rate']}"
+        assert HP_DEFAULT["learning_rate"] == 5e-5, (
+            f"Esperado lr=5e-5, obtenido {HP_DEFAULT['learning_rate']}"
         )
 
     def test_hp_default_n_steps_unchanged(self):
@@ -829,15 +829,15 @@ class TestMejorasV4:
     # ── 1. Q♠ preventive penalty ────────────────────────────
 
     def test_qs_preventivo_aumentado(self):
-        """REWARD_QS_PREVENTIVO debe ser -8.0 (antes -5.0)."""
+        """REWARD_QS_PREVENTIVO debe ser -15.0 (diagnóstico: errores Q♠ Δ=7.26)."""
         from src.v2_1.recompensas import RewardConfigV21
         cfg = RewardConfigV21()
-        assert cfg.REWARD_QS_PREVENTIVO == -8.0, (
-            f"Esperado -8.0, obtenido {cfg.REWARD_QS_PREVENTIVO}"
+        assert cfg.REWARD_QS_PREVENTIVO == -15.0, (
+            f"Esperado -15.0, obtenido {cfg.REWARD_QS_PREVENTIVO}"
         )
 
-    def test_qs_preventivo_devuelve_menos_8(self):
-        """recompensa_qs_preventivo con Q♠ y alternativas debe retornar -8.0."""
+    def test_qs_preventivo_devuelve_menos_15(self):
+        """recompensa_qs_preventivo con Q♠ y alternativas debe retornar -15.0."""
         from src.v2_1.recompensas import CalculadoraRecompensasV21
         from src.dominio.carta import Carta
 
@@ -847,7 +847,7 @@ class TestMejorasV4:
                        2 and not c.es_dama_de_picas]
 
         r = calc.recompensa_qs_preventivo(qs, [qs, otras_picas[0]], True)
-        assert r == -8.0, f"Esperado -8.0, obtenido {r}"
+        assert r == -15.0, f"Esperado -15.0, obtenido {r}"
 
     # ── 2. Early safe burn escalonado ────────────────────────
 

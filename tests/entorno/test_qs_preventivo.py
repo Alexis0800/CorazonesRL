@@ -66,16 +66,14 @@ class TestRewardConfigV21QSPreventivo:
         )
 
     def test_valor_negativo_razonable(self) -> None:
-        """La penalización preventiva debe ser negativa pero no tan fuerte
-        como capturar Q♠ (-13). Sugerido: -5.0."""
+        """La penalización preventiva debe ser negativa.
+
+        Diagnóstico: 4.2% errores Q♠ con Δ=7.26pts cada uno.
+        Por eso se subió a -15 (más fuerte que Q♠ misma)."""
         cfg = RewardConfigV21()
         valor = cfg.REWARD_QS_PREVENTIVO
         assert valor < 0.0, (
             f"REWARD_QS_PREVENTIVO debe ser negativo, es {valor}"
-        )
-        assert valor > -13.0, (
-            f"REWARD_QS_PREVENTIVO no debe exceder REWARD_DAMA_PICAS (-13.0), "
-            f"es {valor}"
         )
 
 

@@ -274,12 +274,13 @@ def entrenar_bc_epoch(
     lr: float = 5e-4,
     max_batches: Optional[int] = None,
     vecnorm: Optional[Any] = None,
+    epochs: int = 1,
 ) -> float:
-    """Ejecuta un epoch de Behavioral Cloning fine-tuning sobre el buffer.
+    """Ejecuta N epochs de Behavioral Cloning fine-tuning sobre el buffer.
 
-    Itera el buffer completo una vez (o hasta max_batches) usando un
-    optimizador Adam temporal con cross-entropy loss sobre las acciones
-    del oráculo. No modifica el optimizer del modelo PPO.
+    Itera el buffer completo `epochs` veces usando un optimizador Adam
+    temporal con cross-entropy loss sobre las acciones del oráculo.
+    No modifica el optimizer del modelo PPO.
 
     Args:
         model: Modelo MaskablePPO entrenado.
@@ -290,9 +291,10 @@ def entrenar_bc_epoch(
         vecnorm: VecNormalize para normalizar observaciones crudas
                  antes de pasarlas a la política (opcional pero
                  recomendado si el modelo se entrenó con VecNormalize).
+        epochs: Número de epochs completos sobre el buffer (default=1).
 
     Returns:
-        Pérdida promedio del epoch.
+        Pérdida promedio del último epoch.
     """
     import torch
 
@@ -309,45 +311,50 @@ def entrenar_bc_epoch(
 
     # Optimizador temporal solo para este fine-tuning
     optimizer = torch.optim.Adam(policy.parameters(), lr=lr)
-    loss_total = 0.0
 
-    indices = np.random.default_rng().permutation(n_total)
-    obs_raw = np.stack([buffer._obs[i] for i in indices])
+    # Precargar todos los datos del buffer (normalizados si es necesario)
+    indices_all = np.arange(n_total)
+    obs_raw = np.stack([buffer._obs[i] for i in indices_all])
     act_arr = np.array([buffer._actions[i]
-                       for i in indices], dtype=np.int64)
+                       for i in indices_all], dtype=np.int64)
 
     # Normalizar si hay VecNormalize (las obs del buffer son crudas)
     if vecnorm is not None:
         obs_raw = vecnorm.normalize_obs(obs_raw)
 
-    for b in range(n_batches):
-        start = b * batch_size
-        end = min(start + batch_size, n_total)
-        obs_batch = torch.from_numpy(obs_raw[start:end]).to(device)
-        act_batch = torch.from_numpy(act_arr[start:end]).to(device)
+    final_loss = 0.0
+    for epoch in range(epochs):
+        loss_total = 0.0
+        indices = np.random.default_rng().permutation(n_total)
 
-        optimizer.zero_grad()
+        for b in range(n_batches):
+            start = b * batch_size
+            end = min(start + batch_size, n_total)
+            batch_idx = indices[start:end]
+            obs_batch = torch.from_numpy(obs_raw[batch_idx]).to(device)
+            act_batch = torch.from_numpy(act_arr[batch_idx]).to(device)
 
-        # SB3 ActorCriticPolicy: extract_features → policy_net → action_net
-        # El mlp_extractor.policy_net reduce features_dim → last_net_arch_dim
-        # (ej. Transformer: 256 → 128), necesario para que action_net(128→52)
-        # reciba la dimensión correcta.
-        features = policy.extract_features(obs_batch)
-        if (policy.mlp_extractor is not None
-                and policy.mlp_extractor.policy_net is not None):
-            latent_pi = policy.mlp_extractor.policy_net(features)
-        else:
-            latent_pi = features
-        logits = policy.action_net(latent_pi)
+            optimizer.zero_grad()
 
-        loss = torch.nn.functional.cross_entropy(logits, act_batch)
-        loss.backward()
-        optimizer.step()
+            # SB3 ActorCriticPolicy: extract_features → policy_net → action_net
+            features = policy.extract_features(obs_batch)
+            if (policy.mlp_extractor is not None
+                    and policy.mlp_extractor.policy_net is not None):
+                latent_pi = policy.mlp_extractor.policy_net(features)
+            else:
+                latent_pi = features
+            logits = policy.action_net(latent_pi)
 
-        loss_total += loss.item()
+            loss = torch.nn.functional.cross_entropy(logits, act_batch)
+            loss.backward()
+            optimizer.step()
 
-    avg_loss = loss_total / n_batches if n_batches > 0 else 0.0
-    return avg_loss
+            loss_total += loss.item()
+
+        avg_loss = loss_total / n_batches if n_batches > 0 else 0.0
+        final_loss = avg_loss
+
+    return final_loss
 
 
 def entrenar_bc_dataset(

@@ -27,24 +27,24 @@ class TestObservacionBuilderV3:
 
     @pytest.fixture
     def builder(self) -> ObservacionBuilderV3:
-        """Builder v3 con 260 dimensiones."""
+        """Builder v3 con 265 dimensiones."""
         return ObservacionBuilderV3()
 
     # ------------------------------------------------------------------
     # Dimensionalidad
     # ------------------------------------------------------------------
 
-    def test_dim_v3_es_260(self) -> None:
-        """DIM_V3 debe ser exactamente 260."""
-        assert DIM_V3 == 260, f"Esperado 260, obtenido {DIM_V3}"
+    def test_dim_v3_es_265(self) -> None:
+        """DIM_V3 debe ser exactamente 265."""
+        assert DIM_V3 == 265, f"Esperado 265, obtenido {DIM_V3}"
 
     def test_builder_usa_dim_v3_por_defecto(self) -> None:
-        """El builder por defecto debe usar DIM_V3=260."""
+        """El builder por defecto debe usar DIM_V3=265."""
         builder = ObservacionBuilderV3()
-        assert builder.dim == 260
+        assert builder.dim == 265
 
-    def test_output_shape_es_260(self, builder, motor) -> None:
-        """construir() debe retornar vector de shape (260,)."""
+    def test_output_shape_es_265(self, builder, motor) -> None:
+        """construir() debe retornar vector de shape (265,)."""
         vacios = [set() for _ in range(4)]
         obs = builder.construir(
             motor=motor,
@@ -55,7 +55,7 @@ class TestObservacionBuilderV3:
             dama_picas_en=None,
         )
         assert obs.shape == (
-            260,), f"Shape esperado (260,), obtenido {obs.shape}"
+            265,), f"Shape esperado (265,), obtenido {obs.shape}"
         assert obs.dtype == np.float32
 
     # ------------------------------------------------------------------
@@ -180,9 +180,9 @@ class TestObservacionBuilderV3:
         assert len(motor.mesa) == mesa_antes
 
     def test_construir_desde_motor_v3(self, builder, motor) -> None:
-        """construir_desde_motor() retorna vector de 260 dims."""
+        """construir_desde_motor() retorna vector de 265 dims."""
         obs = builder.construir_desde_motor(motor, 0)
-        assert obs.shape == (260,)
+        assert obs.shape == (265,)
         assert obs.dtype == np.float32
         # Debe tener mano del jugador
         mano_count = int(obs[0:52].sum())
@@ -206,7 +206,7 @@ class TestObservacionBuilderV3EdgeCases:
             puntos_mano_actual=[0, 0, 0, 0],
             dama_picas_en=None,
         )
-        assert obs.shape == (260,)
+        assert obs.shape == (265,)
         # Sin mano repartida: 0 cartas en mano
         assert obs[0:52].sum() == 0.0
 

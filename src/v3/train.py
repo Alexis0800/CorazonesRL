@@ -61,7 +61,7 @@ BEST_TOP: int = 2
 MIN_SNAPSHOT_STEPS: int = 100_000
 MAX_SNAPSHOTS_POOL: int = 50
 MIN_BC_SAMPLES: int = 100
-MCTS_FREQUENCY: float = 0.40
+MCTS_FREQUENCY: float = 0.60
 
 
 # ------------------------------------------------------------------
@@ -452,20 +452,24 @@ def crear_entorno_self_play_v3(
 ) -> CorazonesEnvV3:
     """Crea un entorno CorazonesEnvV3 con oponentes mixtos (self-play).
 
-    Los oponentes son una mezcla de:
-    - Bots heurísticos (prob_bot): conservador, agresivo, evasivo
-    - Snapshots históricos (1 - prob_bot): Fictitious Self-Play real
-    - BotExperto (fallback): cuando no hay snapshots disponibles aún
+    Estrategia de oponentes (v5 — diagn�stico train/test mismatch):
+      - SIEMPRE 1 BotExperto (castiga errores, ~4-6 pts en eval)
+      - 2 slots restantes: mezcla de snapshots hist�ricos + bots heur�sticos
+
+    El diagn�stico mostr� que sin BotExperto en entrenamiento,
+    el modelo aprende a ganarle a bots d�biles pero falla en
+    evaluaci�n (donde hay 2 BotExperto). La inclusi�n forzosa
+    de BotExperto cierra el train/test gap.
 
     Args:
-        version: Versión del modelo (ej: 'v3_mcts').
-        prob_bot: Probabilidad de usar bot heurístico.
-        min_steps: Pasos mínimos para un snapshot.
-        max_snapshots: Máximo de snapshots en pool.
-        agente_idx: Índice del agente en el entorno (0-3).
+        version: Versi�n del modelo (ej: 'v3_mcts').
+        prob_bot: Probabilidad de usar bot heur�stico (para slots 2-3).
+        min_steps: Pasos m�nimos para un snapshot.
+        max_snapshots: M�ximo de snapshots en pool.
+        agente_idx: �ndice del agente en el entorno (0-3).
         modelo_actual: Instancia MaskablePPO actual (no usado).
-        oracle_buffer: Buffer MCTS para recolectar datos del oráculo.
-        oracle_rng: Generador aleatorio para el oráculo.
+        oracle_buffer: Buffer MCTS para recolectar datos del or�culo.
+        oracle_rng: Generador aleatorio para el or�culo.
 
     Returns:
         Instancia de CorazonesEnvV3 configurada para self-play.
@@ -473,24 +477,26 @@ def crear_entorno_self_play_v3(
     from src.agentes.bot_experto import BotExperto
     from src.agentes.politica_rl import PoliticaSB3
 
-    # ── Cargar pool de snapshots históricos ──
+    # ── Cargar pool de snapshots hist�ricos ──
     snaps_dir = os.path.join("models", version, "snapshots")
     snapshots = _cargar_snapshots_v3(snaps_dir, min_steps, max_snapshots)
 
-    # ── Asignar oponentes ──
+    # ── Asignar oponentes: SIEMPRE al menos 1 BotExperto ──
     politicas: Dict[int, object] = {}
-    for offset in (1, 2, 3):
-        rival_idx = (agente_idx + offset) % 4
-        if random.random() < prob_bot:
-            # Bot heurístico aleatorio
-            politicas[rival_idx] = random.choice(BOTS_DISPONIBLES)
-        elif snapshots:
+    rivales = [(agente_idx + offset) % 4 for offset in (1, 2, 3)]
+
+    # Slot 1: SIEMPRE BotExperto (rival fuerte que castiga errores)
+    politicas[rivales[0]] = BotExperto()
+
+    # Slots 2-3: mezcla de snapshots + heurísticos
+    for rival_idx in rivales[1:]:
+        if snapshots and random.random() > prob_bot:
             # Snapshot histórico (Fictitious Self-Play real)
             snap = random.choice(snapshots)
             politicas[rival_idx] = PoliticaSB3(snap, rival_idx)
         else:
-            # Fallback: BotExperto (sin snapshots aún)
-            politicas[rival_idx] = BotExperto()
+            # Bot heurístico aleatorio (conservador/agresivo/evasivo)
+            politicas[rival_idx] = random.choice(BOTS_DISPONIBLES)
 
     return CorazonesEnvV3(
         agente_idx=agente_idx,
@@ -736,6 +742,7 @@ def entrenar_auto(
     best_top: int = BEST_TOP,
     mcts_enabled: bool = False,
     mcts_frequency: float = 0.05,
+    bc_dataset_path: Optional[str] = None,
 ) -> int:
     """Ejecuta entrenamiento autónomo v3 con Transformer + self-play.
 
@@ -913,6 +920,7 @@ def entrenar_auto(
                 bc_loss = entrenar_bc_epoch(
                     modelo, mcts_buffer,
                     batch_size=256, lr=1e-3, vecnorm=vn,
+                    epochs=2,
                 )
                 buf_size = len(mcts_buffer)
                 log_bc_loss(eval_log_path, step_counter, bc_loss, buf_size)
@@ -944,6 +952,20 @@ def entrenar_auto(
         # ── Guardar snapshot ──
         _guardar_snapshot(modelo, step_counter, dir_snapshots,
                           vecnorm_pkl if os.path.exists(vecnorm_pkl) else None)
+
+        # ── BC regularization: DESACTIVADA (diagnóstico: ancla al modelo en ~9.95 pts) ──
+        # La BC pre-entrenada ya dio su beneficio como inicialización.
+        # El ancla impedía que el modelo aprendiera del reward real.
+        if False and bc_dataset_path and os.path.exists(bc_dataset_path):
+            try:
+                bc_reg_loss = entrenar_bc_dataset(
+                    modelo, bc_dataset_path, epochs=1,
+                    batch_size=256, lr=1e-5,
+                )
+                if bc_reg_loss:
+                    log_bc_loss(eval_log_path, step_counter, bc_reg_loss[0], 0)
+            except Exception as e:
+                pass  # silencioso, no interrumpir entrenamiento
 
         # ── Evaluar win rate (formato estandar + facil) ──
         if step_counter > 0 and step_counter % eval_every == 0:
@@ -1023,7 +1045,7 @@ def _extraer_paso_de_ruta(ruta: str) -> int:
 # ------------------------------------------------------------------
 
 HP_DEFAULT: Dict[str, Any] = {
-    "learning_rate": 1e-4,
+    "learning_rate": 5e-5,
     "n_steps": 2048,
     "batch_size": 256,
     "n_epochs": 10,
@@ -1067,7 +1089,9 @@ if __name__ == "__main__":
     parser.add_argument("--mcts", action="store_true",
                         help="Activar MCTS oracle guidance")
     parser.add_argument("--mcts-frequency", type=float, default=MCTS_FREQUENCY,
-                        help="Fracción de episodios con MCTS (default: 0.05)")
+                        help="Fracción de episodios con MCTS (default: 0.40)")
+    parser.add_argument("--bc-dataset", type=str, default=None,
+                        help="Dataset .npz para BC regularization anti-forgetting")
 
     args = parser.parse_args()
 
@@ -1083,4 +1107,5 @@ if __name__ == "__main__":
         output_dir=args.output_dir,
         mcts_enabled=args.mcts,
         mcts_frequency=args.mcts_frequency,
+        bc_dataset_path=args.bc_dataset,
     )

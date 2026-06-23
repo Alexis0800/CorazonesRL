@@ -333,8 +333,8 @@ class TestIntegracionLiderazgo:
             dama_picas_en=None,
         )
 
-        assert len(obs) == 260, (
-            f"Observación debe tener 260 dims, tiene {len(obs)}"
+        assert len(obs) == 265, (
+            f"Observación debe tener 265 dims, tiene {len(obs)}"
         )
 
     def test_features_base_intactas(self) -> None:

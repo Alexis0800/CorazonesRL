@@ -27,7 +27,8 @@ class RewardConfigV21:
     """
 
     # --- Señales base (v2_ronda) ---
-    REWARD_CORAZON: float = -1.0
+    # Aumentado de -1 a -3 (diagnóstico: 15% errores corazones evitables, Δ=1.85)
+    REWARD_CORAZON: float = -3.0
     REWARD_DAMA_PICAS: float = -13.0
     REWARD_SHOOTING_MOON: float = 78.0
     REWARD_MEJOR_MANO: float = 5.0
@@ -47,8 +48,8 @@ class RewardConfigV21:
     REWARD_LIABILITY_HOLD: float = -5.0
 
     # Penalización preventiva por jugar Q♠ teniendo alternativas seguras
-    # Aumentado de -5.0 a -8.0 (análisis PIMC: modelos capturan Q♠ 35-42%)
-    REWARD_QS_PREVENTIVO: float = -8.0
+    # Aumentado de -8.0 a -15.0 (diagnóstico: 4.2% errores Q♠, Δ=7.26pts)
+    REWARD_QS_PREVENTIVO: float = -15.0
 
     # Umbral para detección de moon block
     MOON_BLOCK_CORAZONES_UMBRAL: int = 6
