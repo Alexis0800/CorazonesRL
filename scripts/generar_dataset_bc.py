@@ -46,8 +46,9 @@ Ejemplos:
         help="Mundos PIMC por decisión (default: 30)")
     parser.add_argument(
         "--rollout", type=str, default="mixto",
-        choices=["evasivo", "experto", "mixto"],
-        help="Política de PIMC: evasivo (rápido), experto (preciso), mixto (balance)")
+        choices=["evasivo", "experto", "mixto", "pimc2", "mcts2"],
+        help="Política de PIMC/MCTS: evasivo (rápido), experto (preciso), "
+             "mixto (balance), pimc2 (PIMC recursivo 2-ply), mcts2 (MCTS profundo)")
     parser.add_argument(
         "--oponentes", type=str, default="experto",
         choices=["heuristicos", "experto", "mixto"],
@@ -58,6 +59,12 @@ Ejemplos:
     parser.add_argument(
         "--mcts-sims", type=int, default=100,
         help="Simulaciones MCTS por decision (default: 100)")
+    parser.add_argument(
+        "--profundidad", type=int, default=1,
+        choices=[1, 2, 3],
+        help="Niveles de lookahead del agente (default: 1). "
+             "1=estándar, 2=optimiza esta decisión + la siguiente, 3=tres niveles. "
+             "Usar con --rollout pimc2 o --rollout mcts2.")
     parser.add_argument(
         "--soft-labels", action="store_true", default=False,
         help="Generar scores para todas las acciones (N,52) en vez de solo la mejor (N,)")
@@ -73,6 +80,9 @@ Ejemplos:
     parser.add_argument(
         "--output", type=str, default="datasets/bc_dataset",
         help="Prefijo de salida (sin extensión). Genera .npz + .json")
+    parser.add_argument(
+        "--dim", type=int, default=220,
+        help="Dimensionalidad del vector de observación (default: 220). Usar 228 para v3.1.")
 
     args = parser.parse_args()
 
@@ -83,13 +93,15 @@ Ejemplos:
     print(f"  Mundos PIMC:  {args.mundos}")
     print(f"  Rollout PIMC: {args.rollout}")
     print(f"  Oponentes:    {args.oponentes}")
-    print(f"  Oracle:       {'MCTS' if args.mcts else 'PIMC'} "
+    print(f"  Oracle:       {'MCTS' if args.mcts else 'PIMC' if args.rollout not in ('pimc2', 'mcts2') else args.rollout.upper()} "
           f"({'{} sims'.format(args.mcts_sims) if args.mcts else '{} mundos'.format(args.mundos)})")
+    print(f"  Profundidad:  {args.profundidad}")
     print(f"  Soft labels:  {args.soft_labels}")
     print(f"  Multi-agente: {args.multi_agente}")
     print(f"  Workers:      {args.workers}")
     print(f"  Seed base:    {args.seed}")
     print(f"  Output:       {args.output}.npz + .json")
+    print(f"  Obs dim:      {args.dim}")
     print("-" * 60)
 
     obs, actions, meta = generar_dataset(
@@ -103,6 +115,8 @@ Ejemplos:
         mcts_simulaciones=args.mcts_sims,
         soft_labels=args.soft_labels,
         multi_agente=args.multi_agente,
+        profundidad=args.profundidad,
+        dim=args.dim,
     )
 
     guardar_dataset(args.output, obs, actions, meta)

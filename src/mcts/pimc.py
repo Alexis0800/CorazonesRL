@@ -432,6 +432,7 @@ def mcts_mejor_jugada(
     rng: Optional[np.random.Generator] = None,
     crear_bots: Optional[Callable[[], Dict[int, Callable]]] = None,
     rollout_tipo: str = "experto",
+    profundidad_agente: int = 1,
 ) -> Carta:
     """MCTS con árbol: búsqueda más profunda que PIMC plano.
 
@@ -448,6 +449,10 @@ def mcts_mejor_jugada(
         rng: Generador aleatorio.
         crear_bots: Factory de políticas (si None, usa rollout_tipo).
         rollout_tipo: "evasivo", "experto", "mixto" (default "experto").
+        profundidad_agente: Cuántos niveles de nodos del agente construir.
+            1 = solo optimiza la decisión actual (comportamiento original).
+            2 = también optimiza la siguiente decisión del agente.
+            3 = optimiza 3 decisiones hacia adelante.
 
     Returns:
         La carta legal con menor puntuación esperada según MCTS.
@@ -483,11 +488,12 @@ def mcts_mejor_jugada(
         # 2. Seleccionar carta desde la raíz (exploración con UCB)
         carta_elegida = _seleccionar_mejor_hijo(raiz).carta
 
-        # 3. Simular (rollout) con bots FRESCOS por simulación
+        # 3. Simular con profundidad de agente variable
         clon = _clonar_motor(mundo)
         bots_frescos = crear_bots()
-        puntos = simular_resto_mano(
-            clon, agente_idx, carta_elegida, bots_frescos)
+        puntos = _simular_mcts_con_profundidad(
+            clon, agente_idx, carta_elegida, bots_frescos,
+            profundidad_agente - 1, vacios, rng, crear_bots, rollout_tipo)
 
         # 4. Backpropagar: actualizar el valor como COSTE (menos = mejor)
         hijo_nodo = raiz.hijos[carta_elegida.id]
@@ -496,3 +502,65 @@ def mcts_mejor_jugada(
 
     # Seleccionar la carta con menor valor medio (menor puntuación esperada)
     return min(legales, key=lambda c: raiz.hijos[c.id].valor_medio)
+
+
+def _simular_mcts_con_profundidad(
+    motor: MotorCorazones,
+    agente_idx: int,
+    primera_carta: Carta,
+    bots: Dict[int, Callable],
+    profundidad_restante: int,
+    vacios: Optional[Dict[int, Set[int]]],
+    rng: np.random.Generator,
+    crear_bots: Callable[[], Dict[int, Callable]],
+    rollout_tipo: str,
+) -> float:
+    """Simula la mano desde el turno actual, aplicando MCTS en turnos
+    futuros del agente si profundidad_restante > 0.
+
+    Args:
+        motor: Estado actual (SE MODIFICA).
+        agente_idx: Índice del agente.
+        primera_carta: Carta que juega el agente en este turno.
+        bots: Políticas de rollout para oponentes.
+        profundidad_restante: Niveles adicionales de optimización MCTS.
+        vacios: Voids conocidos.
+        rng: Generador aleatorio.
+        crear_bots: Factory para bots frescos.
+        rollout_tipo: Tipo de rollout.
+
+    Returns:
+        Puntuación final del agente (0-26).
+    """
+    motor.jugar_carta(agente_idx, primera_carta)
+
+    while True:
+        if len(motor.mesa) == 4:
+            motor.resolver_baza()
+
+        if all(len(j.mano) == 0 for j in motor.jugadores) and len(motor.mesa) == 0:
+            break
+
+        idx = motor.obtener_jugador_actual()
+        legales = motor.obtener_jugadas_legales(idx)
+
+        if not legales:
+            break
+
+        if idx == agente_idx and profundidad_restante > 0:
+            # ── Turno del agente: mini-MCTS con pocas simulaciones ──
+            sims_mcts = max(10, 50 // (3 - min(profundidad_restante, 2)))
+            mejor = mcts_mejor_jugada(
+                motor, agente_idx, legales,
+                num_simulaciones=sims_mcts,
+                rng=rng, crear_bots=crear_bots,
+                rollout_tipo=rollout_tipo,
+                profundidad_agente=profundidad_restante,
+            )
+            motor.jugar_carta(agente_idx, mejor)
+            profundidad_restante -= 1
+        else:
+            carta = bots[idx](motor, idx, legales)
+            motor.jugar_carta(idx, carta)
+
+    return motor.calcular_puntuacion_mano()[agente_idx]

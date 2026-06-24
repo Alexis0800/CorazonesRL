@@ -6,6 +6,10 @@ from src.mcts.pimc import (
     mcts_mejor_jugada,
     crear_bots_rollout,
 )
+from src.mcts.pimc_recursivo import (
+    _puntaje_esperado_recursivo,
+    pimc_mejor_jugada_recursivo,
+)
 from src.mcts.analisis import (
     enumerar_mundos,
     pimc_exacto,
@@ -34,6 +38,9 @@ __all__ = [
     "pimc_mejor_jugada",
     "mcts_mejor_jugada",
     "crear_bots_rollout",
+    # PIMC recursivo
+    "_puntaje_esperado_recursivo",
+    "pimc_mejor_jugada_recursivo",
     # Enumeración y PIMC exacto
     "enumerar_mundos",
     "pimc_exacto",

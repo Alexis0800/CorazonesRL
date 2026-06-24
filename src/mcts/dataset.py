@@ -32,6 +32,7 @@ from src.mcts.pimc import (
     mcts_mejor_jugada,
     crear_bots_rollout,
 )
+from src.mcts.pimc_recursivo import _puntaje_esperado_recursivo
 from src.agentes.heuristicos import bot_evasivo, bot_conservador, bot_agresivo
 
 
@@ -60,6 +61,8 @@ def generar_dataset_una_mano(
     mcts_simulaciones: int = 100,
     soft_labels: bool = False,
     multi_agente: bool = False,
+    profundidad: int = 1,
+    dim: int = DIM_ENTRENAMIENTO,
 ) -> List[Tuple[np.ndarray, Any]]:
     """Genera pares (obs, action/scores) para UNA mano usando PIMC o MCTS.
 
@@ -67,15 +70,27 @@ def generar_dataset_una_mano(
         seed: Semilla para reproducibilidad.
         agente_idx: Indice del agente (0-3). Ignorado si multi_agente=True.
         num_mundos: Mundos PIMC por decision (ignorado si use_mcts=True).
-        rollout_tipo: "evasivo", "experto", "mixto" (politica del oracle).
+        rollout_tipo: Politica del oracle:
+            "evasivo" — PIMC con bot_evasivo como rollout
+            "experto" — PIMC con BotExperto como rollout
+            "mixto" — PIMC con mezcla de politicas
+            "pimc2" — PIMC recursivo 2-ply (estrategia multibaza)
+            "mcts2" — MCTS con profundidad_agente=2
         tipo_oponentes: "heuristicos", "experto", "mixto" (oponentes reales).
         use_mcts: Si True, usa MCTS (multi-step) en vez de PIMC (one-step).
+            Obsoleto cuando rollout_tipo="pimc2" o "mcts2".
         mcts_simulaciones: Simulaciones MCTS por decision (default 100).
         soft_labels: Si True, retorna scores (52,) en vez de action_id.
         multi_agente: Si True, genera para los 4 jugadores (4x datos).
+        profundidad: Niveles de lookahead para el agente.
+            1 = PIMC/MCTS estándar (optimiza solo esta decision).
+            2 = optimiza esta decision + la siguiente del agente.
+            Usado por rollout_tipo="pimc2" y "mcts2".
+        dim: Dimensionalidad del vector de observación (default: DIM_ENTRENAMIENTO).
+            Usar 228 para v3.1, 220 para v10.
 
     Returns:
-        Lista de tuplas (observacion_220, action_id) o (obs, scores_52)
+        Lista de tuplas (observacion_N, action_id) o (obs, scores_52)
         si soft_labels=True.
     """
     random.seed(seed)
@@ -93,6 +108,7 @@ def generar_dataset_una_mano(
                 tipo_oponentes=tipo_oponentes,
                 use_mcts=use_mcts, mcts_simulaciones=mcts_simulaciones,
                 soft_labels=soft_labels, multi_agente=False,
+                profundidad=profundidad, dim=dim,
             )
             todos.extend(pares)
         return todos
@@ -100,7 +116,7 @@ def generar_dataset_una_mano(
     motor = MotorCorazones()
     motor.repartir()
 
-    obs_builder = ObservacionBuilder(dim=DIM_ENTRENAMIENTO)
+    obs_builder = ObservacionBuilder(dim=dim)
 
     # Oponentes configurables
     from src.agentes.bot_experto import BotExperto
@@ -151,26 +167,22 @@ def generar_dataset_una_mano(
                         rollout_tipo=rollout_tipo,
                         use_mcts=use_mcts,
                         mcts_simulaciones=mcts_simulaciones,
+                        profundidad=profundidad,
                     )
                     pares.append((obs, scores))
                     # Jugar la mejor accion segun PIMC
                     mejor_idx = np.nanargmin(scores)
                     mejor_carta = Carta._TODAS[mejor_idx]
                 else:
-                    if use_mcts:
-                        mejor_carta = mcts_mejor_jugada(
-                            motor, agente_idx, legales,
-                            num_simulaciones=mcts_simulaciones,
-                            rollout_tipo=rollout_tipo,
-                        )
-                    else:
-                        mejor_carta = pimc_mejor_jugada(
-                            motor, agente_idx, legales,
-                            num_mundos=num_mundos,
-                            rng=rng,
-                            crear_bots=lambda: crear_bots_rollout(
-                                tipo=rollout_tipo, rng=rng),
-                        )
+                    mejor_carta = _seleccionar_mejor_carta(
+                        motor, agente_idx, legales,
+                        num_mundos=num_mundos,
+                        rollout_tipo=rollout_tipo,
+                        use_mcts=use_mcts,
+                        mcts_simulaciones=mcts_simulaciones,
+                        profundidad=profundidad,
+                        rng=rng,
+                    )
                     pares.append((obs, mejor_carta.id))
 
                 motor.jugar_carta(idx, mejor_carta)
@@ -182,12 +194,86 @@ def generar_dataset_una_mano(
     return pares
 
 
+def _seleccionar_mejor_carta(
+    motor, agente_idx, legales,
+    num_mundos: int,
+    rollout_tipo: str,
+    use_mcts: bool,
+    mcts_simulaciones: int,
+    profundidad: int,
+    rng,
+) -> Carta:
+    """Selecciona la mejor carta según el oráculo configurado.
+
+    Soporta:
+      - PIMC estándar (rollout_tipo: evasivo, experto, mixto)
+      - PIMC recursivo (rollout_tipo: pimc2)
+      - MCTS estándar (use_mcts=True)
+      - MCTS profundo (rollout_tipo: mcts2)
+
+    Args:
+        motor: Estado actual.
+        agente_idx: Índice del agente.
+        legales: Cartas legales.
+        num_mundos: Mundos PIMC.
+        rollout_tipo: Tipo de rollout/oráculo.
+        use_mcts: Si True, usa MCTS.
+        mcts_simulaciones: Simulaciones MCTS.
+        profundidad: Niveles de lookahead.
+        rng: Generador aleatorio.
+
+    Returns:
+        La mejor carta según el oráculo.
+    """
+    # ── PIMC recursivo 2-ply ──
+    if rollout_tipo == "pimc2":
+        from src.mcts.pimc_recursivo import pimc_mejor_jugada_recursivo
+        return pimc_mejor_jugada_recursivo(
+            motor, agente_idx, legales,
+            profundidad=profundidad,
+            num_mundos=num_mundos,
+            rng=rng,
+            crear_bots=lambda: crear_bots_rollout(
+                tipo="experto", rng=rng),
+        )
+
+    # ── MCTS profundo ──
+    if rollout_tipo == "mcts2":
+        return mcts_mejor_jugada(
+            motor, agente_idx, legales,
+            num_simulaciones=mcts_simulaciones,
+            rollout_tipo="experto",
+            profundidad_agente=profundidad,
+            rng=rng,
+        )
+
+    # ── MCTS estándar ──
+    if use_mcts:
+        return mcts_mejor_jugada(
+            motor, agente_idx, legales,
+            num_simulaciones=mcts_simulaciones,
+            rollout_tipo=rollout_tipo,
+            profundidad_agente=1,
+            rng=rng,
+        )
+
+    # ── PIMC estándar ──
+    return pimc_mejor_jugada(
+        motor, agente_idx, legales,
+        num_mundos=num_mundos,
+        rng=rng,
+        crear_bots=lambda: crear_bots_rollout(
+            tipo=rollout_tipo, rng=rng),
+    )
+
+
 def _obtener_scores_acciones(
     motor, agente_idx, legales, obs_builder,
     num_mundos: int, rng,
     rollout_tipo: str,
     use_mcts: bool = False,
     mcts_simulaciones: int = 100,
+    profundidad: int = 1,
 ) -> np.ndarray:
     """Calcula el score PIMC/MCTS esperado para CADA accion legal.
 
@@ -202,9 +288,10 @@ def _obtener_scores_acciones(
         obs_builder: ObservacionBuilder.
         num_mundos: Mundos PIMC.
         rng: numpy Generator.
-        rollout_tipo: Tipo de rollout.
+        rollout_tipo: Tipo de rollout (incluye "pimc2" y "mcts2").
         use_mcts: Si True, usa MCTS.
         mcts_simulaciones: Simulaciones MCTS.
+        profundidad: Niveles de lookahead para PIMC recursivo / MCTS profundo.
 
     Returns:
         Array (52,) float32 con scores.
@@ -212,20 +299,124 @@ def _obtener_scores_acciones(
     scores = np.full(52, np.inf, dtype=np.float32)
 
     for carta in legales:
-        if use_mcts:
-            # MCTS: clonar motor, jugar carta, ejecutar MCTS desde ahi
-            clon = _clonar_motor_para_score(motor)
-            clon.jugar_carta(agente_idx, carta)
-            # Simular el resto de la mano con rollout y medir score
-            score = _mcts_score_desde_estado(
-                clon, agente_idx, mcts_simulaciones, rollout_tipo, rng)
-        else:
-            # PIMC: simular N mundos desde este estado
-            score = _pimc_score_carta(
-                motor, agente_idx, carta, num_mundos, rollout_tipo, rng)
+        score = _score_una_carta(
+            motor, agente_idx, carta,
+            num_mundos=num_mundos, rng=rng,
+            rollout_tipo=rollout_tipo,
+            use_mcts=use_mcts,
+            mcts_simulaciones=mcts_simulaciones,
+            profundidad=profundidad,
+        )
         scores[carta.id] = score
 
     return scores
+
+
+def _score_una_carta(
+    motor, agente_idx, carta,
+    num_mundos: int, rng,
+    rollout_tipo: str,
+    use_mcts: bool,
+    mcts_simulaciones: int,
+    profundidad: int,
+) -> float:
+    """Estima el score esperado si se juega `carta` ahora.
+
+    Delega al oráculo apropiado según la configuración.
+    """
+    # ── PIMC recursivo ──
+    if rollout_tipo == "pimc2":
+        return _pimc_recursivo_score_carta(
+            motor, agente_idx, carta,
+            num_mundos=num_mundos, rng=rng,
+            profundidad=profundidad)
+
+    # ── MCTS profundo ──
+    if rollout_tipo == "mcts2":
+        return _mcts_profundo_score_carta(
+            motor, agente_idx, carta,
+            mcts_simulaciones=mcts_simulaciones, rng=rng,
+            profundidad=profundidad)
+
+    # ── MCTS estándar ──
+    if use_mcts:
+        return _pimc_score_carta(
+            motor, agente_idx, carta,
+            num_mundos=mcts_simulaciones,
+            rollout_tipo=rollout_tipo, rng=rng)
+
+    # ── PIMC estándar ──
+    return _pimc_score_carta(
+        motor, agente_idx, carta,
+        num_mundos=num_mundos,
+        rollout_tipo=rollout_tipo, rng=rng)
+
+
+def _pimc_recursivo_score_carta(
+    motor, agente_idx, carta,
+    num_mundos: int, rng, profundidad: int,
+) -> float:
+    """Score usando PIMC recursivo (multi-ply).
+
+    Para cada mundo determinizado:
+      1. Juega la carta del agente.
+      2. Simula el resto de la mano usando _simular_desde_estado_actual,
+         que aplica PIMC recursivo en los turnos futuros del agente.
+      3. Esto captura estrategia multibaza: el score refleja no solo
+         el efecto inmediato de la carta, sino también las decisiones
+         óptimas que habilita en bazas futuras.
+    """
+    from src.mcts.pimc_recursivo import _simular_desde_estado_actual
+    from src.mcts.pimc import determinizar, crear_bots_rollout
+
+    total = 0.0
+    for _ in range(num_mundos):
+        mundo = determinizar(motor, agente_idx, rng=rng)
+        mundo.jugar_carta(agente_idx, carta)
+        # Simular el resto con PIMC recursivo en turnos futuros del agente
+        puntos = _simular_desde_estado_actual(
+            mundo, agente_idx,
+            profundidad_restante=profundidad - 1,
+            num_mundos=num_mundos,
+            vacios=None,
+            rng=rng,
+            crear_bots=lambda: crear_bots_rollout(tipo="experto", rng=rng),
+            rollout_tipo="experto",
+        )
+        total += puntos
+
+    return total / num_mundos
+
+
+def _mcts_profundo_score_carta(
+    motor, agente_idx, carta,
+    mcts_simulaciones: int, rng, profundidad: int,
+) -> float:
+    """Score usando MCTS con profundidad de agente > 1.
+
+    Usa _simular_mcts_con_profundidad del módulo pimc, que aplica
+    mini-MCTS en turnos futuros del agente.
+    """
+    from src.mcts.pimc import (
+        _clonar_motor, determinizar, crear_bots_rollout,
+        _simular_mcts_con_profundidad,
+    )
+
+    total = 0.0
+    n_sims = max(10, mcts_simulaciones // 2)
+    for _ in range(n_sims):
+        mundo = determinizar(motor, agente_idx, rng=rng)
+        bots = crear_bots_rollout(tipo="experto", rng=rng)
+        puntos = _simular_mcts_con_profundidad(
+            mundo, agente_idx, carta, bots,
+            profundidad_restante=profundidad - 1,
+            vacios=None, rng=rng,
+            crear_bots=lambda: crear_bots_rollout(tipo="experto", rng=rng),
+            rollout_tipo="experto",
+        )
+        total += puntos
+
+    return total / n_sims
 
 
 def _clonar_motor_para_score(motor: MotorCorazones) -> MotorCorazones:
@@ -296,7 +487,7 @@ def _simular_resto_mano(motor, agente_idx, bots) -> None:
 def _worker_generar_mano(args: Tuple) -> List[Tuple[np.ndarray, Any]]:
     """Worker para Pool."""
     (seed, num_mundos, rollout_tipo, tipo_oponentes,
-     use_mcts, mcts_sims, soft_labels, multi_agente) = args
+     use_mcts, mcts_sims, soft_labels, multi_agente, profundidad, dim) = args
     return generar_dataset_una_mano(
         seed=seed,
         num_mundos=num_mundos,
@@ -306,6 +497,8 @@ def _worker_generar_mano(args: Tuple) -> List[Tuple[np.ndarray, Any]]:
         mcts_simulaciones=mcts_sims,
         soft_labels=soft_labels,
         multi_agente=multi_agente,
+        profundidad=profundidad,
+        dim=dim,
     )
 
 
@@ -320,20 +513,24 @@ def generar_dataset(
     mcts_simulaciones: int = 100,
     soft_labels: bool = False,
     multi_agente: bool = False,
+    profundidad: int = 1,
+    dim: int = DIM_ENTRENAMIENTO,
 ) -> Tuple[np.ndarray, np.ndarray, Dict[str, Any]]:
     """Genera un dataset BC completo usando PIMC o MCTS con multiprocessing.
 
     Args:
         num_manos: Numero de manos a generar.
         num_mundos: Mundos PIMC por decision.
-        rollout_tipo: Politica del oracle: \"evasivo\", \"experto\", \"mixto\".
-        tipo_oponentes: Oponentes reales: \"heuristicos\", \"experto\", \"mixto\".
+        rollout_tipo: Politica del oracle: "evasivo", "experto", "mixto",
+            "pimc2" (PIMC recursivo 2-ply), "mcts2" (MCTS profundo).
+        tipo_oponentes: Oponentes reales: "heuristicos", "experto", "mixto".
         num_workers: Numero de procesos paralelos.
         seed: Semilla base.
         use_mcts: Si True, usa MCTS multi-step en vez de PIMC one-step.
         mcts_simulaciones: Simulaciones MCTS por decision.
         soft_labels: Si True, genera scores (N,52) en vez de action ids (N,).
         multi_agente: Si True, genera para las 4 posiciones (4x datos).
+        profundidad: Niveles de lookahead (1=estándar, 2=2-ply).
 
     Returns:
         Tuple (observations, actions/scores, metadata).
@@ -343,7 +540,7 @@ def generar_dataset(
 
     seeds = [seed + i for i in range(num_manos)]
     args = [(s, num_mundos, rollout_tipo, tipo_oponentes,
-             use_mcts, mcts_simulaciones, soft_labels, multi_agente)
+             use_mcts, mcts_simulaciones, soft_labels, multi_agente, profundidad, dim)
             for s in seeds]
 
     todos_pares: List[Tuple[np.ndarray, Any]] = []
@@ -380,10 +577,11 @@ def generar_dataset(
         "num_workers": num_workers,
         "seed_base": seed,
         "total_pares": len(todos_pares),
-        "obs_dim": DIM_ENTRENAMIENTO,
+        "obs_dim": dim,
         "soft_labels": soft_labels,
         "multi_agente": multi_agente,
         "use_mcts": use_mcts,
+        "profundidad": profundidad,
         "tiempo_total_s": round(elapsed, 1),
         "tiempo_por_mano_s": round(elapsed / max(num_manos, 1), 1),
     }

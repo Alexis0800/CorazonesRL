@@ -363,13 +363,18 @@ def entrenar_bc_dataset(
     epochs: int = 5,
     batch_size: int = 256,
     lr: float = 1e-3,
+    use_soft_labels: bool = True,
+    temperature: float = 2.0,
 ) -> List[float]:
-    """Pre-entrena el modelo con un dataset offline de (obs, all_scores).
+    """Pre-entrena el modelo con un dataset offline de (obs, scores).
 
-    Carga el dataset generado por _generar_dataset.py (v2).
-    all_scores es una matriz (N, 52) donde cada fila tiene el score
-    esperado de CADA carta (o -1 si no es legal en ese estado).
-    La accion optima es argmax(all_scores).
+    Soporta dos formatos:
+      - dataset v1: actions = (N,) int64 con action ids
+      - dataset v2+: actions = (N, 52) float32 con scores (menor=mejor)
+
+    Con soft labels, usa KL divergence entre la distribución del modelo
+    y la distribución derivada de los scores del oráculo. Esto preserva
+    la información de ranking entre cartas (no solo cuál es la mejor).
 
     Args:
         model: Modelo MaskablePPO.
@@ -377,6 +382,11 @@ def entrenar_bc_dataset(
         epochs: Numero de epochs completos.
         batch_size: Tamaño de batch.
         lr: Learning rate.
+        use_soft_labels: Si True y el dataset tiene scores (N,52),
+            usa KL divergence con target distribution derivada de scores.
+            Si False, usa cross-entropy con argmax.
+        temperature: Temperatura para convertir scores a probabilidades
+            (menor temperatura = más concentrado en la mejor acción).
 
     Returns:
         Lista de perdidas por epoch.
@@ -385,11 +395,28 @@ def entrenar_bc_dataset(
 
     data = np.load(dataset_path)
     obs_all = data["observations"]
-    scores_all = data["all_scores"]  # (N, 52) — score esperado, menor=mejor
 
-    # Accion optima = argmin de scores validos (excluyendo -1 = no disponible)
-    masked_scores = np.where(scores_all >= 0, scores_all, np.inf)
-    act_all = np.argmin(masked_scores, axis=1).astype(np.int64)
+    # Detectar formato: ¿scores (N,52) o action ids (N,)?
+    if "all_scores" in data:
+        scores_all = data["all_scores"]
+    elif "actions" in data:
+        actions_raw = data["actions"]
+        if actions_raw.ndim == 2 and actions_raw.shape[1] == 52:
+            scores_all = actions_raw  # (N, 52) float32 scores
+        else:
+            # (N,) int64 action ids — formato antiguo
+            scores_all = None
+            act_all = actions_raw.astype(np.int64)
+    else:
+        raise KeyError(
+            f"Dataset {dataset_path} no tiene 'actions' ni 'all_scores'")
+
+    if scores_all is not None:
+        # Convertir scores (menor=mejor) a action ids via argmin
+        masked_scores = np.where(np.isfinite(scores_all), scores_all, np.inf)
+        act_all = np.argmin(masked_scores, axis=1).astype(np.int64)
+    else:
+        use_soft_labels = False  # sin scores no hay soft labels
 
     device = model.device if hasattr(model, 'device') else 'cpu'
     policy = model.policy.to(device)
@@ -408,7 +435,6 @@ def entrenar_bc_dataset(
             batch_idx = indices[start:end]
 
             obs_batch = torch.from_numpy(obs_all[batch_idx]).to(device)
-            act_batch = torch.from_numpy(act_all[batch_idx]).to(device)
 
             optimizer.zero_grad()
             features = policy.extract_features(obs_batch)
@@ -419,7 +445,32 @@ def entrenar_bc_dataset(
                 latent_pi = features
             logits = policy.action_net(latent_pi)
 
-            loss = torch.nn.functional.cross_entropy(logits, act_batch)
+            if use_soft_labels and scores_all is not None:
+                # ── Soft labels: KL divergence ──
+                # Convertir scores a probabilidades target
+                scores_batch = torch.from_numpy(
+                    scores_all[batch_idx]).to(device)
+                # Negamos scores (menor score = mejor = mayor probabilidad)
+                # y enmascaramos acciones ilegales
+                neg_scores = -scores_batch
+                mask = torch.isfinite(scores_batch)
+                neg_scores = torch.where(mask, neg_scores, -1e9)
+
+                # Softmax con temperature sobre los scores negados
+                target_probs = torch.softmax(neg_scores / temperature, dim=-1)
+                model_log_probs = torch.log_softmax(logits, dim=-1)
+
+                # KL divergence: sum(target * log(target/model))
+                # = sum(target * log(target)) - sum(target * log(model))
+                # = -entropy(target) - sum(target * log_softmax(model))
+                loss = torch.nn.functional.kl_div(
+                    model_log_probs, target_probs,
+                    reduction='batchmean', log_target=False)
+            else:
+                # ── Hard labels: cross-entropy ──
+                act_batch = torch.from_numpy(act_all[batch_idx]).to(device)
+                loss = torch.nn.functional.cross_entropy(logits, act_batch)
+
             loss.backward()
             optimizer.step()
 
