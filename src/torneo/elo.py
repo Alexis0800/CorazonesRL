@@ -52,7 +52,10 @@ __all__ = [
     "_Modelo190Wrapper",
     "_extraer_paso_snapshot", "_listar_snapshots_torneo",
     "_encontrar_adyacentes", "_simular_resultado_torneo",
-    "_get_bot_func", "_es_bot", "_nombre_bot", "_jugar_match_snapshots",
+    "_get_bot_func", "_es_bot", "_nombre_bot",
+    "_es_checkpoint_rllib", "_jugar_partida_motor",
+    "_cargar_participante_rllib", "_cargar_snap_como_politica",
+    "_jugar_match_snapshots",
     "torneo_elo",
 ]
 # ------------------------------------------------------------------
@@ -226,19 +229,35 @@ class _Modelo190Wrapper:
         return self._model.load(*args, **kwargs)
 
 
+def _es_checkpoint_rllib(ruta: str) -> bool:
+    """Detecta si una ruta es un checkpoint RLlib (directorio) vs SB3 (.zip)."""
+    if ruta.startswith(BOT_PREFIX):
+        return False
+    if ruta.endswith(".zip"):
+        return False
+    return os.path.isdir(ruta) and any(
+        os.path.exists(os.path.join(ruta, f))
+        for f in ("rllib_checkpoint", "algorithm_state.pkl")
+    )
+
+
 def _extraer_paso_snapshot(ruta: str) -> int:
     """Extrae el número de paso de una ruta de snapshot.
 
     Args:
-        ruta: Ruta como 'snapshot_0005000000.zip' o path completo.
+        ruta: Ruta como 'snapshot_0005000000.zip' / directorio / o ID de bot.
 
     Returns:
         Número de paso (int). Retorna 0 para entradas de bot.
     """
     if ruta.startswith(BOT_PREFIX):
         return 0  # Bots no tienen paso
-    nombre = os.path.basename(ruta).replace(".zip", "")
-    return int(nombre.replace("snapshot_", ""))
+    nombre = os.path.basename(ruta.rstrip("/\\"))
+    nombre = nombre.replace(".zip", "")
+    try:
+        return int(nombre.replace("snapshot_", ""))
+    except ValueError:
+        return 0
 
 
 def _listar_snapshots_torneo(
@@ -250,18 +269,8 @@ def _listar_snapshots_torneo(
 ) -> List[Tuple[str, str]]:
     """Lista snapshots disponibles para torneo, ordenados por paso.
 
-    Con múltiples directorios, aplica muestreo estratificado:
-    cada directorio aporta ~max_snapshots/N snapshots, priorizando
-    los más recientes de cada uno. Así v5 y v6 compiten en igualdad.
-
-    Si incluir_bots=True, agrega bots heurísticos como participantes
-    virtuales (sin paso, colocados al inicio).
-
-    Args:
-        directorios: Lista de directorios de snapshots (default: [v5]).
-        min_paso: Paso mínimo para incluir.
-        max_snapshots: Máximo total de snapshots (modelos + bots).
-        incluir_bots: Si True, agrega los 3 bots heurísticos al torneo.
+    Soporta tanto snapshots SB3 (.zip) como checkpoints RLlib (directorios).
+    Con múltiples directorios, aplica muestreo estratificado.
 
     Returns:
         Lista de tuplas (ruta_absoluta, label_directorio).
@@ -270,13 +279,20 @@ def _listar_snapshots_torneo(
     if directorios is None:
         directorios = [_MODELOS_V5_DIR]
 
-    # Recolectar snaps por directorio
+    # Recolectar snaps por directorio (SB3 .zip + RLlib dirs)
     snaps_por_dir: Dict[str, List[str]] = {}
     for d in directorios:
         if not os.path.isdir(d):
             continue
         label = os.path.basename(d.rstrip("/\\"))
+        # SB3 snapshots (.zip)
         snaps = glob.glob(os.path.join(d, "snapshot_*.zip"))
+        # RLlib checkpoint directories
+        for entry in os.listdir(d):
+            if entry.startswith("snapshot_"):
+                full = os.path.join(d, entry)
+                if _es_checkpoint_rllib(full):
+                    snaps.append(full)
         snaps = [s for s in snaps if _extraer_paso_snapshot(s) >= min_paso]
         snaps.sort(key=_extraer_paso_snapshot)
         if snaps:
@@ -385,6 +401,59 @@ def _simular_resultado_torneo(
 
 
 # ------------------------------------------------------------------
+# Helpers para evaluación con motor directo (RLlib + bots)
+# ------------------------------------------------------------------
+
+def _jugar_partida_motor(
+    politicas: Dict[int, Any],
+    seed: int = 0,
+) -> List[int]:
+    """Juega una partida completa usando el motor directamente.
+
+    Args:
+        politicas: {player_idx: callable(motor, idx, legales) -> Carta}
+        seed: Semilla para el reparto.
+
+    Returns:
+        Lista de puntuaciones finales [p0, p1, p2, p3].
+    """
+    import random as _pyrandom
+    from src.dominio.motor import MotorCorazones
+    _pyrandom.seed(seed)
+
+    motor = MotorCorazones()
+    motor.repartir()
+
+    while motor._mano_activa and motor.numero_baza <= 13:
+        idx = motor.obtener_jugador_actual()
+        legales = motor.obtener_jugadas_legales(idx)
+        carta = politicas[idx](motor, idx, legales)
+        motor.jugar_carta(idx, carta)
+        if len(motor.mesa) == 4:
+            motor.resolver_baza()
+
+    return motor.aplicar_puntuacion()
+
+
+def _cargar_participante_rllib(checkpoint_path: str, obs_dim: int = DIM_ENTORNO) -> Any:
+    """Carga una política RLlib y la envuelve como callable (motor, idx, legales) -> Carta.
+
+    Requiere Ray inicializado o lo inicia localmente.
+    """
+    try:
+        import ray
+        if not ray.is_initialized():
+            ray.init(ignore_reinit_error=True, num_cpus=1, local_mode=False)
+    except ImportError:
+        raise ImportError("Ray no está instalado. Instálalo con: pip install ray[rllib]")
+
+    from src.rllib.utils import cargar_policy_desde_checkpoint
+    from src.rllib.opponent_pool import SnapshotPolicy
+    policy = cargar_policy_desde_checkpoint(checkpoint_path)
+    return SnapshotPolicy(policy, obs_dim=obs_dim)
+
+
+# ------------------------------------------------------------------
 # Match entre dos snapshots
 # ------------------------------------------------------------------
 
@@ -420,6 +489,26 @@ def _nombre_bot(ruta: str) -> str:
     return ruta.replace(BOT_PREFIX, "")
 
 
+def _cargar_snap_como_politica(ruta: str, obs_dim: int = DIM_ENTORNO) -> Any:
+    """Carga un snapshot SB3 o RLlib como callable (motor, idx, legales) → Carta.
+
+    Detecta automáticamente el tipo por extensión/estructura.
+    """
+    if _es_checkpoint_rllib(ruta):
+        return _cargar_participante_rllib(ruta, obs_dim=obs_dim)
+
+    # SB3 legacy (.zip)
+    from sb3_contrib import MaskablePPO
+    from src.torneo.evaluacion import _detectar_vecnorm, _PoliticaSnapshot
+    ruta_clean = ruta[:-4] if ruta.endswith(".zip") else ruta
+    modelo_raw = MaskablePPO.load(ruta_clean, device="cpu")
+    modelo = (_Modelo190Wrapper(modelo_raw)
+              if modelo_raw.observation_space.shape[0] == 190
+              else modelo_raw)
+    vecnorm = _detectar_vecnorm(ruta)
+    return _PoliticaSnapshot(modelo, vecnorm)
+
+
 def _jugar_match_snapshots(
     ruta_a: str,
     ruta_b: str,
@@ -429,179 +518,59 @@ def _jugar_match_snapshots(
     elo_puro: bool = False,
     adyacentes_b: Optional[List[str]] = None,
 ) -> Tuple[int, int]:
-    """Enfrenta dos participantes A vs B (modelos o bots).
+    """Enfrenta dos participantes A vs B (modelos SB3, RLlib, o bots).
 
-    Modos:
-        - Normal: A (seat 0) vs B (seat 1) + 2 bots (seats 2, 3).
-        - Elo puro: A (seat 0) vs B (seat 1) + 2 snapshots adyacentes a B.
-          Esto elimina el ruido de bots y hace la comparación más precisa.
-
-    Args:
-        ruta_a: Ruta al snapshot A (.zip) o ID de bot (__BOT__nombre).
-        ruta_b: Ruta al snapshot B (.zip) o ID de bot (__BOT__nombre).
-        num_partidas: Número de partidas.
-        vecnorm_a: VecNormalize para A (auto-detecta si None). Ignorado si A es bot.
-        vecnorm_b: VecNormalize para B (auto-detecta si None). Ignorado si B es bot.
-        elo_puro: Si True, usar snapshots adyacentes en vez de bots.
-        adyacentes_b: Lista de rutas de snapshots adyacentes a B (2 elementos).
-                      Ignorado si B es bot.
+    Usa motor directo para RLlib; gym.Env solo para SB3 legacy puro.
+    Detecta el tipo de checkpoint automáticamente por extensión.
 
     Returns:
         Tuple (victorias_a, victorias_b).
     """
-    from sb3_contrib import MaskablePPO
-    from src.entorno.single_agent import CorazonesEnv
     from src.agentes.heuristicos import bot_conservador, bot_agresivo, bot_evasivo
-    from src.torneo.evaluacion import (
-        normalizar_obs_si_hay_stats, _detectar_vecnorm, _PoliticaSnapshot,
-    )
 
     es_bot_a = _es_bot(ruta_a)
     es_bot_b = _es_bot(ruta_b)
 
-    # --- Cargar participante A ---
-    if es_bot_a:
-        modelo_a = None
-        vecnorm_a = None
-        bot_a_func = _get_bot_func(_nombre_bot(ruta_a))
-    else:
-        ruta_a_clean = ruta_a[:-4] if ruta_a.endswith(".zip") else ruta_a
-        modelo_a_raw = MaskablePPO.load(ruta_a_clean, device="cpu")
-        modelo_a = (_Modelo190Wrapper(modelo_a_raw)
-                    if modelo_a_raw.observation_space.shape[0] == 190
-                    else modelo_a_raw)
-        if vecnorm_a is None:
-            vecnorm_a = _detectar_vecnorm(ruta_a)
+    # --- Cargar participantes como callables (motor, idx, legales) → Carta ---
+    snap_a = _get_bot_func(_nombre_bot(ruta_a)) if es_bot_a else _cargar_snap_como_politica(ruta_a)
+    snap_b = _get_bot_func(_nombre_bot(ruta_b)) if es_bot_b else _cargar_snap_como_politica(ruta_b)
 
-    # --- Cargar participante B ---
-    if es_bot_b:
-        snap_b = _get_bot_func(_nombre_bot(ruta_b))
-    else:
-        ruta_b_clean = ruta_b[:-4] if ruta_b.endswith(".zip") else ruta_b
-        modelo_b_raw = MaskablePPO.load(ruta_b_clean, device="cpu")
-        modelo_b = (_Modelo190Wrapper(modelo_b_raw)
-                    if modelo_b_raw.observation_space.shape[0] == 190
-                    else modelo_b_raw)
-        if vecnorm_b is None:
-            vecnorm_b = _detectar_vecnorm(ruta_b)
-        snap_b = _PoliticaSnapshot(modelo_b, vecnorm_b)
-
-    # --- Preparar oponentes para seats 2 y 3 ---
+    # --- Preparar seats 2 y 3 ---
     todos_bots = [bot_conservador, bot_agresivo, bot_evasivo]
 
     if elo_puro and not es_bot_b and adyacentes_b:
-        # Modo puro con snapshots adyacentes (solo si B es modelo)
         seats_extra: List[Any] = []
         for adj_path in adyacentes_b[:2]:
             if _es_bot(adj_path):
                 seats_extra.append(_get_bot_func(_nombre_bot(adj_path)))
-                continue
-            try:
-                adj_model_raw = MaskablePPO.load(adj_path, device="cpu")
-                adj_model = (_Modelo190Wrapper(adj_model_raw)
-                             if adj_model_raw.observation_space.shape[0] == 190
-                             else adj_model_raw)
-                adj_vecnorm = _detectar_vecnorm(adj_path) or vecnorm_b
-                seats_extra.append(_PoliticaSnapshot(adj_model, adj_vecnorm))
-            except Exception:
-                pass
-        # Completar con bots si faltan, evitando duplicar bots participantes
+            else:
+                try:
+                    seats_extra.append(_cargar_snap_como_politica(adj_path))
+                except Exception:
+                    pass
         while len(seats_extra) < 2:
-            cand = todos_bots[len(seats_extra) % 3]
-            if es_bot_a and cand is bot_a_func:
-                cand = todos_bots[(len(seats_extra) + 1) % 3]
-            if es_bot_b and cand is snap_b:
-                cand = todos_bots[(len(seats_extra) + 2) % 3]
-            seats_extra.append(cand)
+            seats_extra.append(todos_bots[len(seats_extra) % 3])
     else:
-        # Modo normal: bots para seats 2 y 3
-        # Evitar que el mismo bot esté en seat 1 y seat 2/3
-        idx_offset = 0
-        seats_extra = []
-        for i in range(2):
-            while True:
-                cand = todos_bots[(i + idx_offset) % 3]
-                if (es_bot_a and cand is bot_a_func) or (es_bot_b and cand is snap_b):
-                    idx_offset += 1
-                else:
-                    break
-            seats_extra.append(cand)
-            idx_offset += 1
+        seats_extra = [todos_bots[0], todos_bots[1]]
 
-    # --- Detectar obs_dim de los modelos para crear el entorno correcto ---
-    obs_dim: int = DIM_ENTORNO  # fallback
-    if not es_bot_a:
-        try:
-            obs_dim = modelo_a.observation_space.shape[0]
-        except Exception:
-            pass
-    elif not es_bot_b:
-        try:
-            obs_dim = modelo_b.observation_space.shape[0]
-        except Exception:
-            pass
-
-    # --- Jugar partidas ---
+    # --- Jugar partidas usando motor directo ---
     wins_a = 0
     wins_b = 0
 
     for seed in range(num_partidas):
-        # Rotar seats extra para variabilidad
         if not elo_puro:
             r_idx = seed % 3
             seats_extra = [todos_bots[r_idx], todos_bots[(r_idx + 1) % 3]]
-            # Evitar duplicados con participantes
-            if es_bot_a and seats_extra[0] is bot_a_func:
-                seats_extra[0] = todos_bots[(r_idx + 2) % 3]
-            if es_bot_b and seats_extra[0] is snap_b:
-                seats_extra[0] = todos_bots[(r_idx + 2) % 3]
-            if es_bot_a and seats_extra[1] is bot_a_func:
-                seats_extra[1] = todos_bots[(r_idx + 2) % 3]
-            if es_bot_b and seats_extra[1] is snap_b:
-                seats_extra[1] = todos_bots[(r_idx + 2) % 3]
-            # Si ambos seats 2 y 3 serían el mismo, rotar
             if seats_extra[0] is seats_extra[1]:
                 seats_extra[1] = todos_bots[(r_idx + 2) % 3]
 
-        politicas = {
-            1: snap_b,
-            2: seats_extra[0],
-            3: seats_extra[1],
-        }
+        politicas = {0: snap_a, 1: snap_b, 2: seats_extra[0], 3: seats_extra[1]}
+        puntuaciones = _jugar_partida_motor(politicas, seed=seed)
 
-        env = CorazonesEnv(
-            agente_idx=0, politicas_oponentes=politicas, obs_dim=obs_dim)
-        obs_raw, _ = env.reset(seed=seed)
-        obs = normalizar_obs_si_hay_stats(
-            obs_raw, vecnorm_a) if not es_bot_a else obs_raw
-        done = False
-
-        while not done:
-            if es_bot_a:
-                # Bot A: usar la función de bot directamente
-                legales = env.motor.obtener_jugadas_legales(0)
-                carta = bot_a_func(env.motor, 0, legales)
-                action = carta.id
-            else:
-                mask = env.action_masks()
-                action, _ = modelo_a.predict(
-                    obs, action_masks=mask, deterministic=True)
-                action = int(action)
-
-            obs_raw, _reward, terminated, truncated, _ = env.step(action)
-            obs = normalizar_obs_si_hay_stats(
-                obs_raw, vecnorm_a) if not es_bot_a else obs_raw
-            done = terminated or truncated
-
-        score_a = env._puntuacion_historica[0]
-        score_b = env._puntuacion_historica[1]
-
-        if score_a < score_b:
+        if puntuaciones[0] < puntuaciones[1]:
             wins_a += 1
-        elif score_b < score_a:
+        elif puntuaciones[1] < puntuaciones[0]:
             wins_b += 1
-
-        env.close()
 
     return wins_a, wins_b
 

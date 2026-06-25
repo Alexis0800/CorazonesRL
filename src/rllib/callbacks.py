@@ -62,7 +62,8 @@ class HeartsCallbacks(DefaultCallbacks):
         ).get("learner_stats", {}).get("entropy", float("nan"))
 
         # Escribir métricas en eval_log.jsonl
-        log_dir = getattr(algorithm, "_logdir", None) or "logs"
+        # _log_dir se inyecta desde train_rllib.py antes de build_algo()
+        log_dir = getattr(self.__class__, "_log_dir", None) or "logs"
         os.makedirs(log_dir, exist_ok=True)
         log_path = os.path.join(log_dir, "eval_log.jsonl")
 
