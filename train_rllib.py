@@ -144,8 +144,10 @@ def main() -> None:
         obs_dim=args.obs_dim,
     )
 
+    # opponent_factory=None en el config para que sea serializable en checkpoints.
+    # La factory real se inyecta en los envs vía foreach_env justo después de build.
     config = build_ppo_config(
-        opponent_factory=pool.make_factory(progress=0.0),
+        opponent_factory=None,
         obs_dim=args.obs_dim,
         lr=args.lr,
         train_batch_size=args.batch_size,
@@ -155,6 +157,13 @@ def main() -> None:
     config = config.callbacks(HeartsCallbacks)
 
     algo = config.build_algo()
+
+    # Inyectar fase inicial en todos los envs ahora que ya están creados
+    factory_inicial = pool.make_factory(progress=0.0)
+    algo.env_runner_group.foreach_env(
+        lambda env: setattr(env, "_opponent_factory", factory_inicial)
+    )
+
     console.print("[bold green]Algoritmo construido. Iniciando entrenamiento...[/bold green]\n")
 
     progress_bar = Progress(

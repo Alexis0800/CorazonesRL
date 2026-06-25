@@ -287,12 +287,14 @@ def _listar_snapshots_torneo(
         label = os.path.basename(d.rstrip("/\\"))
         # SB3 snapshots (.zip)
         snaps = glob.glob(os.path.join(d, "snapshot_*.zip"))
-        # RLlib checkpoint directories
+        # RLlib checkpoint directories (solo válidos con policy_state.pkl)
         for entry in os.listdir(d):
             if entry.startswith("snapshot_"):
                 full = os.path.join(d, entry)
                 if _es_checkpoint_rllib(full):
-                    snaps.append(full)
+                    from src.rllib.utils import es_checkpoint_valido
+                    if es_checkpoint_valido(full):
+                        snaps.append(full)
         snaps = [s for s in snaps if _extraer_paso_snapshot(s) >= min_paso]
         snaps.sort(key=_extraer_paso_snapshot)
         if snaps:
@@ -436,21 +438,13 @@ def _jugar_partida_motor(
 
 
 def _cargar_participante_rllib(checkpoint_path: str, obs_dim: int = DIM_ENTORNO) -> Any:
-    """Carga una política RLlib y la envuelve como callable (motor, idx, legales) -> Carta.
+    """Carga una política RLlib desde policy_state.pkl y devuelve un SnapshotPolicy callable.
 
-    Requiere Ray inicializado o lo inicia localmente.
+    No requiere Ray (lee pesos directamente del fichero pickle).
     """
-    try:
-        import ray
-        if not ray.is_initialized():
-            ray.init(ignore_reinit_error=True, num_cpus=1, local_mode=False)
-    except ImportError:
-        raise ImportError("Ray no está instalado. Instálalo con: pip install ray[rllib]")
-
     from src.rllib.utils import cargar_policy_desde_checkpoint
-    from src.rllib.opponent_pool import SnapshotPolicy
-    policy = cargar_policy_desde_checkpoint(checkpoint_path)
-    return SnapshotPolicy(policy, obs_dim=obs_dim)
+    # cargar_policy_desde_checkpoint ya devuelve un SnapshotPolicy directamente
+    return cargar_policy_desde_checkpoint(checkpoint_path)
 
 
 # ------------------------------------------------------------------

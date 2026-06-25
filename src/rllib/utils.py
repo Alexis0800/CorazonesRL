@@ -53,19 +53,61 @@ def listar_snapshots(snapshot_dir: str) -> List[Tuple[int, str]]:
     return result
 
 
+def es_checkpoint_valido(checkpoint_path: str, policy_id: str = "default_policy") -> bool:
+    """Devuelve True si el checkpoint tiene policy_state.pkl legible."""
+    abs_path = os.path.abspath(checkpoint_path)
+    policy_pkl = os.path.join(abs_path, "policies", policy_id, "policy_state.pkl")
+    if not os.path.isfile(policy_pkl) or os.path.getsize(policy_pkl) == 0:
+        return False
+    try:
+        import pickle
+        with open(policy_pkl, "rb") as f:
+            pickle.load(f)
+        return True
+    except Exception:
+        return False
+
+
 def cargar_policy_desde_checkpoint(checkpoint_path: str, policy_id: str = "default_policy"):
-    """Carga una política RLlib desde un checkpoint.
+    """Carga pesos de política desde un checkpoint y devuelve un SnapshotPolicy.
+
+    Lee directamente policy_state.pkl (sin recrear el algo ni Ray workers),
+    así que es rápido y no requiere que Ray esté inicializado.
 
     Args:
-        checkpoint_path: Ruta al directorio del checkpoint.
+        checkpoint_path: Ruta al directorio del checkpoint (absoluta o relativa).
         policy_id:       ID de la política a cargar.
 
     Returns:
-        Objeto Policy de RLlib listo para compute_single_action().
+        SnapshotPolicy listo para usar como callable (motor, idx, legales) -> Carta.
+
+    Raises:
+        FileNotFoundError: si el checkpoint no tiene policy_state.pkl válido.
     """
-    from ray.rllib.algorithms.algorithm import Algorithm
-    algo = Algorithm.from_checkpoint(checkpoint_path)
-    return algo.get_policy(policy_id)
+    import pickle
+    from src.rllib.opponent_pool import SnapshotPolicy
+    from src.entorno.dimensiones import DIM_ENTORNO
+
+    abs_path = os.path.abspath(checkpoint_path)
+    policy_pkl = os.path.join(abs_path, "policies", policy_id, "policy_state.pkl")
+
+    if not os.path.isfile(policy_pkl):
+        raise FileNotFoundError(
+            f"Checkpoint sin policy_state.pkl (puede estar corrupto): {checkpoint_path}"
+        )
+
+    with open(policy_pkl, "rb") as f:
+        state = pickle.load(f)
+
+    weights: dict = state["weights"]
+
+    # Detectar obs_dim a partir de la forma del primer layer del encoder
+    try:
+        obs_dim = weights["_encoder.0.weight"].shape[1]
+    except Exception:
+        obs_dim = DIM_ENTORNO
+
+    return SnapshotPolicy.from_weights(weights, obs_dim=obs_dim)
 
 
 def podar_snapshots(
