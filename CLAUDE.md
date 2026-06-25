@@ -40,6 +40,19 @@ python train.py --resume models/v7_golden/snapshots/snapshot_0014900000 --total-
 python train.py --total-steps 20000000 --device dml --output-dir models/v9
 ```
 
+### Behavioral Cloning (BC) Pretraining
+
+```bash
+# Generate PIMC dataset (oracle-quality (obs, action) pairs)
+python scripts/generar_dataset_bc.py --partidas 5000 --output datasets/mcts_50k.npz
+
+# Supervised pretraining on the dataset (warm-start for RL)
+python train_bc.py --dataset datasets/mcts_50k.npz --output models/bc_pretrain --epochs 30 --lr 1e-3 --batch 512 --obs-dim 220
+
+# Resume RL fine-tuning from the BC checkpoint
+python train.py --resume models/bc_pretrain --total-steps 20000000 --output-dir models/v9
+```
+
 ### Evaluation & Play
 
 ```bash
@@ -70,11 +83,14 @@ python scripts/jugar.py --modelo models/v8/elite/snapshot_0015000000.zip
 - `multi_agent.py`: `CorazonesAEC` — PettingZoo AEC environment for multi-agent experiments.
 - `observacion.py`: `ObservacionBuilder` — SSOT for the **220-dim** observation vector (standard). Supports 190/194/220 via constructor parameter. Call `construir()` for full observation; `construir_desde_motor()` for minimal (used by opponent snapshots in self-play).
 - `recompensas.py`: `RewardConfig` (frozen dataclass, **v12 SSOT**) and `CalculadoraRecompensas` — ALL reward logic centralized here (SRP). `CorazonesEnv` delegates every reward calculation to this module.
+- `recompensas_minimal.py`: `RewardConfigMinimal` and `CalculadoraRecompensasMinimal` — alternative v13_minimal reward system with only 3 signals (captured points, distance reward, shooting moon). Kept separate from `recompensas.py` for A/B experimentation without cross-contamination.
 - `dimensiones.py`: SSOT for observation dimensions (`DIM_V5=190`, `DIM_V6=194`, `DIM_V10=220`, `DIM_ENTORNO=220`, `DIM_ENTRENAMIENTO=220`, `DIMS_VALIDAS`). All modules import from here — no hardcoded `194` or `220` anywhere.
 
 **`src/agentes/`** — Agent strategies (Strategy pattern: `(motor, idx, legales) → Carta`).
 
-- `heuristicos.py`: Three bots — `bot_conservador` (play lowest), `bot_agresivo` (play highest), `bot_evasivo`.
+- `heuristicos.py`: Three stateless bots — `bot_conservador` (play lowest), `bot_agresivo` (play highest), `bot_evasivo`.
+- `bot_experto.py`: `BotExperto` — stronger heuristic that uses void-tracking and suit-lead logic.
+- `bot_castigador.py`: `BotCastigador` — stateful per-hand bot that aggressively leads/follows ♠ to punish the Q♠ holder. Resets automatically at each new hand.
 - `politica_rl.py`: `PoliticaSB3` — adapts a `MaskablePPO` model to the policy callable signature.
 
 **`src/red.py`** — `CorazonesFeatureExtractor`: MLP `input → 256 → 256 → 128` (ReLU), compatible with `MaskablePPO`. `obtener_policy_kwargs()` returns `policy_kwargs` for SB3.
@@ -90,9 +106,27 @@ python scripts/jugar.py --modelo models/v8/elite/snapshot_0015000000.zip
 - `config.py`: SSOT for all paths and hyperparameters (`Hiperparametros` dataclass, `HP_DEFAULT`). Key v12 defaults: `vf_coef=0.25`, `max_grad_norm=0.3`, `dim_observacion=220`. Also provides `directorio_*_version(version)` path helpers.
 - `self_play.py`: `crear_entorno_self_play()` — builds a `CorazonesEnv` with mixed opponents (bots + historical snapshots loaded from `models/{version}/snapshots/`).
 
+**`src/mcts/`** — PIMC (Perfect Information Monte Carlo) oracle and dataset tools.
+
+- `pimc.py`: `pimc_mejor_jugada()` — main oracle entry point. For each legal card, simulates `num_mundos` random completions of the hand using `bot_evasivo` as rollout policy, returns the card minimizing expected score.
+- `pimc_recursivo.py`: Recursive determinization variant.
+- `dataset.py`: Generates `(obs, action)` pairs by running PIMC on game states — the source data for BC pretraining.
+- `analisis.py`: Post-hoc analysis of PIMC decisions.
+
+**`src/cli/`** — Actual implementations for interactive play and evaluation. `scripts/jugar.py` and `scripts/evaluar.py` are thin entry-point wrappers around these.
+
+- `jugar.py`: Full human-vs-model interactive loop with card visualization and legal-move prompting.
+- `evaluar.py`: Win-rate evaluation runner.
+
 **`train.py`** — Main autonomous training pipeline. Manages the full loop: snapshot saving, VecNormalize, cosine decay of `prob_bot` (50%→20%), LR schedule (3 phases), async Elo tournaments, elite snapshot pruning.
 
+**`train_bc.py`** — Supervised BC pretraining: trains an actor head with CrossEntropyLoss on PIMC datasets. The output `.zip` can be loaded by `MaskablePPO.load()` as a warm-start for RL.
+
 **`train_self_play.py`** — Legacy constants and helpers still imported by `train.py`.
+
+**`scripts/`** — Analysis, diagnostic, and dataset-generation tools. Prefixed with `_` if not intended as direct entry points. Key scripts: `generar_dataset_bc.py`, `entrenar_bc.py`, `analizar_errores_bot.py`, `diagnosticar_modelo.py`.
+
+**Legacy versioned modules** (`src/v2_1/`, `src/v2_ronda/`, `src/v3/`, `src/v3_1/`, `src/v4/`, `src/v5/`) — Superseded experiment branches kept for reference. Each contains its own `entorno.py`, `train.py`, `recompensas.py`, and sometimes `elo.py`. Do not modify; the canonical system is `src/entorno/` + `train.py`.
 
 ### Observation Vector (220 dims, v12 standard)
 
