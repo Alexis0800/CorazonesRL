@@ -56,7 +56,8 @@ class HeartsCallbacks(DefaultCallbacks):
             return
 
         timesteps = result.get("timesteps_total", 0)
-        mean_reward = result.get("episode_reward_mean", float("nan"))
+        # En Ray 2.55.1 old API, las métricas de episodio están bajo "env_runners"
+        mean_reward = result.get("env_runners", {}).get("episode_reward_mean", float("nan"))
         entropy = result.get("info", {}).get("learner", {}).get(
             "default_policy", {}
         ).get("learner_stats", {}).get("entropy", float("nan"))

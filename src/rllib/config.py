@@ -38,7 +38,7 @@ def build_ppo_config(
     # entropy_coeff alto = más exploración. Con recompensas terminales y self-play
     # es importante mantenerlo por encima de 0.01 para que el modelo nunca converja
     # prematuramente a una estrategia local.
-    entropy_coeff: float = 0.015,
+    entropy_coeff: float = 0.03,
     vf_coef: float = 0.25,
     grad_clip: float = 0.5,
     train_batch_size: int = 4096,

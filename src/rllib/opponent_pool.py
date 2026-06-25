@@ -2,8 +2,9 @@
 Pool de oponentes para self-play en Hearts.
 
 Gestiona la selección de oponentes según la fase de entrenamiento:
-  Fase 0  (0–15%):  3 bots heurísticos (bootstrap — aprende reglas básicas)
-  Fase 1 (15–100%): 1 bot simple + 2 snapshots (nunca self-play puro)
+  Fase 0  (0–5%):   3 bots heurísticos (bootstrap — aprende reglas básicas)
+  Fase 1  (5–20%):  2 bots + 1 snapshot (transición gradual)
+  Fase 2 (20–100%): 1 bot + 2 snapshots (self-play con ancla permanente)
 
 La regla de oro: SIEMPRE al menos 1 bot heurístico en el pool para evitar
 estancamiento. El self-play puro tiende a ciclar en estrategias sin mejorar.
@@ -114,9 +115,11 @@ class SnapshotPolicy:
 class OpponentPool:
     """Pool de oponentes para self-play con bots y snapshots históricos.
 
-    Usa solo 2 fases:
-      - Bootstrap (0–15%): 3 bots simples para aprender las reglas básicas.
-      - Self-play (15–100%): SIEMPRE 1 bot + 2 snapshots. Nunca self-play puro.
+    Usa 3 fases:
+      - Fase 0 (0–5%):   3 bots simples para aprender las reglas básicas.
+      - Fase 1 (5–20%):  2 bots + 1 snapshot. Transición gradual que evita el
+                          shock de distribución y permite recuperar entropía.
+      - Fase 2 (20–100%): SIEMPRE 1 bot + 2 snapshots. Nunca self-play puro.
 
     La factory retornada acepta `agente_idx` como parámetro para soportar
     rotación multi-posición (el agente puede entrenar desde cualquier asiento).
@@ -164,28 +167,35 @@ class OpponentPool:
         bootstrap_phase = progress < 0.15
 
         def _factory(agente_idx: int = 0) -> Dict[int, PolicyFn]:
-            """Selecciona oponentes para los 3 slots no-agente.
+            """Selecciona oponentes para los 3 slots no-agente según fase.
 
-            Fase bootstrap (0–15%): 3 bots simples.
-            Fase self-play (15–100%): 1 bot fijo + 2 snapshots.
-              Si no hay snapshots aún, usa 3 bots.
+            Fase 0 (0–5%):   3 bots simples — aprender reglas básicas.
+            Fase 1 (5–20%):  2 bots + 1 snapshot — transición gradual;
+                              evita el shock de distribución y recupera entropía.
+            Fase 2 (20–100%): 1 bot + 2 snapshots — self-play puro con ancla.
+              Si no hay suficientes snapshots, rellena con bots.
             """
             opp_indices = [i for i in range(4) if i != agente_idx]
-            random.shuffle(opp_indices)  # posición del bot es aleatoria
+            random.shuffle(opp_indices)
 
             fns: Dict[int, PolicyFn] = {}
 
-            if bootstrap_phase or len(snapshots) < 2:
+            if progress < 0.05 or len(snapshots) == 0:
+                # Fase 0: todo bots
                 for idx in opp_indices:
                     fns[idx] = random.choice(_BOTS_SIMPLES)
-            else:
-                # Siempre 1 bot para mantener diversidad y evitar stagnation
+
+            elif progress < 0.20 or len(snapshots) < 2:
+                # Fase 1: 2 bots + 1 snapshot (transición)
                 fns[opp_indices[0]] = random.choice(_BOTS_SIMPLES)
-                # 2 snapshots de distintas partes del pool para diversidad
-                snap1 = random.choice(snapshots)
-                snap2 = random.choice(snapshots)
-                fns[opp_indices[1]] = snap1
-                fns[opp_indices[2]] = snap2
+                fns[opp_indices[1]] = random.choice(_BOTS_SIMPLES)
+                fns[opp_indices[2]] = random.choice(snapshots)
+
+            else:
+                # Fase 2: 1 bot + 2 snapshots (self-play con ancla permanente)
+                fns[opp_indices[0]] = random.choice(_BOTS_SIMPLES)
+                fns[opp_indices[1]] = random.choice(snapshots)
+                fns[opp_indices[2]] = random.choice(snapshots)
 
             return fns
 

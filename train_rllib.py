@@ -41,6 +41,7 @@ from rich.table import Table
 from src.entorno.dimensiones import DIM_ENTORNO
 from src.rllib.callbacks import HeartsCallbacks
 from src.rllib.config import build_ppo_config
+from src.rllib.eval_bots import evaluar_vs_bots
 from src.rllib.opponent_pool import OpponentPool
 from src.rllib.utils import guardar_snapshot, podar_snapshots
 
@@ -49,9 +50,13 @@ console = Console()
 # Refrescar la factory cada N pasos para incorporar nuevos snapshots al pool
 FACTORY_REFRESH_STEPS = 500_000
 
+# Evaluar contra bots fijos cada N snapshots (métrica absoluta independiente del pool)
+EVAL_BOT_INTERVAL = 5   # cada 5 snapshots ≈ cada 500K pasos
+
 _FASES = {
-    0: ("Bootstrap (bots)",         "cyan"),
-    1: ("Self-play (1 bot + 2 snaps)", "green"),
+    0: ("Bootstrap (3 bots)",          "cyan"),
+    1: ("Transición (2 bots + 1 snap)", "yellow"),
+    2: ("Self-play (1 bot + 2 snaps)",  "green"),
 }
 
 
@@ -76,8 +81,17 @@ def parse_args() -> argparse.Namespace:
 
 
 def _fase(progress: float) -> int:
-    """Devuelve el índice de fase según el progreso de entrenamiento."""
-    return 0 if progress < 0.15 else 1
+    """Devuelve el índice de fase según el progreso de entrenamiento.
+
+    Fase 0 (0–5%):   Bootstrap con 3 bots — aprender reglas básicas.
+    Fase 1 (5–20%):  Transición con 2 bots + 1 snapshot.
+    Fase 2 (20–100%): Self-play con 1 bot + 2 snapshots.
+    """
+    if progress < 0.05:
+        return 0
+    elif progress < 0.20:
+        return 1
+    return 2
 
 
 def _build_panel(
@@ -126,6 +140,7 @@ def main() -> None:
     snapshot_dir = os.path.join(args.output_dir, "snapshots")
     log_dir = os.path.join(args.output_dir, "logs")
     log_path = os.path.join(log_dir, "eval_log.jsonl")
+    bot_eval_log_path = os.path.join(log_dir, "bot_eval_log.jsonl")
     os.makedirs(snapshot_dir, exist_ok=True)
     os.makedirs(log_dir, exist_ok=True)
 
@@ -193,6 +208,7 @@ def main() -> None:
     reward_max = float("nan")
     ep_len = float("nan")
     num_snapshots = 0
+    snapshots_desde_ultima_eval = 0
 
     try:
         with Live(console=console, refresh_per_second=4) as live:
@@ -232,6 +248,21 @@ def main() -> None:
                             "fase": fase_actual,
                             "snapshot": os.path.basename(ruta),
                         }) + "\n")
+
+                    # Evaluación periódica contra bots fijos (métrica absoluta)
+                    snapshots_desde_ultima_eval += 1
+                    if snapshots_desde_ultima_eval >= EVAL_BOT_INTERVAL:
+                        snapshots_desde_ultima_eval = 0
+                        try:
+                            policy = algo.get_policy()
+                            metricas_bot = evaluar_vs_bots(policy, obs_dim=args.obs_dim)
+                            metricas_bot["tipo"] = "bot_eval"
+                            metricas_bot["paso"] = pasos_totales
+                            metricas_bot["fase"] = fase_actual
+                            with open(bot_eval_log_path, "a", encoding="utf-8") as f:
+                                f.write(json.dumps(metricas_bot) + "\n")
+                        except Exception as exc:
+                            console.print(f"[yellow]bot_eval error: {exc}[/yellow]")
 
                 # Refrescar factory cuando cambia de fase O cada FACTORY_REFRESH_STEPS.
                 # Esto garantiza que los snapshots nuevos se incorporen al pool de rivales.
