@@ -38,9 +38,11 @@ src/v3_1/                # ← v4 delega TODA la lógica aquí
 ```
 
 > **Patrón de delegación:** `src/v4/entorno.py` son solo 10 líneas:
+>
 > ```python
 > from src.v3_1.entorno import CorazonesEnvV31 as CorazonesEnvV4
 > ```
+>
 > Esto permite que v4 herede toda la lógica de v3_1 sin duplicación. Si se modifica v3_1, v4 se actualiza automáticamente.
 
 ---
@@ -56,6 +58,7 @@ step() → reward inmediato (por baza) + reward táctico (Q♠ dump, moon block,
 ```
 
 El agente recibía señales como:
+
 - `-3` por cada corazón capturado en la baza
 - `-13` por capturar Q♠
 - `+12` por descartar Q♠ sobre un rival (v2.1)
@@ -64,6 +67,7 @@ El agente recibía señales como:
 - `-5` por retener A♠/K♠ con Q♠ activa (v2.1)
 
 **Problemas detectados:**
+
 1. **Crédito temporal difuso:** El agente no sabe si la recompensa de la baza 3 se debe a su acción en la baza 3 o a decisiones anteriores.
 2. **Señales contradictorias:** `+12` por Q♠ dump vs `-13` por capturar Q♠ crean objetivos confluyentes difíciles de balancear.
 3. **Escala de recompensas ruidosa:** Un agente que evita 3 corazones (-9) y bloquea 1 pozo (+15) puede terminar con +6 neto sin haber jugado bien realmente.
@@ -84,11 +88,13 @@ return obs, reward, True, False, info
 ```
 
 **La fórmula es simple:**
+
 - `reward = 26 - puntos_del_agente`
 - Rango: `[0, 26]` (0 = capturó todos los puntos, 26 = mano perfecta)
 - Si el agente hace *shooting the moon* (captura los 26 puntos): `reward = 26 - (-26) = 52`
 
 **Por qué funciona mejor:**
+
 1. **Objetivo cristalino:** El agente optimiza UNA sola métrica: minimizar puntos al final de la mano.
 2. **Sin conflación de señales:** No hay que balancear pesos entre señales tácticas.
 3. **RL más puro:** El algoritmo (PPO) aprende por sí mismo las estrategias intermedias (descartar Q♠, bloquear pozo) porque conducen al objetivo final.
@@ -99,6 +105,7 @@ return obs, reward, True, False, info
 La clase `CorazonesEnvV31` **SÍ calcula** internamente las señales tácticas de `CalculadoraRecompensasV21` (Q♠ dump, moon block, etc.) durante `_procesar_baza()` y `_finalizar_mano()`. Sin embargo, el método `step()` **ignora estos valores** y solo emite la recompensa terminal.
 
 Esto se diseñó así para:
+
 - Mantener compatibilidad con el código existente de v2_1/v3_1
 - Poder reactivar señales intermedias si se necesita (cambiando una línea en `step()`)
 - Facilitar experimentación A/B
@@ -226,6 +233,7 @@ v4 implementa **Fictitious Self-Play** con 3 fases progresivas:
 | **Fase 2** | 30% – 100% | `[Modelo, Modelo, Snapshot, Bot]` | Self-play: 2 copias del modelo + 1 snapshot + 1 bot |
 
 **Pool de snapshots:**
+
 - Se cargan del directorio `models/{version}/snapshots/`
 - Mínimo 100K pasos para entrar al pool
 - Máximo 50 snapshots en el pool (los más recientes)
@@ -336,6 +344,7 @@ v4 evalúa contra **dos configuraciones de dificultad**:
 | **FÁCIL** | `[Modelo, Experto, Bot, Bot]` | 50 |
 
 Métricas reporteadas:
+
 - **WR≤8**: Win rate (porcentaje de manos donde el modelo toma ≤8 puntos)
 - **Top1 rate**: Porcentaje de manos donde el modelo queda en 1ᵉʳ lugar
 - **Top2 rate**: Porcentaje donde queda en 1° o 2° lugar
