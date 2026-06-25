@@ -41,6 +41,8 @@ class MotorCorazones:
         """Baraja y reparte 13 cartas a cada jugador. Reinicia el estado de la mano."""
         self.baraja = Baraja()
         self.baraja.repartir(self.jugadores)
+        for jug in self.jugadores:
+            jug.bazas_ganadas = []
         self.corazones_rotos = False
         self.numero_baza = 1
         self.mesa = []

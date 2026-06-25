@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Summary
 
-Reinforcement learning agent for the card game Hearts (Corazones), using MaskablePPO from `sb3-contrib`. The agent trains via Fictitious Self-Play against a pool of its own historical snapshots and three heuristic bots, evaluated with a least-squares Elo system.
+Reinforcement learning agent for the card game Hearts (Corazones), migrating from MaskablePPO (SB3) to **Ray RLlib v2.55.1 + PPO** (old API stack, TorchModelV2). The agent trains via Fictitious Self-Play against a pool of its own historical snapshots and heuristic bots, evaluated with a least-squares Elo system.
+
+> **Branch `feature/refactorizacion`**: active RLlib migration. Legacy SB3 code has been removed. The new entry point is `train_rllib.py`.
 
 ## Commands
 
@@ -27,43 +29,23 @@ python -m pytest tests/dominio/test_modulo1.py -q
 python -m pytest tests/torneo/test_elo.py::TestEloConvergente::test_elo_inicial -q
 ```
 
-### Training
+### Training (RLlib — nuevo pipeline)
+
+**Requires Python 3.12** — Ray 2.55.1 has no wheels for Python 3.13.
 
 ```bash
-# Train from scratch
-python train.py --total-steps 20000000 --output-dir models/v9
+# Train from scratch (RLlib PPO)
+python train_rllib.py --total-steps 20000000 --output-dir models/v_rllib
 
-# Resume from a checkpoint
-python train.py --resume models/v7_golden/snapshots/snapshot_0014900000 --total-steps 25000000 --output-dir models/v7_cont
-
-# With Intel Arc GPU
-python train.py --total-steps 20000000 --device dml --output-dir models/v9
+# With more workers and GPU
+python train_rllib.py --total-steps 20000000 --workers 4 --gpus 1 --output-dir models/v_rllib
 ```
 
-### Behavioral Cloning (BC) Pretraining
-
-```bash
-# Generate PIMC dataset (oracle-quality (obs, action) pairs)
-python scripts/generar_dataset_bc.py --partidas 5000 --output datasets/mcts_50k.npz
-
-# Supervised pretraining on the dataset (warm-start for RL)
-python train_bc.py --dataset datasets/mcts_50k.npz --output models/bc_pretrain --epochs 30 --lr 1e-3 --batch 512 --obs-dim 220
-
-# Resume RL fine-tuning from the BC checkpoint
-python train.py --resume models/bc_pretrain --total-steps 20000000 --output-dir models/v9
-```
-
-### Evaluation & Play
+### Evaluation
 
 ```bash
 # Elo tournament between snapshots
 python -m src.torneo.elo --directorio models/v8/elite --partidas 50 --elo-puro --incluir-bots
-
-# Evaluate win rate against bots
-python scripts/evaluar.py --modelo models/v8/elite/snapshot_0015000000.zip
-
-# Play interactively against the model
-python scripts/jugar.py --modelo models/v8/elite/snapshot_0015000000.zip
 ```
 
 ## Architecture
@@ -77,58 +59,48 @@ python scripts/jugar.py --modelo models/v8/elite/snapshot_0015000000.zip
 - `jugador.py`: Player state (hand, `bazas_ganadas`, accumulated score).
 - `motor.py`: `MotorCorazones` — full game loop (tricks, scoring, `obtener_jugadas_legales()` with 4-filter cascade, shooting the moon, broken hearts, Q♠).
 
-**`src/entorno/`** — Gymnasium RL environment.
+**`src/entorno/`** — Gymnasium RL environments.
 
-- `single_agent.py`: `CorazonesEnv(gym.Env)` — the primary training environment. Wraps `MotorCorazones`, handles action masking, calls opponent policies. Uses `CalculadoraRecompensas` for all reward logic (delegated, not inline).
-- `multi_agent.py`: `CorazonesAEC` — PettingZoo AEC environment for multi-agent experiments.
-- `observacion.py`: `ObservacionBuilder` — SSOT for the **220-dim** observation vector (standard). Supports 190/194/220 via constructor parameter. Call `construir()` for full observation; `construir_desde_motor()` for minimal (used by opponent snapshots in self-play).
-- `recompensas.py`: `RewardConfig` (frozen dataclass, **v12 SSOT**) and `CalculadoraRecompensas` — ALL reward logic centralized here (SRP). `CorazonesEnv` delegates every reward calculation to this module.
-- `recompensas_minimal.py`: `RewardConfigMinimal` and `CalculadoraRecompensasMinimal` — alternative v13_minimal reward system with only 3 signals (captured points, distance reward, shooting moon). Kept separate from `recompensas.py` for A/B experimentation without cross-contamination.
-- `dimensiones.py`: SSOT for observation dimensions (`DIM_V5=190`, `DIM_V6=194`, `DIM_V10=220`, `DIM_ENTORNO=220`, `DIM_ENTRENAMIENTO=220`, `DIMS_VALIDAS`). All modules import from here — no hardcoded `194` or `220` anywhere.
+- `corazones_rllib.py`: `CorazonesEnvRLlib(gym.Env)` — **primary RLlib training env**. Observation space `Dict({"obs": Box(224,), "action_mask": Box(52,)})`. One episode = one mano (13 agent steps). Opponents managed inside the env via `opponent_factory`. Passes `gymnasium.check_env`.
+- `observacion.py`: `ObservacionBuilder` — SSOT for the **224-dim** observation vector (v11). Supports 190/194/220/224 via constructor parameter. Call `construir()` for full observation; `construir_desde_motor()` for minimal (used by opponent snapshots in self-play).
+- `recompensas.py`: `RewardConfig` (frozen dataclass, **v12 SSOT**) and `CalculadoraRecompensas` — ALL reward logic centralized here (SRP).
+- `recompensas_minimal.py`: `RewardConfigMinimal` — alternative minimal reward system (3 signals only) for A/B experimentation.
+- `dimensiones.py`: SSOT for observation dimensions (`DIM_V5=190`, `DIM_V6=194`, `DIM_V10=220`, `DIM_V11=224`, `DIM_ENTORNO=224`). Always import from here — never hardcode.
 
 **`src/agentes/`** — Agent strategies (Strategy pattern: `(motor, idx, legales) → Carta`).
 
-- `heuristicos.py`: Three stateless bots — `bot_conservador` (play lowest), `bot_agresivo` (play highest), `bot_evasivo`.
-- `bot_experto.py`: `BotExperto` — stronger heuristic that uses void-tracking and suit-lead logic.
-- `bot_castigador.py`: `BotCastigador` — stateful per-hand bot that aggressively leads/follows ♠ to punish the Q♠ holder. Resets automatically at each new hand.
-- `politica_rl.py`: `PoliticaSB3` — adapts a `MaskablePPO` model to the policy callable signature.
+- `heuristicos.py`: Three stateless bots — `bot_conservador`, `bot_agresivo`, `bot_evasivo`.
+- `bot_experto.py`: `BotExperto` — stronger heuristic using void-tracking and suit-lead logic.
+- `bot_castigador.py`: `BotCastigador` — stateful per-hand bot, resets automatically each mano.
 
-**`src/red.py`** — `CorazonesFeatureExtractor`: MLP `input → 256 → 256 → 128` (ReLU), compatible with `MaskablePPO`. `obtener_policy_kwargs()` returns `policy_kwargs` for SB3.
+**`src/rllib/`** — RLlib pipeline components (new).
+
+- `model.py`: `HeartsActionMaskModel(TorchModelV2)` — MLP `input → 512 → 512 → 256` with action masking via logit clamping. Registered as `"hearts_model"` in `ModelCatalog`.
+- `config.py`: `build_ppo_config()` — builds `PPOConfig` (old API stack). Key Ray 2.55.1 params: `minibatch_size` (was `sgd_minibatch_size`), `num_epochs` (was `num_sgd_iter`), `env_runners()` (was `rollouts()`), `preprocessor_pref=None` for Dict obs.
+- `opponent_pool.py`: `OpponentPool` — phase-based factory (0–5%: bots, 5–15%: expert, 15–40%: expert+snapshots, 40–70%: snapshots, 70–100%: pure snapshots). `SnapshotPolicy` wraps a Ray policy into the `(motor, idx, legales) → Carta` signature.
+- `callbacks.py`: `HeartsCallbacks(DefaultCallbacks)` — logs episode metrics to `eval_log.jsonl`.
+- `utils.py`: snapshot save/load/prune utilities.
 
 **`src/torneo/`** — Evaluation infrastructure.
 
-- `elo.py`: Least-squares Elo (no order bias). Runs round-robin tournaments; snapshots and bots both receive ratings. Invokable as `python -m src.torneo.elo`.
+- `elo.py`: Least-squares Elo (no order bias). Invokable as `python -m src.torneo.elo`.
 - `evaluacion.py`: Win-rate evaluation against the three heuristic bots.
-- `normalizacion.py`: VecNormalize loading/saving utilities.
+- `normalizacion.py`: VecNormalize utilities (legacy SB3, kept for golden baselines).
 
-**`src/entrenamiento/`** — Training plumbing.
+**`src/entrenamiento/`** — Legacy SB3 training config (kept for reference).
 
-- `config.py`: SSOT for all paths and hyperparameters (`Hiperparametros` dataclass, `HP_DEFAULT`). Key v12 defaults: `vf_coef=0.25`, `max_grad_norm=0.3`, `dim_observacion=220`. Also provides `directorio_*_version(version)` path helpers.
-- `self_play.py`: `crear_entorno_self_play()` — builds a `CorazonesEnv` with mixed opponents (bots + historical snapshots loaded from `models/{version}/snapshots/`).
+- `config.py`: `Hiperparametros` dataclass and path helpers.
 
 **`src/mcts/`** — PIMC (Perfect Information Monte Carlo) oracle and dataset tools.
 
-- `pimc.py`: `pimc_mejor_jugada()` — main oracle entry point. For each legal card, simulates `num_mundos` random completions of the hand using `bot_evasivo` as rollout policy, returns the card minimizing expected score.
-- `pimc_recursivo.py`: Recursive determinization variant.
-- `dataset.py`: Generates `(obs, action)` pairs by running PIMC on game states — the source data for BC pretraining.
-- `analisis.py`: Post-hoc analysis of PIMC decisions.
+- `pimc.py`: `pimc_mejor_jugada()` — for each legal card, simulates `num_mundos` random completions using `bot_evasivo`, returns the card minimizing expected score.
+- `dataset.py`: Generates `(obs, action)` pairs for BC pretraining.
 
-**`src/cli/`** — Actual implementations for interactive play and evaluation. `scripts/jugar.py` and `scripts/evaluar.py` are thin entry-point wrappers around these.
+**`train_rllib.py`** — Main RLlib training pipeline. Phase progression, snapshot management, self-play pool updates via `algo.env_runners`.
 
-- `jugar.py`: Full human-vs-model interactive loop with card visualization and legal-move prompting.
-- `evaluar.py`: Win-rate evaluation runner.
+**`train_self_play.py`** — Legacy constants kept for reference only (not used by RLlib pipeline).
 
-**`train.py`** — Main autonomous training pipeline. Manages the full loop: snapshot saving, VecNormalize, cosine decay of `prob_bot` (50%→20%), LR schedule (3 phases), async Elo tournaments, elite snapshot pruning.
-
-**`train_bc.py`** — Supervised BC pretraining: trains an actor head with CrossEntropyLoss on PIMC datasets. The output `.zip` can be loaded by `MaskablePPO.load()` as a warm-start for RL.
-
-**`train_self_play.py`** — Legacy constants and helpers still imported by `train.py`.
-
-**`scripts/`** — Analysis, diagnostic, and dataset-generation tools. Prefixed with `_` if not intended as direct entry points. Key scripts: `generar_dataset_bc.py`, `entrenar_bc.py`, `analizar_errores_bot.py`, `diagnosticar_modelo.py`.
-
-**Legacy versioned modules** (`src/v2_1/`, `src/v2_ronda/`, `src/v3/`, `src/v3_1/`, `src/v4/`, `src/v5/`) — Superseded experiment branches kept for reference. Each contains its own `entorno.py`, `train.py`, `recompensas.py`, and sometimes `elo.py`. Do not modify; the canonical system is `src/entorno/` + `train.py`.
-
-### Observation Vector (220 dims, v12 standard)
+### Observation Vector (224 dims, v11 standard = `DIM_ENTORNO`)
 
 | Range | Content |
 |-------|---------
@@ -154,6 +126,7 @@ python scripts/jugar.py --modelo models/v8/elite/snapshot_0015000000.zip
 | `[211:215]` | Hearts captured this hand / 13.0 |
 | `[215:219]` | Moon alert by player (≥6 hearts) |
 | `[219]` | Led suit (`palo_salida`): 0.0 if None, else suit/3.0 |
+| `[220:224]` | Who played in current trick (4 bits, relative positions) |
 
 All positions are **relative to the agent** (`(player_idx - agent_idx) % 4`).
 
@@ -172,9 +145,10 @@ Golden (frozen) baselines: `models/v5_golden/` (190-dim, ~1500 Elo) and `models/
 
 ### Key Design Constraints
 
-- **Single Source of Truth (SSOT)**: Reward values live ONLY in `RewardConfig` (recompensas.py). Observation dimensions live ONLY in `dimensiones.py`. No magic numbers `194` or `220` anywhere in the codebase — always import `DIM_ENTORNO` or `DIM_ENTRENAMIENTO`.
-- **VecNormalize coupling**: every `MaskablePPO` snapshot has a paired `_vecnorm.pkl`. Loading a model without its VecNormalize degrades play quality. The `_Modelo190Wrapper` in `elo.py` handles cross-gen compatibility for 190-dim vs 220-dim models.
-- **Action masking**: `CorazonesEnv` always provides an action mask via `action_masks()`. Use `MaskablePPO` (not `PPO`) and `MaskableEvalCallback`.
-- **Self-play pool**: snapshots older than `min_snapshot_steps` (500k) are excluded from the opponent pool. Pool is capped at `max_snapshots` (50) most-recent entries.
-- **Elo is the primary metric**; win rate against bots is a weaker signal because the bots are simple.
-- **Diagnostic alerts** are written to `eval_log.jsonl` with `"tipo": "alerta"` when metrics cross thresholds (entropy, KL, value_loss, explained_variance).
+- **SSOT**: Reward values → `RewardConfig` (recompensas.py). Observation dims → `dimensiones.py`. Never hardcode `220` or `224`.
+- **Action masking**: `CorazonesEnvRLlib` returns `{"obs": ..., "action_mask": ...}`. `HeartsActionMaskModel` clamps illegal actions to `-1e9`. `preprocessor_pref=None` is required in `env_runners()` to prevent RLlib from flattening the Dict obs.
+- **Ray 2.55.1 API changes** (vs older docs): `rollouts()` → `env_runners()`, `sgd_minibatch_size` → `minibatch_size`, `num_sgd_iter` → `num_epochs`, `.build()` → `.build_algo()`.
+- **Self-play pool**: phase-based opponent mixing in `OpponentPool`. Pool capped at 50 most-recent snapshots.
+- **`motor.repartir()` clears `bazas_ganadas`**: critical for determinism across episodes (bug fix applied to `src/dominio/motor.py`).
+- **Elo is the primary metric**; win rate against bots is a weaker signal.
+- **Diagnostic alerts** written to `eval_log.jsonl` with `"tipo": "alerta"` when metrics cross thresholds.
