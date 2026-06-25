@@ -3,17 +3,16 @@ Corazones — Reinforcement Learning agent for the card game Hearts.
 
 Arquitectura:
     dominio/   — Pure game rules (no RL dependencies)
-    entorno/   — Gymnasium/PettingZoo RL environments
-    agentes/   — Playing strategies (heuristic bots, RL policies)
+    entorno/   — Gymnasium RL environment (observation, rewards, dimensions)
+    agentes/   — Playing strategies (heuristic bots)
     torneo/    — Evaluation and Elo rating system
-    entrenamiento/ — Training pipeline (self-play, auto-training)
-    cli/       — Command-line interfaces (play, evaluate)
+    entrenamiento/ — Training configuration
+    mcts/      — PIMC oracle for dataset generation and analysis
 
 Uso:
     from src.dominio import Carta, MotorCorazones
-    from src.agentes import bot_conservador, PoliticaSB3
-    from src.entorno import CorazonesEnv
+    from src.agentes import bot_conservador, BotCastigador
+    from src.entorno import ObservacionBuilder, CalculadoraRecompensas
 """
-# Re-export para acceso rápido
 from src.dominio import Carta, Baraja, Jugador, MotorCorazones
 from src.agentes import bot_conservador, bot_agresivo, bot_evasivo, BotCastigador

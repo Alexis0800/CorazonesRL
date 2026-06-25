@@ -3,6 +3,7 @@ Tests TDD para dataset generator mejorado (v2): MCTS + soft labels + multi-agent
 """
 import numpy as np
 import pytest
+from src.entorno.dimensiones import DIM_ENTORNO
 
 
 class TestDatasetSoftLabels:
@@ -24,7 +25,7 @@ class TestDatasetSoftLabels:
         # Cada par es (obs, scores_array) donde scores_array es (52,) float32
         assert len(pares) > 0, "Debe generar al menos un par"
         obs, scores = pares[0]
-        assert obs.shape == (220,)
+        assert obs.shape == (DIM_ENTORNO,)
         assert scores.shape == (52,)
         assert scores.dtype == np.float32
 
@@ -55,7 +56,7 @@ class TestDatasetSoftLabels:
             4, f"Multi-agente debe generar ~52 pares, genero {len(pares)}"
         # Verificar formato
         for obs, scores in pares[:5]:
-            assert obs.shape == (220,)
+            assert obs.shape == (DIM_ENTORNO,)
             assert scores.shape == (52,)
             assert scores.dtype == np.float32
 
