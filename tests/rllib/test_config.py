@@ -29,8 +29,12 @@ class TestBuildPPOConfig:
 
     def test_config_lr_custom(self):
         from src.rllib.config import build_ppo_config
-        config = build_ppo_config(lr=1e-4)
+        # lr sigue siendo float; lr_schedule es la lista separada
+        config = build_ppo_config(lr=1e-4, lr_end=5e-5, total_steps=10_000_000)
         assert config.lr == 1e-4
+        assert isinstance(config.lr_schedule, list)
+        assert config.lr_schedule[0] == [0, 1e-4]
+        assert config.lr_schedule[-1][-1] == 5e-5
 
     def test_config_train_batch_size_custom(self):
         from src.rllib.config import build_ppo_config

@@ -6,11 +6,14 @@ Uso:
     python train_rllib.py --total-steps 20000000 --output-dir models/v_rllib --workers 4 --gpus 1
 
 Fases de self-play (automáticas según progreso de entrenamiento):
-    0–5%   → 3 bots heurísticos simples
-    5–15%  → 2 bots + BotExperto
-    15–40% → BotExperto + snapshots históricos
-    40–70% → mayoría snapshots + BotExperto
-    70–100% → snapshots puros
+    0–15%   → Bootstrap: 3 bots heurísticos (aprender las reglas básicas)
+    15–100% → Self-play: 1 bot simple + 2 snapshots históricos
+
+Principios de diseño:
+  - Recompensa terminal-only: reward = 26 - puntos solo al final de cada mano.
+  - Rotación multi-posición: el agente entrena desde las 4 posiciones aleatoriamente.
+  - Sin self-play puro: siempre 1 bot en el pool para evitar ciclos y stagnation.
+  - La factory se refresca cada FACTORY_REFRESH_STEPS para incorporar snapshots nuevos.
 """
 from __future__ import annotations
 
@@ -43,12 +46,12 @@ from src.rllib.utils import guardar_snapshot, podar_snapshots
 
 console = Console()
 
+# Refrescar la factory cada N pasos para incorporar nuevos snapshots al pool
+FACTORY_REFRESH_STEPS = 500_000
+
 _FASES = {
-    0: ("Bots simples",         "cyan"),
-    1: ("BotExperto",           "blue"),
-    2: ("Experto + snapshots",  "yellow"),
-    3: ("Snapshots mayoritario","orange1"),
-    4: ("Snapshots puros",      "green"),
+    0: ("Bootstrap (bots)",         "cyan"),
+    1: ("Self-play (1 bot + 2 snaps)", "green"),
 }
 
 
@@ -62,21 +65,19 @@ def parse_args() -> argparse.Namespace:
                    help="Pasos entre cada snapshot guardado (default 100k)")
     p.add_argument("--max-snapshots", type=int, default=50)
     p.add_argument("--obs-dim", type=int, default=DIM_ENTORNO)
-    p.add_argument("--lr", type=float, default=3e-4)
+    p.add_argument("--lr", type=float, default=3e-4,
+                   help="LR inicial (default 3e-4)")
+    p.add_argument("--lr-end", type=float, default=1e-4,
+                   help="LR mínimo al final del entrenamiento (default 1e-4, nunca decae a cero)")
     p.add_argument("--batch-size", type=int, default=4096)
+    p.add_argument("--no-random-position", action="store_true",
+                   help="Desactivar rotación multi-posición (agente siempre en idx=0)")
     return p.parse_args()
 
 
 def _fase(progress: float) -> int:
-    if progress < 0.05:
-        return 0
-    elif progress < 0.15:
-        return 1
-    elif progress < 0.40:
-        return 2
-    elif progress < 0.70:
-        return 3
-    return 4
+    """Devuelve el índice de fase según el progreso de entrenamiento."""
+    return 0 if progress < 0.15 else 1
 
 
 def _build_panel(
@@ -101,7 +102,7 @@ def _build_panel(
         f"[bold]Iteración:[/bold] {iter_count}",
         f"[bold]Steps:[/bold] {pasos_totales:,} / {total_steps:,}  ({progress_pct:.1f}%)",
     )
-    reward_color = "green" if (not math.isnan(reward_medio) and reward_medio > 0) else "red"
+    reward_color = "green" if (not math.isnan(reward_medio) and reward_medio > 13) else "red"
     grid.add_row(
         f"[bold]Reward medio:[/bold] [{reward_color}]{reward_medio:.3f}[/{reward_color}]",
         f"[bold]Reward máx:[/bold]  {reward_max:.2f}",
@@ -120,6 +121,7 @@ def _build_panel(
 
 def main() -> None:
     args = parse_args()
+    random_position = not args.no_random_position
 
     snapshot_dir = os.path.join(args.output_dir, "snapshots")
     log_dir = os.path.join(args.output_dir, "logs")
@@ -128,28 +130,31 @@ def main() -> None:
     os.makedirs(log_dir, exist_ok=True)
 
     with open(os.path.join(args.output_dir, "config.json"), "w") as f:
-        json.dump(vars(args), f, indent=2)
+        json.dump({**vars(args), "random_position": random_position,
+                   "lr_schedule": f"{args.lr} -> {args.lr_end}"}, f, indent=2)
 
-    # Pasar log_dir a HeartsCallbacks ANTES de construir el algo
     HeartsCallbacks._log_dir = log_dir
 
     ray.init(ignore_reinit_error=True)
     console.print(f"[green]Ray {ray.__version__} inicializado[/green]")
-    console.print(f"Output: [bold]{args.output_dir}[/bold]  |  Workers: {args.workers}  |  Steps: {args.total_steps:,}")
+    console.print(
+        f"Output: [bold]{args.output_dir}[/bold]  |  Workers: {args.workers}  |  "
+        f"Steps: {args.total_steps:,}  |  Posición aleatoria: {random_position}"
+    )
 
     pool = OpponentPool(
-        agente_idx=0,
         snapshot_dir=snapshot_dir,
         max_snapshots=args.max_snapshots,
         obs_dim=args.obs_dim,
     )
 
-    # opponent_factory=None en el config para que sea serializable en checkpoints.
-    # La factory real se inyecta en los envs vía foreach_env justo después de build.
     config = build_ppo_config(
         opponent_factory=None,
         obs_dim=args.obs_dim,
+        random_position=random_position,
         lr=args.lr,
+        lr_end=args.lr_end,
+        total_steps=args.total_steps,
         train_batch_size=args.batch_size,
         num_rollout_workers=args.workers,
         num_gpus=args.gpus,
@@ -158,7 +163,7 @@ def main() -> None:
 
     algo = config.build_algo()
 
-    # Inyectar fase inicial en todos los envs ahora que ya están creados
+    # Inyectar factory inicial en todos los envs
     factory_inicial = pool.make_factory(progress=0.0)
     algo.env_runner_group.foreach_env(
         lambda env: setattr(env, "_opponent_factory", factory_inicial)
@@ -181,12 +186,12 @@ def main() -> None:
 
     pasos_totales = 0
     ultimo_snapshot = 0
-    proxima_fase = -1
+    ultimo_factory_refresh = 0
+    fase_actual = 0
     iter_count = 0
     reward_medio = float("nan")
     reward_max = float("nan")
     ep_len = float("nan")
-    fase_actual = 0
     num_snapshots = 0
 
     try:
@@ -198,7 +203,6 @@ def main() -> None:
                 pasos_totales = result.get("timesteps_total", pasos_totales)
                 progress = pasos_totales / args.total_steps
 
-                # Métricas en Ray 2.55.1 están bajo "env_runners"
                 env_r = result.get("env_runners", {})
                 reward_medio = env_r.get("episode_reward_mean", float("nan"))
                 reward_max   = env_r.get("episode_reward_max",  float("nan"))
@@ -218,7 +222,6 @@ def main() -> None:
 
                     podar_snapshots(snapshot_dir, mantener=args.max_snapshots)
 
-                    # Escribir métricas al log
                     with open(log_path, "a", encoding="utf-8") as f:
                         f.write(json.dumps({
                             "tipo": "snapshot",
@@ -230,17 +233,20 @@ def main() -> None:
                             "snapshot": os.path.basename(ruta),
                         }) + "\n")
 
-                # Actualizar fase de oponentes
+                # Refrescar factory cuando cambia de fase O cada FACTORY_REFRESH_STEPS.
+                # Esto garantiza que los snapshots nuevos se incorporen al pool de rivales.
                 nueva_fase = _fase(progress)
-                if nueva_fase != proxima_fase:
-                    proxima_fase = nueva_fase
+                fase_cambio = nueva_fase != fase_actual
+                factory_stale = (pasos_totales - ultimo_factory_refresh) >= FACTORY_REFRESH_STEPS
+
+                if fase_cambio or factory_stale:
                     fase_actual = nueva_fase
+                    ultimo_factory_refresh = pasos_totales
                     new_factory = pool.make_factory(progress=progress)
                     algo.env_runner_group.foreach_env(
                         lambda env: setattr(env, "_opponent_factory", new_factory)
                     )
 
-                # Actualizar panel + barra de progreso
                 progress_bar.update(task, completed=min(pasos_totales, args.total_steps))
                 live.update(Group(
                     _build_panel(

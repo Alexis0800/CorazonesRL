@@ -2,17 +2,16 @@
 Pool de oponentes para self-play en Hearts.
 
 Gestiona la selección de oponentes según la fase de entrenamiento:
-  Fase 0  (0–5%):  3 bots heurísticos simples
-  Fase 1  (5–15%): 2 bots + 1 BotExperto
-  Fase 2 (15–40%): 1 BotExperto + snapshots históricos
-  Fase 3 (40–70%): mayoría snapshots + 1 BotExperto
-  Fase 4 (70–100%): snapshots puros
+  Fase 0  (0–15%):  3 bots heurísticos (bootstrap — aprende reglas básicas)
+  Fase 1 (15–100%): 1 bot simple + 2 snapshots (nunca self-play puro)
+
+La regla de oro: SIEMPRE al menos 1 bot heurístico en el pool para evitar
+estancamiento. El self-play puro tiende a ciclar en estrategias sin mejorar.
 
 Los snapshots son callables cargados desde weights de políticas RLlib.
 """
 from __future__ import annotations
 
-import os
 import random
 from typing import Callable, Dict, List, Optional
 
@@ -21,28 +20,12 @@ import numpy as np
 from src.dominio.carta import Carta
 from src.dominio.motor import MotorCorazones
 from src.agentes.heuristicos import bot_conservador, bot_agresivo, bot_evasivo
-from src.agentes.bot_experto import BotExperto
-from src.agentes.bot_castigador import BotCastigador
 from src.entorno.dimensiones import DIM_ENTORNO
 from src.entorno.observacion import ObservacionBuilder
 
 PolicyFn = Callable[[MotorCorazones, int, List[Carta]], Carta]
 
 _BOTS_SIMPLES: List[PolicyFn] = [bot_conservador, bot_agresivo, bot_evasivo]
-
-
-def _select_opponent(progress: float, snapshots: list) -> PolicyFn:
-    """Selecciona un oponente según la fase de entrenamiento. Función de módulo (picklable)."""
-    if progress < 0.05 or not snapshots:
-        return random.choice(_BOTS_SIMPLES)
-    elif progress < 0.15:
-        return BotExperto() if random.random() < 0.5 else random.choice(_BOTS_SIMPLES)
-    elif progress < 0.40:
-        return random.choice(snapshots) if snapshots and random.random() < 0.5 else BotExperto()
-    elif progress < 0.70:
-        return random.choice(snapshots) if snapshots and random.random() < 0.7 else BotExperto()
-    else:
-        return random.choice(snapshots) if snapshots else BotExperto()
 
 
 class SnapshotPolicy:
@@ -54,11 +37,10 @@ class SnapshotPolicy:
     """
 
     def __init__(self, policy, obs_dim: int = DIM_ENTORNO):
-        # Extraer pesos como numpy arrays (siempre serializables)
         self._weights: dict = policy.get_weights()
         self._obs_dim = obs_dim
         self._obs_builder = ObservacionBuilder(dim=obs_dim)
-        self._model = None  # reconstruido lazy en cada proceso
+        self._model = None
 
     @classmethod
     def from_weights(cls, weights: dict, obs_dim: int = DIM_ENTORNO) -> "SnapshotPolicy":
@@ -70,7 +52,6 @@ class SnapshotPolicy:
         obj._model = None
         return obj
 
-    # ---- pickle support: solo guardar pesos + dim, nunca el modelo torch ----
     def __getstate__(self):
         return {"weights": self._weights, "obs_dim": self._obs_dim}
 
@@ -97,8 +78,6 @@ class SnapshotPolicy:
         model_config = {"fcnet_hiddens": [512, 512, 256], "fcnet_activation": "relu", "vf_share_layers": False}
 
         model = HeartsActionMaskModel(obs_space, action_space, 52, model_config, "snapshot")
-
-        # Los pesos desde policy.get_weights() o policy_state.pkl usan nombres PyTorch exactos
         torch_state = {k: torch.tensor(v) for k, v in self._weights.items()}
         model.load_state_dict(torch_state, strict=True)
         model.eval()
@@ -135,9 +114,18 @@ class SnapshotPolicy:
 class OpponentPool:
     """Pool de oponentes para self-play con bots y snapshots históricos.
 
+    Usa solo 2 fases:
+      - Bootstrap (0–15%): 3 bots simples para aprender las reglas básicas.
+      - Self-play (15–100%): SIEMPRE 1 bot + 2 snapshots. Nunca self-play puro.
+
+    La factory retornada acepta `agente_idx` como parámetro para soportar
+    rotación multi-posición (el agente puede entrenar desde cualquier asiento).
+
     Uso:
-        pool = OpponentPool(agente_idx=0, snapshot_dir="models/v_rllib/snapshots")
-        env_config = {"opponent_factory": pool.make_factory(progress=0.3)}
+        pool = OpponentPool(snapshot_dir="models/v_rllib/snapshots")
+        factory = pool.make_factory(progress=0.3)
+        # En el env:
+        opponents = factory(agente_idx=2)  # dict {0: fn, 1: fn, 3: fn}
     """
 
     def __init__(
@@ -151,9 +139,7 @@ class OpponentPool:
         self._snapshot_dir = snapshot_dir
         self._max_snapshots = max_snapshots
         self._obs_dim = obs_dim
-
         self._snapshots: List[SnapshotPolicy] = []
-        self._bot_experto_pool: List[PolicyFn] = []
 
     def add_snapshot(self, policy) -> None:
         """Añade una nueva política snapshot al pool (FIFO si excede el máximo)."""
@@ -162,23 +148,45 @@ class OpponentPool:
         if len(self._snapshots) > self._max_snapshots:
             self._snapshots.pop(0)
 
-    def make_factory(self, progress: float) -> Callable[[], Dict[int, PolicyFn]]:
+    def make_factory(self, progress: float) -> Callable:
         """Devuelve un opponent_factory serializable para la fase actual.
 
-        El closure NO captura self — solo datos picklables — para que pueda
-        enviarse a workers remotos de Ray sin errores de serialización.
+        El closure captura una copia de los snapshots disponibles en este momento.
+        Llama periódicamente a make_factory() para incorporar nuevos snapshots.
 
         Args:
             progress: fracción de entrenamiento completada (0.0 – 1.0).
-        """
-        opp_indices = [i for i in range(4) if i != self._agente_idx]
-        snapshots = list(self._snapshots)  # copia picklable en este momento
 
-        def _factory() -> Dict[int, PolicyFn]:
+        Returns:
+            Callable(agente_idx: int) -> dict[int, PolicyFn]
+        """
+        snapshots = list(self._snapshots)
+        bootstrap_phase = progress < 0.15
+
+        def _factory(agente_idx: int = 0) -> Dict[int, PolicyFn]:
+            """Selecciona oponentes para los 3 slots no-agente.
+
+            Fase bootstrap (0–15%): 3 bots simples.
+            Fase self-play (15–100%): 1 bot fijo + 2 snapshots.
+              Si no hay snapshots aún, usa 3 bots.
+            """
+            opp_indices = [i for i in range(4) if i != agente_idx]
+            random.shuffle(opp_indices)  # posición del bot es aleatoria
+
             fns: Dict[int, PolicyFn] = {}
-            for idx in opp_indices:
-                fns[idx] = _select_opponent(progress, snapshots)
+
+            if bootstrap_phase or len(snapshots) < 2:
+                for idx in opp_indices:
+                    fns[idx] = random.choice(_BOTS_SIMPLES)
+            else:
+                # Siempre 1 bot para mantener diversidad y evitar stagnation
+                fns[opp_indices[0]] = random.choice(_BOTS_SIMPLES)
+                # 2 snapshots de distintas partes del pool para diversidad
+                snap1 = random.choice(snapshots)
+                snap2 = random.choice(snapshots)
+                fns[opp_indices[1]] = snap1
+                fns[opp_indices[2]] = snap2
+
             return fns
 
         return _factory
-
