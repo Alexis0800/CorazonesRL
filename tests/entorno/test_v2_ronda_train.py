@@ -11,6 +11,8 @@ import tempfile
 import numpy as np
 import pytest
 
+from src.entorno.dimensiones import DIM_ENTORNO as dim_entorno
+
 
 class TestV2VecNormalize:
     """Verifica compatibilidad CorazonesEnvSingleHand + VecNormalize."""
@@ -26,7 +28,7 @@ class TestV2VecNormalize:
         venv = VecNormalize(venv, norm_obs=True, norm_reward=True,
                             clip_obs=10.0, clip_reward=10.0, gamma=0.995, epsilon=1e-8)
         obs = venv.reset()
-        assert obs.shape == (1, 220)
+        assert obs.shape == (1, dim_entorno)
 
     def test_venv_step_retorna_reward_normalizado(self):
         """VecNormalize produce rewards finitos."""

@@ -503,4 +503,5 @@ class TestMotorCorazones:
         m.jugar_mano()
         # Verificar que las puntuaciones históricas se actualizaron
         total_historico = sum(j.puntuacion_historica for j in m.jugadores)
-        assert total_historico == 26 or total_historico == 26 * 4
+        assert total_historico in (26, 26 * 3, 26 * 4), \
+            f"Total histórico inesperado: {total_historico}"

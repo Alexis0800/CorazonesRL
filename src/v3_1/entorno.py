@@ -6,6 +6,7 @@ Adaptado de v3. Usa ObservacionBuilderV31 para el vector de 228 dims.
 
 from __future__ import annotations
 
+import random
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -34,6 +35,7 @@ class CorazonesEnvV31(gym.Env):
         politicas_oponentes: Optional[Dict[int, object]] = None,
         oracle_buffer: Optional[object] = None,
         oracle_rng: Optional[np.random.Generator] = None,
+        epsilon: float = 0.0,
     ):
         super().__init__()
 
@@ -41,6 +43,8 @@ class CorazonesEnvV31(gym.Env):
         self.politicas_oponentes = politicas_oponentes or {}
         self._oracle_buffer = oracle_buffer
         self._oracle_rng = oracle_rng
+        # exploration rate (0=off, 0.3=max exploration)
+        self._epsilon = epsilon
 
         self.observation_space = gym.spaces.Box(
             low=-1.0, high=26.0, shape=(DIM_V3_1,), dtype=np.float32,
@@ -96,6 +100,13 @@ class CorazonesEnvV31(gym.Env):
             return obs, 0.0, False, False, {}
 
         carta = Carta._TODAS[action]
+
+        # ── Epsilon-greedy exploration ──
+        if self._epsilon > 0 and random.random() < self._epsilon:
+            legales = self.motor.obtener_jugadas_legales(self.agente_idx)
+            if legales:
+                carta = random.choice(legales)
+                action = carta.id
 
         # ── Hook MCTS Oracle ──
         if self._oracle_buffer is not None and self._oracle_rng is not None:

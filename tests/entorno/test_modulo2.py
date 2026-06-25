@@ -15,6 +15,8 @@ import pytest
 import gymnasium as gym
 from gymnasium.utils.env_checker import check_env
 
+from src.entorno.dimensiones import DIM_ENTORNO as dim_entorno
+
 
 # ============================================================
 # Pruebas de inicialización y espacios
@@ -33,7 +35,7 @@ class TestCorazonesEnvInicializacion:
         from src.entorno.single_agent import CorazonesEnv
         env = CorazonesEnv()
         assert env.observation_space.shape == (
-            220,), f"Esperado (220,), got {env.observation_space.shape}"
+            dim_entorno,), f"Esperado ({dim_entorno},), got {env.observation_space.shape}"
         assert env.observation_space.dtype == np.float32
         env.close()
 
@@ -79,7 +81,8 @@ class TestCorazonesEnvReset:
         from src.entorno.single_agent import CorazonesEnv
         env = CorazonesEnv()
         obs, _ = env.reset()
-        assert obs.shape == (220,), f"Esperado (220,), got {obs.shape}"
+        assert obs.shape == (
+            dim_entorno,), f"Esperado ({dim_entorno},), got {obs.shape}"
         env.close()
 
     def test_reset_obs_dtype_float32(self):
@@ -403,7 +406,8 @@ class TestCicloCompleto:
             done = terminated or truncated
             pasos += 1
             assert not np.any(np.isnan(obs)), f"NaN en paso {pasos}"
-            assert obs.shape == (220,), f"Shape incorrecto en paso {pasos}"
+            assert obs.shape == (
+                dim_entorno,), f"Shape incorrecto en paso {pasos}"
         assert pasos < 10000, "Juego no terminó en 10000 pasos"
         env.close()
 
@@ -420,7 +424,7 @@ class TestCicloCompleto:
             if terminated or truncated:
                 break
         # Validar que la observación sigue siendo válida
-        assert obs.shape == (220,)
+        assert obs.shape == (dim_entorno,)
         assert obs.dtype == np.float32
         assert not np.any(np.isnan(obs))
         assert np.all(obs >= 0.0) and np.all(obs <= 1.0)

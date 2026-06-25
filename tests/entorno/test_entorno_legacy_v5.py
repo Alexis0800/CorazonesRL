@@ -9,6 +9,7 @@ Cubre:
 import pytest
 import numpy as np
 from src.entorno.single_agent import CorazonesEnv
+from src.entorno.dimensiones import DIM_ENTORNO as dim_entorno
 from src.dominio.carta import Carta
 
 
@@ -57,8 +58,8 @@ class TestObservacionV5:
         """El vector de observación debe tener exactamente 190 floats."""
         env = CorazonesEnv(agente_idx=0)
         obs, _ = env.reset(seed=42)
-        assert obs.shape == (220,), \
-            f"Se esperaba (220,), se obtuvo {obs.shape}"
+        assert obs.shape == (dim_entorno,), \
+            f"Se esperaba ({dim_entorno},), se obtuvo {obs.shape}"
         assert obs.dtype == np.float32
 
     def test_pozo_viable_mano_fuerte_sin_corazones_rotos(self):

@@ -5,7 +5,7 @@ Extraído de entorno.py para cumplir Single Responsibility Principle (SRP).
 La lógica de construcción de observación está separada del ciclo de vida
 del entorno Gymnasium.
 
-Vector de observación (v12, 220 dimensiones):
+Vector de observación (v11, 224 dimensiones):
     [0:52]    Mano del agente (one-hot)
     [52:104]  Mesa actual / baza en curso (one-hot)
     [104:156] Cementerio / cartas jugadas en bazas anteriores (one-hot)
@@ -30,6 +30,7 @@ Vector de observación (v12, 220 dimensiones):
     [211:215] Corazones capturados esta mano / 13.0
     [215:219] Alerta pozo por jugador (≥6 corazones)
     [219]     Palo de salida (-1.0 si None, else palo/3.0)
+    [220:224] quien_jugo_mesa — 4 flags: ¿el jugador relativo ya jugó en esta baza?
 """
 
 from __future__ import annotations
@@ -38,7 +39,7 @@ from typing import List, Optional
 
 import numpy as np
 
-from src.entorno.dimensiones import DIM_V5, DIM_V6, DIM_V10, DIM_ENTRENAMIENTO
+from src.entorno.dimensiones import DIM_V5, DIM_V6, DIM_V10, DIM_V11, DIM_ENTRENAMIENTO
 
 
 class ObservacionBuilder:
@@ -155,6 +156,10 @@ class ObservacionBuilder:
                 obs, a, motor, puntuacion_historica, dama_picas_en, vacios
             )
 
+        # --- Bloque v11 [220:224]: quien_jugo_mesa ---
+        if self.dim >= 224:
+            self._construir_bloque_v11(obs, a, motor)
+
         return obs
 
     def _construir_bloque_v9(
@@ -241,6 +246,28 @@ class ObservacionBuilder:
             else motor.palo_de_salida / 3.0
         )
 
+    def _construir_bloque_v11(
+        self,
+        obs: np.ndarray,
+        a: int,
+        motor,
+    ) -> None:
+        """Añade las 4 features v11: quien_jugo_mesa [220:224].
+
+        Para cada jugador relativo al agente (0=self, 1=izq, 2=frente, 3=der),
+        indica si ya jugó en la baza actual.
+
+        Args:
+            obs: Array de observación a modificar in-place.
+            a: Índice del agente.
+            motor: Instancia de MotorCorazones.
+        """
+        # Determinar qué jugadores ya jugaron en esta baza
+        jugadores_que_jugaron = {idx for idx, _ in motor.mesa}
+        for rel in range(4):
+            abs_idx = (a + rel) % 4
+            obs[220 + rel] = 1.0 if abs_idx in jugadores_que_jugaron else 0.0
+
     def _calcular_prob_q_picas(
         self,
         a: int,
@@ -307,10 +334,17 @@ class ObservacionBuilder:
             for c in motor.jugadores[i].bazas_ganadas:
                 obs[104 + c.id] = 1.0
 
+        # Bloque v11: quien_jugo_mesa
+        if self.dim >= 224:
+            jugadores_que_jugaron = {idx for idx, _ in motor.mesa}
+            for rel in range(4):
+                abs_idx = (jugador_idx + rel) % 4
+                obs[220 + rel] = 1.0 if abs_idx in jugadores_que_jugaron else 0.0
+
         return obs
 
 
 # Instancia por defecto
-_observacion_default = ObservacionBuilder(dim=220)
+_observacion_default = ObservacionBuilder(dim=DIM_V11)
 
 __all__ = ["ObservacionBuilder"]

@@ -11,6 +11,7 @@ Cubre:
 import pytest
 import numpy as np
 from src.entorno.single_agent import CorazonesEnv
+from src.entorno.dimensiones import DIM_ENTORNO as dim_entorno
 from src.dominio.carta import Carta
 
 
@@ -49,8 +50,8 @@ class TestObservacionV6:
         """El vector de observación debe tener exactamente 194 floats."""
         env = CorazonesEnv(agente_idx=0)
         obs, _ = env.reset(seed=42)
-        assert obs.shape == (220,), \
-            f"Se esperaba (220,), se obtuvo {obs.shape}"
+        assert obs.shape == (dim_entorno,), \
+            f"Se esperaba ({dim_entorno},), se obtuvo {obs.shape}"
         assert obs.dtype == np.float32
 
     def test_all_void_treboles_todos_vacios(self):

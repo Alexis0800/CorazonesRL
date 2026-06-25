@@ -17,6 +17,7 @@ Cubre los 27 features añadidos en [194:220]:
 import pytest
 import numpy as np
 from src.entorno.single_agent import CorazonesEnv
+from src.entorno.dimensiones import DIM_ENTORNO as dim_entorno
 from src.dominio.carta import Carta
 from src.dominio.motor import MotorCorazones
 
@@ -92,18 +93,20 @@ class TestDimensionV9:
         assert obs.shape == (220,)
 
     def test_step_retorna_220_dimensiones(self):
+        """CorazonesEnv(obs_dim=220) debe retornar exactamente 220 dims."""
         env = CorazonesEnv(obs_dim=220)
         obs, _ = env.reset(seed=0)
         mask = env.action_masks()
         legal = int(np.argmax(mask))
         obs_next, _, _, _, _ = env.step(legal)
-        assert obs_next.shape == (220,)
+        assert obs_next.shape == (
+            220,), f"Esperado (220,), got {obs_next.shape}"
 
     def test_compatibilidad_hacia_atras_194(self):
-        """CorazonesEnv sin obs_dim sigue generando 194 dims."""
+        """CorazonesEnv sin obs_dim sigue generando el estándar actual."""
         env = CorazonesEnv()
         obs, _ = env.reset(seed=0)
-        assert obs.shape == (220,)
+        assert obs.shape == (dim_entorno,)
 
     def test_observation_space_220(self):
         """observation_space debe reflejar la dimensión configurada."""
