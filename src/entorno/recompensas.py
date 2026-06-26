@@ -80,6 +80,17 @@ class RewardConfig:
     SCORE_RIVAL_CERCA: int = 85     # umbral para "rival cerca de 100"
     CORAZONES_ALERTA_POZO: int = 10  # corazones capturados para detectar moon
 
+    # --- v9: señales baza-level por diagnóstico PIMC ---
+    # Penalización inmediata al capturar Q♠ sin intención de luna.
+    # Complementa la señal terminal para mejorar crédito-asignación.
+    Q_SPADES_BAZA_PENALTY: float = -5.0
+    # Recompensa por corazón capturado durante intento Moon activo
+    # (moon_prob_agente >= moon_prob_threshold). Incentiva perseguir la luna.
+    MOON_HEARTS_STEP_REWARD: float = 0.4
+    # Bonus por descartar K♠/A♠ sin ganar la baza, con Q♠ aún activa.
+    # Corrige el error más costoso del v8: retener K♠ en lugar de descartarlo.
+    DESCARTAR_REY_PICAS_REWARD: float = 1.5
+
 
 class CalculadoraRecompensas:
     """Calcula recompensas para eventos dentro de una partida de Corazones."""

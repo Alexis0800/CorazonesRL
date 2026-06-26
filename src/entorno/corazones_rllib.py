@@ -94,6 +94,10 @@ class CorazonesEnvRLlib(gym.Env):
         self._baza_reward_weight: float = cfg.get("baza_reward_weight", 0.15)
         # Umbral de P(Moon) para suprimir penalización por baza
         self._moon_prob_threshold: float = cfg.get("moon_prob_threshold", 0.5)
+        # v9: acumula recompensas baza-level (Q♠ penalty, moon hearts, K♠ discard)
+        # para consumirlas al final de step() sea cual sea la posición del agente en la baza
+        self._pending_baza_reward: float = 0.0
+        self._ultima_carta_agente = None  # carta que jugó el agente en la baza actual
 
     # ------------------------------------------------------------------
     # Gymnasium API
@@ -115,6 +119,8 @@ class CorazonesEnvRLlib(gym.Env):
         self._puntos_mano_actual = [0] * 4
         self._vacios = [set() for _ in range(4)]
         self._dama_picas_en = None
+        self._pending_baza_reward = 0.0
+        self._ultima_carta_agente = None
 
         if self._opponent_factory is not None:
             # La factory acepta el agente_idx actual para asignar los 3 slots rivales
@@ -136,6 +142,7 @@ class CorazonesEnvRLlib(gym.Env):
         if carta not in legales:
             carta = legales[0]
 
+        self._ultima_carta_agente = carta  # trackear para recompensas baza-level (v9)
         self._motor.jugar_carta(self._agente_idx, carta)
         self._actualizar_vacios(self._agente_idx, carta)
 
@@ -177,6 +184,10 @@ class CorazonesEnvRLlib(gym.Env):
         else:
             reward = 0.0
 
+        # Consumir recompensas baza-level acumuladas en _resolver_baza() (v9)
+        reward += self._pending_baza_reward
+        self._pending_baza_reward = 0.0
+
         return self._build_obs(), reward, terminated, False, {}
 
     # ------------------------------------------------------------------
@@ -199,8 +210,9 @@ class CorazonesEnvRLlib(gym.Env):
                 self._resolver_baza()
 
     def _resolver_baza(self) -> None:
-        """Avanza el motor al resolver la baza (solo actualiza estado, sin reward)."""
+        """Avanza el motor al resolver la baza y acumula recompensas baza-level (v9)."""
         cartas_en_mesa = [c for _, c in self._motor.mesa]
+        q_activa_antes = self._dama_picas_en is None  # ¿Q♠ aún no capturada?
         ganador = self._motor.resolver_baza()
 
         if any(c.es_dama_de_picas for c in cartas_en_mesa):
@@ -208,6 +220,34 @@ class CorazonesEnvRLlib(gym.Env):
 
         for i, jug in enumerate(self._motor.jugadores):
             self._puntos_mano_actual[i] = jug.contar_puntos_bazas()
+
+        # --- v9: señales baza-level ---
+        cfg = self._reward_config
+        if ganador == self._agente_idx:
+            moon_prob = self._calcular_moon_prob(self._agente_idx)
+            for c in cartas_en_mesa:
+                if c.es_dama_de_picas and moon_prob < self._moon_prob_threshold:
+                    # Capturó Q♠ sin estar persiguiendo la luna → penalizar
+                    self._pending_baza_reward += cfg.Q_SPADES_BAZA_PENALTY
+                if c.es_corazon and moon_prob >= self._moon_prob_threshold:
+                    # Capturó corazón durante intento Moon activo → incentivar
+                    self._pending_baza_reward += cfg.MOON_HEARTS_STEP_REWARD
+        elif (self._ultima_carta_agente is not None
+              and q_activa_antes
+              and self._ultima_carta_agente.palo == 2
+              and self._ultima_carta_agente.valor >= 13):
+            # Agente jugó K♠/A♠ y no ganó la baza, con Q♠ aún activa.
+            # Solo recompensar si la carta era un riesgo real: el agente
+            # tenía ≤ 2 espadas en total (K♠/A♠ + a lo sumo una más).
+            # Si tenía 5 espadas, K♠ no era inminente — no bonus.
+            picas_restantes = sum(
+                1 for c in self._motor.jugadores[self._agente_idx].mano
+                if c.palo == 2
+            )
+            if picas_restantes <= 1:
+                self._pending_baza_reward += cfg.DESCARTAR_REY_PICAS_REWARD
+
+        self._ultima_carta_agente = None  # consumida para esta baza
 
     def _calcular_recompensa_terminal(self) -> float:
         """Recompensa final de la mano.
