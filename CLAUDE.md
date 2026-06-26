@@ -103,7 +103,7 @@ python -m src.torneo.elo --directorio models/v8/elite --partidas 50 --elo-puro -
 ### Observation Vector (224 dims, v11 standard = `DIM_ENTORNO`)
 
 | Range | Content |
-|-------|---------
+| ------- | --------- |
 | `[0:52]` | Agent's hand (one-hot) |
 | `[52:104]` | Current trick / mesa (one-hot) |
 | `[104:156]` | Played cards / cementerio (one-hot) |
@@ -113,7 +113,9 @@ python -m src.torneo.elo --directorio models/v8/elite --partidas 50 --elo-puro -
 | `[180]` | Hearts broken (0/1) |
 | `[181]` | Position in trick (0.0, 0.33, 0.66, 1.0) |
 | `[182:187]` | Q♠ tracker (one-hot, 5 states) |
-| `[187:190]` | Strategic flags: `pozo_viable`, `debo_arriesgar`, `puedo_alimentar` |
+| `[187]` | `moon_prob_agente`: P(Moon del agente) continuo [0, 1] |
+| `[188]` | `moon_prob_rival`: max P(Moon) entre los 3 rivales [0, 1] |
+| `[189]` | `puedo_alimentar`: puede dar puntos a un rival (0/1) |
 | `[190:194]` | `all_void_X`: all 3 opponents are void in suit X |
 | `[194]` | Baza number / 13.0 |
 | `[195]` | Players near 100 / 3.0 |

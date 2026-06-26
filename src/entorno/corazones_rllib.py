@@ -5,8 +5,8 @@ gym.Env single-agent con:
   - Observation space: Dict({"obs": Box(DIM_ENTORNO,), "action_mask": Box(52,)})
   - Action space: Discrete(52)
   - Un episodio = una mano completa (13 bazas, ~13 pasos del agente).
-  - Recompensa: SOLO al final de la mano (terminal-only).
-    reward = 26 - puntos_agente   [rango 0..26, o 52 si hizo Shooting the Moon]
+  - Recompensa: terminal (26 - puntos_agente) + señal por baza (baza_reward_weight).
+    Moon exitoso = +52. Señal por baza se suprime cuando P(Moon) >= 0.5.
 
 Los oponentes (3 jugadores) se gestionan dentro del env. Su comportamiento
 se controla mediante `opponent_factory` en env_config:
@@ -88,6 +88,12 @@ class CorazonesEnvRLlib(gym.Env):
         self._vacios: List[set] = [set() for _ in range(4)]
         self._dama_picas_en: Optional[int] = None
         self._opponents: Dict[int, PolicyFn] = {}
+        # Puntos acumulados al inicio de la baza actual, para calcular delta por baza
+        self._puntos_antes_de_baza: int = 0
+        # Peso de la señal por baza relativa al terminal (0 = terminal-only)
+        self._baza_reward_weight: float = cfg.get("baza_reward_weight", 0.15)
+        # Umbral de P(Moon) para suprimir penalización por baza
+        self._moon_prob_threshold: float = cfg.get("moon_prob_threshold", 0.5)
 
     # ------------------------------------------------------------------
     # Gymnasium API
@@ -133,7 +139,9 @@ class CorazonesEnvRLlib(gym.Env):
         self._motor.jugar_carta(self._agente_idx, carta)
         self._actualizar_vacios(self._agente_idx, carta)
 
-        if len(self._motor.mesa) == 4:
+        baza_cerrada = len(self._motor.mesa) == 4
+        if baza_cerrada:
+            self._puntos_antes_de_baza = self._motor.jugadores[self._agente_idx].contar_puntos_bazas()
             self._resolver_baza()
 
         if not self._es_fin_de_mano():
@@ -143,6 +151,29 @@ class CorazonesEnvRLlib(gym.Env):
 
         if terminated:
             reward = self._calcular_recompensa_terminal()
+        elif baza_cerrada and self._baza_reward_weight > 0:
+            puntos_ahora = self._motor.jugadores[self._agente_idx].contar_puntos_bazas()
+            delta = puntos_ahora - self._puntos_antes_de_baza
+            if delta > 0:
+                moon_prob = self._calcular_moon_prob(self._agente_idx)
+                moon_prob_rival = max(
+                    self._calcular_moon_prob(i)
+                    for i in range(4) if i != self._agente_idx
+                )
+                if moon_prob >= self._moon_prob_threshold:
+                    # Trayectoria Moon activa — no penalizar; el terminal +52 guía.
+                    # Si falla, el terminal (26-pts) lo castigará.
+                    reward = 0.0
+                elif moon_prob_rival >= 0.7:
+                    # Tomar puntos para romper el Moon de un rival es neutral.
+                    # El modelo aprende por el terminal (evitar el +26 ajeno).
+                    reward = 0.0
+                else:
+                    # Juego normal: penalizar proporcionalmente, atenuando por moon_prob
+                    atenuacion = 1.0 - moon_prob
+                    reward = -self._baza_reward_weight * (delta / 13.0) * atenuacion
+            else:
+                reward = 0.0
         else:
             reward = 0.0
 
@@ -212,20 +243,49 @@ class CorazonesEnvRLlib(gym.Env):
             if carta.palo != self._motor.palo_de_salida:
                 self._vacios[jugador_idx].add(self._motor.palo_de_salida)
 
-    def _calcular_pozo_viable(self) -> bool:
-        """Shooting the moon es viable si alguien acumula ≥6 corazones."""
-        return any(
-            sum(1 for c in jug.bazas_ganadas if c.es_corazon) >= 6
-            for jug in self._motor.jugadores
+    def _calcular_moon_prob(self, jugador_idx: int) -> float:
+        """Probabilidad aproximada [0, 1] de que jugador_idx complete Moon.
+
+        Retorna 0.0 inmediatamente si cualquier rival ya tiene puntos de
+        penalización (condición necesaria: Moon requiere los 26 puntos completos).
+
+        Score = control de corazones altos (A K Q J 10) × 0.60
+              + Q♠ bajo control × 0.20
+              + progreso (hearts ya ganados) × 0.10
+              - penalización por hearts aún en manos rivales × 0.10
+        """
+        for i, jug in enumerate(self._motor.jugadores):
+            if i != jugador_idx and jug.contar_puntos_bazas() > 0:
+                return 0.0
+
+        jug = self._motor.jugadores[jugador_idx]
+        todas = list(jug.mano) + list(jug.bazas_ganadas)
+
+        # Corazones altos: A=14 K=13 Q=12 J=11 10=10
+        high_hearts = sum(1 for c in todas if c.es_corazon and c.valor >= 10)
+        hearts_ganados = sum(1 for c in jug.bazas_ganadas if c.es_corazon)
+        qs_control = any(c.es_dama_de_picas for c in todas)
+
+        # Hearts que aún están en manos rivales (vías de escape del Moon)
+        hearts_en_rivales = sum(
+            1 for i, jug_r in enumerate(self._motor.jugadores)
+            if i != jugador_idx
+            for c in jug_r.mano if c.es_corazon
         )
+
+        control  = (high_hearts / 5.0) * 0.60
+        qs_bonus = 0.20 if qs_control else 0.0
+        progreso = min(hearts_ganados / 13.0, 1.0) * 0.10
+        escape   = min(hearts_en_rivales * 0.015, 0.10)
+
+        return max(0.0, min(1.0, control + qs_bonus + progreso - escape))
 
     def _build_obs(self) -> dict:
         agente = self._agente_idx
-        agente_corazones = sum(
-            1 for c in self._motor.jugadores[agente].bazas_ganadas if c.es_corazon
+        moon_prob_agente = self._calcular_moon_prob(agente)
+        moon_prob_rival  = max(
+            self._calcular_moon_prob(i) for i in range(4) if i != agente
         )
-        pozo_viable = self._calcular_pozo_viable()
-        debo_arriesgar = agente_corazones >= 6
         puedo_alimentar = any(
             self._puntuacion_historica[j] >= self._calc.cfg.SCORE_RIVAL_CERCA
             for j in range(4) if j != agente
@@ -238,8 +298,8 @@ class CorazonesEnvRLlib(gym.Env):
             puntuacion_historica=self._puntuacion_historica,
             puntos_mano_actual=self._puntos_mano_actual,
             dama_picas_en=self._dama_picas_en,
-            pozo_viable=pozo_viable,
-            debo_arriesgar=debo_arriesgar,
+            moon_prob_agente=moon_prob_agente,
+            moon_prob_rival=moon_prob_rival,
             puedo_alimentar=puedo_alimentar,
         )
 

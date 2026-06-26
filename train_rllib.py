@@ -74,9 +74,11 @@ def parse_args() -> argparse.Namespace:
                    help="LR inicial (default 3e-4)")
     p.add_argument("--lr-end", type=float, default=1e-4,
                    help="LR mínimo al final del entrenamiento (default 1e-4, nunca decae a cero)")
-    p.add_argument("--batch-size", type=int, default=4096)
+    p.add_argument("--batch-size", type=int, default=8192)
     p.add_argument("--no-random-position", action="store_true",
                    help="Desactivar rotación multi-posición (agente siempre en idx=0)")
+    p.add_argument("--baza-reward-weight", type=float, default=0.15,
+                   help="Peso de la señal de recompensa por baza (0=terminal-only, default 0.15)")
     return p.parse_args()
 
 
@@ -146,6 +148,7 @@ def main() -> None:
 
     with open(os.path.join(args.output_dir, "config.json"), "w") as f:
         json.dump({**vars(args), "random_position": random_position,
+                   "baza_reward_weight": args.baza_reward_weight,
                    "lr_schedule": f"{args.lr} -> {args.lr_end}"}, f, indent=2)
 
     HeartsCallbacks._log_dir = log_dir

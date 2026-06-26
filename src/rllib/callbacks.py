@@ -80,7 +80,7 @@ class HeartsCallbacks(DefaultCallbacks):
         # Alertas diagnósticas
         alertas = []
         if isinstance(entropy, float) and not (entropy != entropy):  # not NaN
-            if entropy < 0.5:
+            if entropy < 0.4:
                 alertas.append(f"entropy baja ({entropy:.3f}) — posible colapso de política")
             if entropy > 3.5:
                 alertas.append(f"entropy alta ({entropy:.3f}) — posible no convergencia")

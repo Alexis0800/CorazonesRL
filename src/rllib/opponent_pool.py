@@ -20,6 +20,7 @@ import numpy as np
 
 from src.dominio.carta import Carta
 from src.dominio.motor import MotorCorazones
+from src.agentes.bot_experto import BotExperto
 from src.agentes.heuristicos import bot_conservador, bot_agresivo, bot_evasivo
 from src.entorno.dimensiones import DIM_ENTORNO
 from src.entorno.observacion import ObservacionBuilder
@@ -192,10 +193,13 @@ class OpponentPool:
                 fns[opp_indices[2]] = random.choice(snapshots)
 
             else:
-                # Fase 2: 1 bot + 2 snapshots (self-play con ancla permanente)
-                fns[opp_indices[0]] = random.choice(_BOTS_SIMPLES)
+                # Fase 2: 1 BotExperto + 1 snapshot + 1 bot simple.
+                # BotExperto ancla la calidad — rompe el echo chamber de snapshots
+                # que todos juegan igual. Sin él, el pool de self-play converge a
+                # una estrategia pasiva y deja de aprender.
+                fns[opp_indices[0]] = BotExperto()
                 fns[opp_indices[1]] = random.choice(snapshots)
-                fns[opp_indices[2]] = random.choice(snapshots)
+                fns[opp_indices[2]] = random.choice(_BOTS_SIMPLES)
 
             return fns
 

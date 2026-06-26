@@ -15,8 +15,8 @@ Vector de observación (v11, 224 dimensiones):
     [180]     Corazones rotos (0.0 o 1.0)
     [181]     Posición en la baza actual (0.0, 0.33, 0.66, 1.0)
     [182:187] Rastreador de la Dama de Picas (one-hot, 5 estados)
-    [187]     pozo_viable — ¿es viable intentar shooting the moon?
-    [188]     debo_arriesgar — ¿estoy tan atrás que debo arriesgarme?
+    [187]     moon_prob_agente — P(Moon del agente) continuo [0, 1]
+    [188]     moon_prob_rival  — max P(Moon) entre los 3 rivales [0, 1]
     [189]     puedo_alimentar — ¿puedo darle puntos a un rival?
     [190:194] all_void_X — ¿los 3 rivales son void en el palo X?
     [194]     Número de baza / 13.0
@@ -70,8 +70,8 @@ class ObservacionBuilder:
         puntuacion_historica: List[int],
         puntos_mano_actual: List[int],
         dama_picas_en: Optional[int],
-        pozo_viable: bool = False,
-        debo_arriesgar: bool = False,
+        moon_prob_agente: float = 0.0,
+        moon_prob_rival: float = 0.0,
         puedo_alimentar: bool = False,
     ) -> np.ndarray:
         """Construye el vector de observación completo de `dim` dimensiones.
@@ -82,9 +82,9 @@ class ObservacionBuilder:
             vacios: Lista de sets de palos void para cada jugador.
             puntuacion_historica: Puntuación acumulada de cada jugador.
             puntos_mano_actual: Puntos en la mano actual de cada jugador.
-            dama_picas_en: Índice del jugador que tiene la Dama de Picas (o None).
-            pozo_viable: Si es viable intentar shooting the moon.
-            debo_arriesgar: Si el agente debe arriesgarse.
+            dama_picas_en: Índice del jugador con la Dama de Picas (o None).
+            moon_prob_agente: P(Moon del agente) continuo [0, 1].
+            moon_prob_rival: max P(Moon) entre los 3 rivales [0, 1].
             puedo_alimentar: Si el agente puede alimentar puntos a un rival.
 
         Returns:
@@ -138,8 +138,8 @@ class ObservacionBuilder:
 
         # --- Features v5 [187:190] ---
         if self.dim >= 190:
-            obs[187] = 1.0 if pozo_viable else 0.0
-            obs[188] = 1.0 if debo_arriesgar else 0.0
+            obs[187] = float(moon_prob_agente)   # P(Moon agente) continuo [0,1]
+            obs[188] = float(moon_prob_rival)    # max P(Moon rival) continuo [0,1]
             obs[189] = 1.0 if puedo_alimentar else 0.0
 
         # --- Features all_void v6 [190:194] ---
