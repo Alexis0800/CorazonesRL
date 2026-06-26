@@ -2,17 +2,19 @@
 Pipeline de entrenamiento de Hearts con Ray RLlib.
 
 Uso:
-    python train_rllib.py --total-steps 20000000 --output-dir models/v_rllib
-    python train_rllib.py --total-steps 20000000 --output-dir models/v_rllib --workers 4 --gpus 1
+    python train_rllib.py --total-steps 20000000 --output-dir models/v8
+    python train_rllib.py --total-steps 20000000 --output-dir models/v8 --workers 4 --use-lstm
 
-Fases de self-play (automáticas según progreso de entrenamiento):
-    0–15%   → Bootstrap: 3 bots heurísticos (aprender las reglas básicas)
-    15–100% → Self-play: 1 bot simple + 2 snapshots históricos
+Curriculum de 5 fases (automático según progreso):
+    0–5%    → Fase 0: 3 bots simples (bootstrap)
+    5–15%   → Fase 1: 2 bots simples + 1 BotExperto
+    15–40%  → Fase 2: 1 BotExperto + 2 snapshots
+    40–70%  → Fase 3: 3 snapshots del pool completo (self-play puro)
+    70–100% → Fase 4: 3 snapshots recientes (presión máxima)
 
 Principios de diseño:
   - Recompensa terminal-only: reward = 26 - puntos solo al final de cada mano.
   - Rotación multi-posición: el agente entrena desde las 4 posiciones aleatoriamente.
-  - Sin self-play puro: siempre 1 bot en el pool para evitar ciclos y stagnation.
   - La factory se refresca cada FACTORY_REFRESH_STEPS para incorporar snapshots nuevos.
 """
 from __future__ import annotations
@@ -54,9 +56,11 @@ FACTORY_REFRESH_STEPS = 500_000
 EVAL_BOT_INTERVAL = 5   # cada 5 snapshots ≈ cada 500K pasos
 
 _FASES = {
-    0: ("Bootstrap (3 bots)",          "cyan"),
-    1: ("Transición (2 bots + 1 snap)", "yellow"),
-    2: ("Self-play (1 bot + 2 snaps)",  "green"),
+    0: ("Bootstrap (3 bots)",                "cyan"),
+    1: ("Experto (2 bots + BotExperto)",     "yellow"),
+    2: ("Mix (BotExperto + 2 snaps)",        "green"),
+    3: ("Self-play puro (3 snaps)",          "blue"),
+    4: ("Self-play duro (3 snaps recientes)", "magenta"),
 }
 
 
@@ -79,21 +83,23 @@ def parse_args() -> argparse.Namespace:
                    help="Desactivar rotación multi-posición (agente siempre en idx=0)")
     p.add_argument("--baza-reward-weight", type=float, default=0.15,
                    help="Peso de la señal de recompensa por baza (0=terminal-only, default 0.15)")
+    p.add_argument("--use-lstm", action="store_true",
+                   help="Usar HeartsLSTMModel (LSTM 256) en lugar del MLP estándar")
+    p.add_argument("--lstm-hidden", type=int, default=256,
+                   help="Tamaño del estado oculto LSTM (default 256, solo con --use-lstm)")
     return p.parse_args()
 
 
 def _fase(progress: float) -> int:
-    """Devuelve el índice de fase según el progreso de entrenamiento.
-
-    Fase 0 (0–5%):   Bootstrap con 3 bots — aprender reglas básicas.
-    Fase 1 (5–20%):  Transición con 2 bots + 1 snapshot.
-    Fase 2 (20–100%): Self-play con 1 bot + 2 snapshots.
-    """
     if progress < 0.05:
         return 0
-    elif progress < 0.20:
+    elif progress < 0.15:
         return 1
-    return 2
+    elif progress < 0.40:
+        return 2
+    elif progress < 0.70:
+        return 3
+    return 4
 
 
 def _build_panel(
@@ -147,9 +153,12 @@ def main() -> None:
     os.makedirs(log_dir, exist_ok=True)
 
     with open(os.path.join(args.output_dir, "config.json"), "w") as f:
-        json.dump({**vars(args), "random_position": random_position,
-                   "baza_reward_weight": args.baza_reward_weight,
-                   "lr_schedule": f"{args.lr} -> {args.lr_end}"}, f, indent=2)
+        json.dump({
+            **vars(args),
+            "random_position": random_position,
+            "lr_schedule": f"{args.lr} -> {args.lr_end}",
+            "curriculum": "5-fases",
+        }, f, indent=2)
 
     HeartsCallbacks._log_dir = log_dir
 
@@ -170,12 +179,15 @@ def main() -> None:
         opponent_factory=None,
         obs_dim=args.obs_dim,
         random_position=random_position,
+        baza_reward_weight=args.baza_reward_weight,
         lr=args.lr,
         lr_end=args.lr_end,
         total_steps=args.total_steps,
         train_batch_size=args.batch_size,
         num_rollout_workers=args.workers,
         num_gpus=args.gpus,
+        use_lstm=args.use_lstm,
+        lstm_hidden_size=args.lstm_hidden,
     )
     config = config.callbacks(HeartsCallbacks)
 

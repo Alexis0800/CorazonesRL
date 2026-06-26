@@ -1,15 +1,15 @@
 """
-Pool de oponentes para self-play en Hearts.
+Pool de oponentes para self-play en Hearts — curriculum de 5 fases.
 
-Gestiona la selección de oponentes según la fase de entrenamiento:
-  Fase 0  (0–5%):   3 bots heurísticos (bootstrap — aprende reglas básicas)
-  Fase 1  (5–20%):  2 bots + 1 snapshot (transición gradual)
-  Fase 2 (20–100%): 1 bot + 2 snapshots (self-play con ancla permanente)
+  Fase 0  (0–5%):   3 bots simples — bootstrap, aprender reglas básicas.
+  Fase 1  (5–15%):  2 bots simples + 1 BotExperto — introducir oponente duro.
+  Fase 2 (15–40%):  1 BotExperto + 2 snapshots — mezcla experto + self-play.
+  Fase 3 (40–70%):  3 snapshots del pool completo — self-play puro.
+  Fase 4 (70–100%): 3 snapshots recientes (últimos 10) — presión máxima.
 
-La regla de oro: SIEMPRE al menos 1 bot heurístico en el pool para evitar
-estancamiento. El self-play puro tiende a ciclar en estrategias sin mejorar.
-
-Los snapshots son callables cargados desde weights de políticas RLlib.
+BotExperto solo aparece en fases 1 y 2 para que actúe como guía, no como
+ancla permanente. En fases 3-4 el agente se enfrenta solo a sí mismo,
+forzando refinamiento continuo sin el arrastre del experto.
 """
 from __future__ import annotations
 
@@ -64,12 +64,16 @@ class SnapshotPolicy:
         self._model = None
 
     def _get_model(self):
-        """Construye el modelo PyTorch desde los pesos la primera vez (lazy)."""
+        """Construye el modelo PyTorch desde los pesos la primera vez (lazy).
+
+        Detecta automáticamente si los pesos son de HeartsLSTMModel o HeartsActionMaskModel
+        inspeccionando las claves del state_dict.
+        """
         if self._model is not None:
             return self._model
 
         import torch
-        from src.rllib.model import HeartsActionMaskModel
+        from src.rllib.model import HeartsActionMaskModel, HeartsLSTMModel
         from gymnasium import spaces
 
         obs_space = spaces.Dict({
@@ -77,9 +81,22 @@ class SnapshotPolicy:
             "action_mask": spaces.Box(0.0, 1.0, shape=(52,), dtype=np.float32),
         })
         action_space = spaces.Discrete(52)
-        model_config = {"fcnet_hiddens": [512, 512, 256], "fcnet_activation": "relu", "vf_share_layers": False}
 
-        model = HeartsActionMaskModel(obs_space, action_space, 52, model_config, "snapshot")
+        is_lstm = any("_lstm_layer" in k for k in self._weights.keys())
+
+        if is_lstm:
+            lstm_hidden = self._weights["_lstm_layer.weight_hh_l0"].shape[1]
+            model_config = {
+                "lstm_cell_size": lstm_hidden,
+                "max_seq_len": 13,
+                "fcnet_activation": "relu",
+                "vf_share_layers": False,
+            }
+            model = HeartsLSTMModel(obs_space, action_space, 52, model_config, "snapshot")
+        else:
+            model_config = {"fcnet_hiddens": [512, 512, 256], "fcnet_activation": "relu", "vf_share_layers": False}
+            model = HeartsActionMaskModel(obs_space, action_space, 52, model_config, "snapshot")
+
         torch_state = {k: torch.tensor(v) for k, v in self._weights.items()}
         model.load_state_dict(torch_state, strict=True)
         model.eval()
@@ -104,7 +121,12 @@ class SnapshotPolicy:
             obs_t = torch.tensor(obs_vec, dtype=torch.float32).unsqueeze(0)
             mask_t = torch.tensor(mask, dtype=torch.float32).unsqueeze(0)
             input_dict = {"obs": {"obs": obs_t, "action_mask": mask_t}}
-            logits, _ = model.forward(input_dict, [], None)
+
+            # Para modelos LSTM, proveer estado inicial zeros (inferencia sin estado previo)
+            initial = model.get_initial_state()
+            state = [s.unsqueeze(0) for s in initial] if initial else []
+
+            logits, _ = model.forward(input_dict, state, None)
             action = int(logits.argmax(dim=1).item())
 
         carta = Carta._TODAS[action]
@@ -156,7 +178,7 @@ class OpponentPool:
         """Devuelve un opponent_factory serializable para la fase actual.
 
         El closure captura una copia de los snapshots disponibles en este momento.
-        Llama periódicamente a make_factory() para incorporar nuevos snapshots.
+        Llamar periódicamente para incorporar nuevos snapshots al pool de rivales.
 
         Args:
             progress: fracción de entrenamiento completada (0.0 – 1.0).
@@ -165,41 +187,41 @@ class OpponentPool:
             Callable(agente_idx: int) -> dict[int, PolicyFn]
         """
         snapshots = list(self._snapshots)
-        bootstrap_phase = progress < 0.15
+        # Snapshots recientes: últimos 10 (fase 4 solo usa estos para máxima presión)
+        snapshots_recientes = snapshots[-10:] if len(snapshots) >= 10 else snapshots
 
         def _factory(agente_idx: int = 0) -> Dict[int, PolicyFn]:
-            """Selecciona oponentes para los 3 slots no-agente según fase.
-
-            Fase 0 (0–5%):   3 bots simples — aprender reglas básicas.
-            Fase 1 (5–20%):  2 bots + 1 snapshot — transición gradual;
-                              evita el shock de distribución y recupera entropía.
-            Fase 2 (20–100%): 1 bot + 2 snapshots — self-play puro con ancla.
-              Si no hay suficientes snapshots, rellena con bots.
-            """
             opp_indices = [i for i in range(4) if i != agente_idx]
             random.shuffle(opp_indices)
-
             fns: Dict[int, PolicyFn] = {}
 
             if progress < 0.05 or len(snapshots) == 0:
-                # Fase 0: todo bots
+                # Fase 0: bootstrap con 3 bots simples
                 for idx in opp_indices:
                     fns[idx] = random.choice(_BOTS_SIMPLES)
 
-            elif progress < 0.20 or len(snapshots) < 2:
-                # Fase 1: 2 bots + 1 snapshot (transición)
+            elif progress < 0.15 or len(snapshots) < 1:
+                # Fase 1: 2 bots simples + 1 BotExperto — introduce oponente duro
                 fns[opp_indices[0]] = random.choice(_BOTS_SIMPLES)
                 fns[opp_indices[1]] = random.choice(_BOTS_SIMPLES)
-                fns[opp_indices[2]] = random.choice(snapshots)
+                fns[opp_indices[2]] = BotExperto()
 
-            else:
-                # Fase 2: 1 BotExperto + 1 snapshot + 1 bot simple.
-                # BotExperto ancla la calidad — rompe el echo chamber de snapshots
-                # que todos juegan igual. Sin él, el pool de self-play converge a
-                # una estrategia pasiva y deja de aprender.
+            elif progress < 0.40 or len(snapshots) < 2:
+                # Fase 2: 1 BotExperto + 2 snapshots — mezcla experto + self-play
                 fns[opp_indices[0]] = BotExperto()
                 fns[opp_indices[1]] = random.choice(snapshots)
-                fns[opp_indices[2]] = random.choice(_BOTS_SIMPLES)
+                fns[opp_indices[2]] = random.choice(snapshots)
+
+            elif progress < 0.70:
+                # Fase 3: 3 snapshots del pool completo — self-play puro sin ancla de bots
+                for idx in opp_indices:
+                    fns[idx] = random.choice(snapshots)
+
+            else:
+                # Fase 4: 3 snapshots recientes — presión máxima contra versiones propias
+                pool = snapshots_recientes if len(snapshots_recientes) >= 1 else snapshots
+                for idx in opp_indices:
+                    fns[idx] = random.choice(pool)
 
             return fns
 

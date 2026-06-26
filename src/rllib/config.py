@@ -17,10 +17,11 @@ from ray.rllib.algorithms.ppo import PPOConfig
 from ray.rllib.models import ModelCatalog
 
 from src.entorno.dimensiones import DIM_ENTORNO
-from src.rllib.model import HeartsActionMaskModel
+from src.rllib.model import HeartsActionMaskModel, HeartsLSTMModel
 
-# Registrar modelo custom una sola vez al importar el módulo
+# Registrar modelos custom una sola vez al importar el módulo
 ModelCatalog.register_custom_model("hearts_model", HeartsActionMaskModel)
+ModelCatalog.register_custom_model("hearts_lstm_model", HeartsLSTMModel)
 
 
 def build_ppo_config(
@@ -28,6 +29,7 @@ def build_ppo_config(
     obs_dim: int = DIM_ENTORNO,
     agente_idx: int = 0,
     random_position: bool = True,
+    baza_reward_weight: float = 0.15,
     # PPO hiperparámetros
     lr: float = 3e-4,
     lr_end: float = 1e-4,          # piso del LR — nunca decae a cero para que el
@@ -46,6 +48,8 @@ def build_ppo_config(
     num_sgd_iter: int = 10,
     # Arquitectura
     fcnet_hiddens: List[int] = None,
+    use_lstm: bool = False,
+    lstm_hidden_size: int = 256,
     # Recursos
     num_rollout_workers: int = 2,
     num_gpus: int = 0,
@@ -53,18 +57,18 @@ def build_ppo_config(
     """Construye la configuración PPO para Hearts.
 
     Args:
-        opponent_factory: callable(agente_idx) -> dict[int, policy_fn].
-                          Si es None, se usan bots evasivos por defecto.
-        obs_dim:          Dimensión del vector de observación.
-        agente_idx:       Índice base del jugador agente (0-3). Ignorado si
-                          random_position=True.
-        random_position:  Si True, el env sortea agente_idx en cada episodio,
-                          entrenando el modelo desde las 4 posiciones de la mesa.
-        lr / lr_end:      LR inicial y piso final. Decae linealmente de lr a lr_end
-                          durante total_steps. El piso impide que el modelo se "congele"
-                          cuando llegan snapshots nuevos al pool de oponentes.
-        entropy_coeff:    Coeficiente de entropía para exploración continua.
-                          Mantener ≥0.01 para que el modelo nunca deje de explorar.
+        opponent_factory:   callable(agente_idx) -> dict[int, policy_fn].
+                            Si es None, se usan bots evasivos por defecto.
+        obs_dim:            Dimensión del vector de observación.
+        agente_idx:         Índice base del jugador agente (0-3). Ignorado si
+                            random_position=True.
+        random_position:    Si True, el env sortea agente_idx en cada episodio,
+                            entrenando el modelo desde las 4 posiciones de la mesa.
+        baza_reward_weight: Peso de la señal de recompensa por baza (0=terminal-only).
+        lr / lr_end:        LR inicial y piso final. Decae linealmente durante total_steps.
+        entropy_coeff:      Coeficiente de entropía. Mantener ≥0.01 para exploración.
+        use_lstm:           Si True, usa HeartsLSTMModel en lugar del MLP estándar.
+        lstm_hidden_size:   Tamaño del estado oculto del LSTM (default 256).
 
     Returns:
         PPOConfig lista para .build_algo().
@@ -73,8 +77,6 @@ def build_ppo_config(
         fcnet_hiddens = [512, 512, 256]
 
     # Schedule lineal: lr → lr_end a lo largo del entrenamiento.
-    # No usamos cosine decay porque decaería a near-zero e impediría adaptarse
-    # a nuevos oponentes cuando el pool de snapshots crece.
     lr_schedule = [[0, lr], [total_steps, lr_end]]
 
     env_config = {
@@ -82,8 +84,25 @@ def build_ppo_config(
         "agente_idx": agente_idx,
         "random_position": random_position,
         "opponent_factory": opponent_factory,
-        "baza_reward_weight": 0.15,
+        "baza_reward_weight": baza_reward_weight,
     }
+
+    if use_lstm:
+        model_config = {
+            "custom_model": "hearts_lstm_model",
+            "lstm_cell_size": lstm_hidden_size,
+            # max_seq_len = longitud de un episodio Hearts (13 tricks por mano)
+            "max_seq_len": 13,
+            "fcnet_activation": "relu",
+            "vf_share_layers": False,
+        }
+    else:
+        model_config = {
+            "custom_model": "hearts_model",
+            "fcnet_hiddens": fcnet_hiddens,
+            "fcnet_activation": "relu",
+            "vf_share_layers": False,
+        }
 
     config = (
         PPOConfig()
@@ -101,13 +120,8 @@ def build_ppo_config(
         .framework("torch")
         # ── Modelo ───────────────────────────────────────────────────────
         .training(
-            model={
-                "custom_model": "hearts_model",
-                "fcnet_hiddens": fcnet_hiddens,
-                "fcnet_activation": "relu",
-                "vf_share_layers": False,
-            },
-            lr=lr,                  # float — para torch.optim.Adam al inicializar
+            model=model_config,
+            lr=lr,                   # float — para torch.optim.Adam al inicializar
             lr_schedule=lr_schedule, # lista [[step, lr]] — RLlib lo aplica en cada update
             gamma=gamma,
             lambda_=lambda_,
