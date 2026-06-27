@@ -61,10 +61,10 @@ python -m src.torneo.elo --directorio models/v8/elite --partidas 50 --elo-puro -
 
 **`src/entorno/`** — Gymnasium RL environments.
 
-- `corazones_rllib.py`: `CorazonesEnvRLlib(gym.Env)` — **primary RLlib training env**. Observation space `Dict({"obs": Box(224,), "action_mask": Box(52,)})`. One episode = one mano (13 agent steps). Opponents managed inside the env via `opponent_factory`. Passes `gymnasium.check_env`.
-- `observacion.py`: `ObservacionBuilder` — SSOT for the **224-dim** observation vector (v11). Supports 190/194/220/224 via constructor parameter. Call `construir()` for full observation; `construir_desde_motor()` for minimal (used by opponent snapshots in self-play).
-- `recompensas.py`: `RewardConfig` (frozen dataclass, **v12 SSOT**) and `CalculadoraRecompensas` — ALL reward logic centralized here (SRP).
-- `recompensas_minimal.py`: `RewardConfigMinimal` — alternative minimal reward system (3 signals only) for A/B experimentation.
+- `corazones_rllib.py`: `CorazonesEnvRLlib(gym.Env)` — **primary RLlib training env**. Observation space `Dict({"obs": Box(224,), "action_mask": Box(52,)})`. **v10: one episode = one FULL GAME to 100 pts** (multiple hands, scoreboard persists). Reward = R_terminal by final placement (1st=+1, 2nd=+0.3, 3rd=−0.3, 4th=−1) + PBRS potential shaping on the scoreboard (`reward_config`/`gamma` in env_config; gamma must match PPO). Opponents managed inside via `opponent_factory`. Passes `gymnasium.check_env`. See `docs/Rediseño_v10_partida_completa.md`.
+- `observacion.py`: `ObservacionBuilder` — SSOT for the **224-dim** observation vector (v11). In v10 the scoreboard features (`[172:176]`, near-100, leader, terminal-hand) are now LIVE because score persists across hands.
+- `recompensas_partida.py`: **v10 SSOT** — `RewardConfigPartida` + `CalculadoraRecompensasPartida` (R_terminal + PBRS Φ). This is what `CorazonesEnvRLlib` uses now.
+- `recompensas.py`: `RewardConfig` + `CalculadoraRecompensas` — **legacy (v12, single-hand)**; not wired into the v10 env (kept for reference/tests).
 - `dimensiones.py`: SSOT for observation dimensions (`DIM_V5=190`, `DIM_V6=194`, `DIM_V10=220`, `DIM_V11=224`, `DIM_ENTORNO=224`). Always import from here — never hardcode.
 
 **`src/agentes/`** — Agent strategies (Strategy pattern: `(motor, idx, legales) → Carta`).

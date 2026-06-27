@@ -1,12 +1,15 @@
 """
-Entorno de Hearts compatible con Ray RLlib.
+Entorno de Hearts compatible con Ray RLlib — PARTIDA COMPLETA (v10).
 
 gym.Env single-agent con:
   - Observation space: Dict({"obs": Box(DIM_ENTORNO,), "action_mask": Box(52,)})
   - Action space: Discrete(52)
-  - Un episodio = una mano completa (13 bazas, ~13 pasos del agente).
-  - Recompensa: terminal (26 - puntos_agente) + señal por baza (baza_reward_weight).
-    Moon exitoso = +52. Señal por baza se suprime cuando P(Moon) >= 0.5.
+  - Un episodio = una PARTIDA COMPLETA: se juegan manos hasta que un jugador
+    alcanza el límite de puntos (100). El marcador persiste entre manos.
+  - Recompensa (ver docs/Rediseño_v10_partida_completa.md):
+      * R_terminal: por puesto final (1º=+1.0, 2º=+0.3, 3º=−0.3, 4º=−1.0).
+      * Shaping PBRS: F = γ·Φ(s') − Φ(s), con Φ sobre el marcador acumulado.
+        Garantizado no-farmeable (Ng/Harada/Russell 1999).
 
 Los oponentes (3 jugadores) se gestionan dentro del env. Su comportamiento
 se controla mediante `opponent_factory` en env_config:
@@ -14,13 +17,12 @@ se controla mediante `opponent_factory` en env_config:
     env_config = {
         "obs_dim": 224,                # dimensión del vector de observación
         "agente_idx": 0,               # posición fija del agente (0-3)
-        "random_position": True,       # si True, agente_idx se sortea cada episodio
+        "random_position": True,       # si True, agente_idx se sortea cada partida
         "opponent_factory": fn,        # callable(agente_idx) -> dict[int, policy_fn]
+        "gamma": 0.999,                # DEBE coincidir con el gamma de PPO (PBRS)
     }
 
 `policy_fn` tiene la firma: (motor: MotorCorazones, idx: int, legales: List[Carta]) -> Carta
-
-La factory acepta el agente_idx actual para poder sortear posiciones.
 """
 from __future__ import annotations
 
@@ -34,7 +36,10 @@ from src.dominio.carta import Carta
 from src.dominio.motor import MotorCorazones
 from src.entorno.dimensiones import DIM_ENTORNO
 from src.entorno.observacion import ObservacionBuilder
-from src.entorno.recompensas import CalculadoraRecompensas, RewardConfig
+from src.entorno.recompensas_partida import (
+    CalculadoraRecompensasPartida,
+    RewardConfigPartida,
+)
 from src.agentes.heuristicos import bot_evasivo
 
 
@@ -43,13 +48,13 @@ OpponentFactory = Callable[[int], Dict[int, PolicyFn]]
 
 
 class CorazonesEnvRLlib(gym.Env):
-    """Entorno de Hearts para Ray RLlib (single-agent, 13 bazas por episodio).
+    """Entorno de Hearts para Ray RLlib (single-agent, PARTIDA COMPLETA).
 
-    Recompensa terminal-only: reward = 26 - puntos_agente al final de la mano.
-    Todas las bazas intermedias devuelven reward = 0.0.
+    El episodio abarca múltiples manos hasta que un jugador llega a 100 puntos.
+    Recompensa = shaping PBRS por mano + recompensa terminal por puesto final.
 
-    Si random_position=True, el agente_idx se sortea en cada reset(), lo que
-    obliga al modelo a aprender a jugar desde las 4 posiciones de la mesa.
+    Si random_position=True, el agente_idx se sortea en cada reset() (= cada
+    partida), obligando al modelo a jugar desde las 4 posiciones de la mesa.
     """
 
     metadata = {"render_modes": []}
@@ -66,10 +71,15 @@ class CorazonesEnvRLlib(gym.Env):
         self._agente_idx: int = cfg.get("agente_idx", 0)
         self._random_position: bool = cfg.get("random_position", False)
         self._obs_dim: int = cfg.get("obs_dim", DIM_ENTORNO)
-        self._reward_config: RewardConfig = cfg.get("reward_config", RewardConfig())
+        self._reward_config: RewardConfigPartida = cfg.get(
+            "reward_config", RewardConfigPartida()
+        )
         self._opponent_factory: Optional[OpponentFactory] = cfg.get(
             "opponent_factory", None
         )
+        # gamma para el shaping PBRS — DEBE coincidir con el de PPO para que
+        # la garantía de invarianza de política se mantenga.
+        self._gamma: float = cfg.get("gamma", 0.999)
 
         self.observation_space = spaces.Dict({
             "obs": spaces.Box(0.0, 1.0, shape=(self._obs_dim,), dtype=np.float32),
@@ -79,25 +89,18 @@ class CorazonesEnvRLlib(gym.Env):
 
         self._motor = MotorCorazones()
         self._obs_builder = ObservacionBuilder(dim=self._obs_dim)
-        # Mantenemos el calculador para _build_obs() (pozo_viable, SCORE_RIVAL_CERCA)
-        self._calc = CalculadoraRecompensas(self._reward_config)
+        self._calc = CalculadoraRecompensasPartida(self._reward_config)
 
-        # Estado de episodio
-        self._puntuacion_historica: List[int] = [0] * 4
+        # Estado por mano (se reinicia al inicio de cada mano)
         self._puntos_mano_actual: List[int] = [0] * 4
         self._vacios: List[set] = [set() for _ in range(4)]
         self._dama_picas_en: Optional[int] = None
+
+        # Estado por partida (se reinicia en reset())
         self._opponents: Dict[int, PolicyFn] = {}
-        # Puntos acumulados al inicio de la baza actual, para calcular delta por baza
-        self._puntos_antes_de_baza: int = 0
-        # Peso de la señal por baza relativa al terminal (0 = terminal-only)
-        self._baza_reward_weight: float = cfg.get("baza_reward_weight", 0.15)
-        # Umbral de P(Moon) para suprimir penalización por baza
-        self._moon_prob_threshold: float = cfg.get("moon_prob_threshold", 0.5)
-        # v9: acumula recompensas baza-level (Q♠ penalty, moon hearts, K♠ discard)
-        # para consumirlas al final de step() sea cual sea la posición del agente en la baza
-        self._pending_baza_reward: float = 0.0
-        self._ultima_carta_agente = None  # carta que jugó el agente en la baza actual
+        self._phi_prev: float = 0.0
+        self._manos_jugadas: int = 0
+        self._agente_hizo_pozo: bool = False
 
     # ------------------------------------------------------------------
     # Gymnasium API
@@ -109,93 +112,112 @@ class CorazonesEnvRLlib(gym.Env):
         rng_seed = int(self.np_random.integers(0, 2**31))
         _pyrandom.seed(rng_seed)
 
-        # Sortear posición si está habilitado
         if self._random_position:
             self._agente_idx = int(self.np_random.integers(0, 4))
 
-        self._motor.repartir()
-        # Reiniciar todo el estado por episodio
-        self._puntuacion_historica = [0] * 4
-        self._puntos_mano_actual = [0] * 4
-        self._vacios = [set() for _ in range(4)]
-        self._dama_picas_en = None
-        self._pending_baza_reward = 0.0
-        self._ultima_carta_agente = None
+        # Inicia una partida nueva (marcador a cero) y reparte la primera mano.
+        self._motor.nueva_partida()
+        self._reiniciar_estado_mano()
+        self._manos_jugadas = 0
+        self._agente_hizo_pozo = False
 
+        # Potencial inicial: Φ([0,0,0,0]) = 0 por construcción.
+        self._phi_prev = self._calc.potencial(
+            self._motor.puntuaciones_historicas(), self._agente_idx
+        )
+
+        # La factory se llama UNA vez por partida → oponentes fijos toda la partida.
         if self._opponent_factory is not None:
-            # La factory acepta el agente_idx actual para asignar los 3 slots rivales
             self._opponents = self._opponent_factory(self._agente_idx)
         else:
             self._opponents = {
-                i: bot_evasivo
-                for i in range(4) if i != self._agente_idx
+                i: bot_evasivo for i in range(4) if i != self._agente_idx
             }
 
         self._auto_step_opponents()
-
         return self._build_obs(), {}
 
     def step(self, action: int) -> Tuple[dict, float, bool, bool, dict]:
         carta = Carta._TODAS[action]
         legales = self._motor.obtener_jugadas_legales(self._agente_idx)
-
         if carta not in legales:
             carta = legales[0]
 
-        self._ultima_carta_agente = carta  # trackear para recompensas baza-level (v9)
         self._motor.jugar_carta(self._agente_idx, carta)
         self._actualizar_vacios(self._agente_idx, carta)
 
-        baza_cerrada = len(self._motor.mesa) == 4
-        if baza_cerrada:
-            self._puntos_antes_de_baza = self._motor.jugadores[self._agente_idx].contar_puntos_bazas()
+        if len(self._motor.mesa) == 4:
             self._resolver_baza()
 
+        # Avanzar oponentes hasta el turno del agente o el fin de la mano.
         if not self._es_fin_de_mano():
             self._auto_step_opponents()
 
-        terminated = self._es_fin_de_mano()
+        terminated = False
+        info: dict = {}
+
+        if self._es_fin_de_mano():
+            # Cerrar la mano: aplicar puntuación al marcador acumulado.
+            self._cerrar_mano()
+
+            if self._motor.partida_terminada(self._reward_config.LIMITE_PARTIDA):
+                terminated = True
+            else:
+                # Repartir la siguiente mano (conserva el marcador) y avanzar
+                # hasta el turno del agente.
+                self._motor.repartir()
+                self._reiniciar_estado_mano()
+                self._reset_oponentes_por_mano()
+                self._auto_step_opponents()
+
+        # --- Recompensa: shaping PBRS (+ R_terminal si terminó la partida) ---
+        scores = self._motor.puntuaciones_historicas()
+        reward = self._shaping_step(scores, terminated)
 
         if terminated:
-            reward = self._calcular_recompensa_terminal()
-        elif baza_cerrada and self._baza_reward_weight > 0:
-            puntos_ahora = self._motor.jugadores[self._agente_idx].contar_puntos_bazas()
-            delta = puntos_ahora - self._puntos_antes_de_baza
-            if delta > 0:
-                moon_prob = self._calcular_moon_prob(self._agente_idx)
-                moon_prob_rival = max(
-                    self._calcular_moon_prob(i)
-                    for i in range(4) if i != self._agente_idx
-                )
-                if moon_prob >= self._moon_prob_threshold:
-                    # Trayectoria Moon activa — no penalizar; el terminal +52 guía.
-                    # Si falla, el terminal (26-pts) lo castigará.
-                    reward = 0.0
-                elif moon_prob_rival >= 0.7:
-                    # Tomar puntos para romper el Moon de un rival es neutral.
-                    # El modelo aprende por el terminal (evitar el +26 ajeno).
-                    reward = 0.0
-                else:
-                    # Juego normal: penalizar proporcionalmente, atenuando por moon_prob
-                    atenuacion = 1.0 - moon_prob
-                    reward = -self._baza_reward_weight * (delta / 13.0) * atenuacion
-            else:
-                reward = 0.0
-        else:
-            reward = 0.0
+            reward += self._calc.recompensa_terminal(scores, self._agente_idx)
+            puesto = self._calc.puesto(scores, self._agente_idx)
+            info = {
+                "puesto": puesto,
+                "gano_partida": puesto == 1,
+                "top2": puesto <= 2,
+                "scores_finales": list(scores),
+                "manos_jugadas": self._manos_jugadas,
+                "shooting_moon": self._agente_hizo_pozo,
+                "r_terminal": self._calc.recompensa_terminal(scores, self._agente_idx),
+            }
 
-        # Consumir recompensas baza-level acumuladas en _resolver_baza() (v9)
-        reward += self._pending_baza_reward
-        self._pending_baza_reward = 0.0
+        return self._build_obs(), reward, terminated, False, info
 
-        return self._build_obs(), reward, terminated, False, {}
+    def _shaping_step(self, scores: List[int], terminal: bool) -> float:
+        """F = γ·Φ(s') − Φ(s), manteniendo Φ(s) entre steps (telescopaje exacto)."""
+        phi_now = 0.0 if terminal else self._calc.potencial(scores, self._agente_idx)
+        f = self._gamma * phi_now - self._phi_prev
+        self._phi_prev = phi_now
+        return f
 
     # ------------------------------------------------------------------
-    # Internals — avance del juego (sin recompensas intermedias)
+    # Internals
     # ------------------------------------------------------------------
+
+    def _reiniciar_estado_mano(self) -> None:
+        """Reinicia el estado táctico que solo vive durante una mano."""
+        self._puntos_mano_actual = [0] * 4
+        self._vacios = [set() for _ in range(4)]
+        self._dama_picas_en = None
+
+    def _reset_oponentes_por_mano(self) -> None:
+        """Resetea el estado interno de oponentes con estado por mano (BotExperto, etc.)."""
+        for opp in self._opponents.values():
+            reset = getattr(opp, "reset", None)
+            if callable(reset):
+                try:
+                    reset()
+                except Exception:
+                    pass
 
     def _auto_step_opponents(self) -> None:
-        """Avanza oponentes hasta el turno del agente."""
+        """Avanza oponentes hasta el turno del agente (o fin de mano)."""
         while (
             not self._es_fin_de_mano()
             and self._motor.obtener_jugador_actual() != self._agente_idx
@@ -205,72 +227,25 @@ class CorazonesEnvRLlib(gym.Env):
             carta = self._opponents.get(idx, bot_evasivo)(self._motor, idx, legales)
             self._motor.jugar_carta(idx, carta)
             self._actualizar_vacios(idx, carta)
-
             if len(self._motor.mesa) == 4:
                 self._resolver_baza()
 
     def _resolver_baza(self) -> None:
-        """Avanza el motor al resolver la baza y acumula recompensas baza-level (v9)."""
+        """Resuelve la baza y actualiza estado táctico (Q♠, puntos de mano)."""
         cartas_en_mesa = [c for _, c in self._motor.mesa]
-        q_activa_antes = self._dama_picas_en is None  # ¿Q♠ aún no capturada?
         ganador = self._motor.resolver_baza()
-
         if any(c.es_dama_de_picas for c in cartas_en_mesa):
             self._dama_picas_en = ganador
-
         for i, jug in enumerate(self._motor.jugadores):
             self._puntos_mano_actual[i] = jug.contar_puntos_bazas()
 
-        # --- v9: señales baza-level ---
-        cfg = self._reward_config
-        if ganador == self._agente_idx:
-            moon_prob = self._calcular_moon_prob(self._agente_idx)
-            for c in cartas_en_mesa:
-                if c.es_dama_de_picas and moon_prob < self._moon_prob_threshold:
-                    # Capturó Q♠ sin estar persiguiendo la luna → penalizar
-                    self._pending_baza_reward += cfg.Q_SPADES_BAZA_PENALTY
-                if c.es_corazon and moon_prob >= self._moon_prob_threshold:
-                    # Capturó corazón durante intento Moon activo → incentivar
-                    self._pending_baza_reward += cfg.MOON_HEARTS_STEP_REWARD
-        elif (self._ultima_carta_agente is not None
-              and q_activa_antes
-              and self._ultima_carta_agente.palo == 2
-              and self._ultima_carta_agente.valor >= 13):
-            # Agente jugó K♠/A♠ y no ganó la baza, con Q♠ aún activa.
-            # Solo recompensar si la carta era un riesgo real: el agente
-            # tenía ≤ 2 espadas en total (K♠/A♠ + a lo sumo una más).
-            # Si tenía 5 espadas, K♠ no era inminente — no bonus.
-            picas_restantes = sum(
-                1 for c in self._motor.jugadores[self._agente_idx].mano
-                if c.palo == 2
-            )
-            if picas_restantes <= 1:
-                self._pending_baza_reward += cfg.DESCARTAR_REY_PICAS_REWARD
-
-        self._ultima_carta_agente = None  # consumida para esta baza
-
-    def _calcular_recompensa_terminal(self) -> float:
-        """Recompensa final de la mano.
-
-        Fórmula: reward = 26 - puntos_agente
-          - Rango normal: [0, 26]  (0 = máximo de puntos, 26 = mano perfecta)
-          - Shooting the Moon: 52  (el agente capturó los 26 puntos de penalización)
-
-        Los rivales se llevan 26 pts cada uno cuando hay Moon; el agente queda en 0.
-        Detectamos Moon por puntos_crudos antes de llamar a aplicar_puntuacion().
-        """
+    def _cerrar_mano(self) -> None:
+        """Aplica la puntuación de la mano al marcador acumulado."""
         puntos_crudos = [j.contar_puntos_bazas() for j in self._motor.jugadores]
-
         if puntos_crudos[self._agente_idx] == 26:
-            # Agente hizo Shooting the Moon
-            self._motor.aplicar_puntuacion()
-            return 52.0
-
-        puntuaciones = self._motor.aplicar_puntuacion()
-        self._puntuacion_historica = [
-            self._puntuacion_historica[i] + puntuaciones[i] for i in range(4)
-        ]
-        return 26.0 - float(puntuaciones[self._agente_idx])
+            self._agente_hizo_pozo = True
+        self._motor.aplicar_puntuacion()
+        self._manos_jugadas += 1
 
     def _es_fin_de_mano(self) -> bool:
         return self._motor.numero_baza > 13 or all(
@@ -284,16 +259,7 @@ class CorazonesEnvRLlib(gym.Env):
                 self._vacios[jugador_idx].add(self._motor.palo_de_salida)
 
     def _calcular_moon_prob(self, jugador_idx: int) -> float:
-        """Probabilidad aproximada [0, 1] de que jugador_idx complete Moon.
-
-        Retorna 0.0 inmediatamente si cualquier rival ya tiene puntos de
-        penalización (condición necesaria: Moon requiere los 26 puntos completos).
-
-        Score = control de corazones altos (A K Q J 10) × 0.60
-              + Q♠ bajo control × 0.20
-              + progreso (hearts ya ganados) × 0.10
-              - penalización por hearts aún en manos rivales × 0.10
-        """
+        """Probabilidad aproximada [0, 1] de que jugador_idx complete Moon."""
         for i, jug in enumerate(self._motor.jugadores):
             if i != jugador_idx and jug.contar_puntos_bazas() > 0:
                 return 0.0
@@ -301,33 +267,31 @@ class CorazonesEnvRLlib(gym.Env):
         jug = self._motor.jugadores[jugador_idx]
         todas = list(jug.mano) + list(jug.bazas_ganadas)
 
-        # Corazones altos: A=14 K=13 Q=12 J=11 10=10
         high_hearts = sum(1 for c in todas if c.es_corazon and c.valor >= 10)
         hearts_ganados = sum(1 for c in jug.bazas_ganadas if c.es_corazon)
         qs_control = any(c.es_dama_de_picas for c in todas)
-
-        # Hearts que aún están en manos rivales (vías de escape del Moon)
         hearts_en_rivales = sum(
             1 for i, jug_r in enumerate(self._motor.jugadores)
             if i != jugador_idx
             for c in jug_r.mano if c.es_corazon
         )
 
-        control  = (high_hearts / 5.0) * 0.60
+        control = (high_hearts / 5.0) * 0.60
         qs_bonus = 0.20 if qs_control else 0.0
         progreso = min(hearts_ganados / 13.0, 1.0) * 0.10
-        escape   = min(hearts_en_rivales * 0.015, 0.10)
-
+        escape = min(hearts_en_rivales * 0.015, 0.10)
         return max(0.0, min(1.0, control + qs_bonus + progreso - escape))
 
     def _build_obs(self) -> dict:
         agente = self._agente_idx
+        # El marcador histórico ahora ESTÁ VIVO (persiste entre manos).
+        puntuacion_historica = self._motor.puntuaciones_historicas()
         moon_prob_agente = self._calcular_moon_prob(agente)
-        moon_prob_rival  = max(
+        moon_prob_rival = max(
             self._calcular_moon_prob(i) for i in range(4) if i != agente
         )
         puedo_alimentar = any(
-            self._puntuacion_historica[j] >= self._calc.cfg.SCORE_RIVAL_CERCA
+            puntuacion_historica[j] >= 85
             for j in range(4) if j != agente
         )
 
@@ -335,7 +299,7 @@ class CorazonesEnvRLlib(gym.Env):
             motor=self._motor,
             agente_idx=agente,
             vacios=self._vacios,
-            puntuacion_historica=self._puntuacion_historica,
+            puntuacion_historica=puntuacion_historica,
             puntos_mano_actual=self._puntos_mano_actual,
             dama_picas_en=self._dama_picas_en,
             moon_prob_agente=moon_prob_agente,

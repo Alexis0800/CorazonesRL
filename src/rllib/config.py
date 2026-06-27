@@ -29,12 +29,15 @@ def build_ppo_config(
     obs_dim: int = DIM_ENTORNO,
     agente_idx: int = 0,
     random_position: bool = True,
-    baza_reward_weight: float = 0.15,
+    reward_config=None,
+    baza_reward_weight: float = 0.15,  # obsoleto (v9), ignorado en v10
     # PPO hiperparámetros
     lr: float = 3e-4,
     lr_end: float = 1e-4,          # piso del LR — nunca decae a cero para que el
     total_steps: int = 20_000_000, # modelo siempre pueda adaptarse a nuevos snapshots
-    gamma: float = 0.99,
+    # gamma alto: el episodio es una PARTIDA COMPLETA (~100-170 steps); el puesto
+    # final debe propagar hacia atrás. DEBE coincidir con el gamma del env (PBRS).
+    gamma: float = 0.999,
     lambda_: float = 0.95,
     clip_param: float = 0.2,
     # entropy_coeff alto = más exploración. Con recompensas terminales y self-play
@@ -84,15 +87,22 @@ def build_ppo_config(
         "agente_idx": agente_idx,
         "random_position": random_position,
         "opponent_factory": opponent_factory,
-        "baza_reward_weight": baza_reward_weight,
+        # gamma del shaping PBRS — debe ser idéntico al gamma de PPO.
+        "gamma": gamma,
     }
+    if reward_config is not None:
+        env_config["reward_config"] = reward_config
 
     if use_lstm:
         model_config = {
             "custom_model": "hearts_lstm_model",
             "lstm_cell_size": lstm_hidden_size,
-            # max_seq_len = longitud de un episodio Hearts (13 tricks por mano)
-            "max_seq_len": 13,
+            # v10: el episodio es una PARTIDA COMPLETA (~130 steps, ~10 manos).
+            # max_seq_len es la ventana de BPTT; debe cruzar varias manos para que
+            # la LSTM aprenda a modelar patrones de rivales ENTRE manos (no solo
+            # dentro de una). 52 ≈ 4 manos de contexto. El estado oculto se arrastra
+            # toda la partida; esto solo limita hasta dónde fluye el gradiente.
+            "max_seq_len": 52,
             "fcnet_activation": "relu",
             "vf_share_layers": False,
         }

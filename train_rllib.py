@@ -12,10 +12,15 @@ Curriculum de 5 fases (automático según progreso):
     40–70%  → Fase 3: 3 snapshots del pool completo (self-play puro)
     70–100% → Fase 4: 3 snapshots recientes (presión máxima)
 
-Principios de diseño:
-  - Recompensa terminal-only: reward = 26 - puntos solo al final de cada mano.
+Principios de diseño (v10 — PARTIDA COMPLETA):
+  - Episodio = una partida completa a 100 puntos (el marcador persiste entre manos).
+  - Recompensa = R_terminal por puesto final (1º=+1, 2º=+0.3, 3º=−0.3, 4º=−1)
+    + shaping PBRS sobre el marcador (garantizado no-farmeable).
+  - gamma alto (0.999) para propagar el puesto final; debe coincidir env↔PPO.
   - Rotación multi-posición: el agente entrena desde las 4 posiciones aleatoriamente.
   - La factory se refresca cada FACTORY_REFRESH_STEPS para incorporar snapshots nuevos.
+
+Ver: docs/Rediseño_v10_partida_completa.md
 """
 from __future__ import annotations
 
@@ -23,6 +28,16 @@ import argparse
 import json
 import math
 import os
+import sys
+
+# Forzar UTF-8 en stdout/stderr: rich (panel Live + mensajes) usa caracteres
+# unicode que rompen en consolas Windows cp1252 cuando la salida se redirige
+# (p.ej. ejecución en background). Sin esto, un print con unicode mata el run.
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+except Exception:
+    pass
 
 import ray
 from rich.console import Console
@@ -45,7 +60,7 @@ from src.rllib.callbacks import HeartsCallbacks
 from src.rllib.config import build_ppo_config
 from src.rllib.eval_bots import evaluar_vs_bots
 from src.rllib.opponent_pool import OpponentPool
-from src.rllib.utils import guardar_snapshot, podar_snapshots
+from src.rllib.utils import guardar_snapshot, podar_snapshots, preservar_elite
 
 console = Console()
 
@@ -81,8 +96,15 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--batch-size", type=int, default=8192)
     p.add_argument("--no-random-position", action="store_true",
                    help="Desactivar rotación multi-posición (agente siempre en idx=0)")
+    p.add_argument("--gamma", type=float, default=0.999,
+                   help="Factor de descuento. Alto porque el episodio es una partida "
+                        "completa (~100-170 steps). Debe coincidir env↔PPO (PBRS).")
+    p.add_argument("--phi-lambda", type=float, default=0.5,
+                   help="Peso del potencial Φ del shaping PBRS (default 0.5)")
+    p.add_argument("--limite-partida", type=int, default=100,
+                   help="Puntos para terminar la partida (default 100)")
     p.add_argument("--baza-reward-weight", type=float, default=0.15,
-                   help="Peso de la señal de recompensa por baza (0=terminal-only, default 0.15)")
+                   help="OBSOLETO (v9): ignorado en v10. Se mantiene por compatibilidad.")
     p.add_argument("--use-lstm", action="store_true",
                    help="Usar HeartsLSTMModel (LSTM 256) en lugar del MLP estándar")
     p.add_argument("--lstm-hidden", type=int, default=256,
@@ -124,13 +146,15 @@ def _build_panel(
         f"[bold]Iteración:[/bold] {iter_count}",
         f"[bold]Steps:[/bold] {pasos_totales:,} / {total_steps:,}  ({progress_pct:.1f}%)",
     )
-    reward_color = "green" if (not math.isnan(reward_medio) and reward_medio > 13) else "red"
+    # Reward de partida ≈ [-1.5, +1.5] (R_terminal ±1/±0.3 + shaping PBRS).
+    # >0 indica que el agente tiende a quedar en la mitad alta de la tabla.
+    reward_color = "green" if (not math.isnan(reward_medio) and reward_medio > 0) else "red"
     grid.add_row(
         f"[bold]Reward medio:[/bold] [{reward_color}]{reward_medio:.3f}[/{reward_color}]",
         f"[bold]Reward máx:[/bold]  {reward_max:.2f}",
     )
     grid.add_row(
-        f"[bold]Ep len:[/bold] {ep_len:.1f}",
+        f"[bold]Ep len (steps/partida):[/bold] {ep_len:.0f}",
         f"[bold]Snapshots:[/bold] {num_snapshots}",
     )
     grid.add_row(
@@ -146,6 +170,7 @@ def main() -> None:
     random_position = not args.no_random_position
 
     snapshot_dir = os.path.join(args.output_dir, "snapshots")
+    elite_dir = os.path.join(args.output_dir, "elite")
     log_dir = os.path.join(args.output_dir, "logs")
     log_path = os.path.join(log_dir, "eval_log.jsonl")
     bot_eval_log_path = os.path.join(log_dir, "bot_eval_log.jsonl")
@@ -175,11 +200,18 @@ def main() -> None:
         obs_dim=args.obs_dim,
     )
 
+    from src.entorno.recompensas_partida import RewardConfigPartida
+    reward_config = RewardConfigPartida(
+        PHI_LAMBDA=args.phi_lambda,
+        LIMITE_PARTIDA=args.limite_partida,
+    )
+
     config = build_ppo_config(
         opponent_factory=None,
         obs_dim=args.obs_dim,
         random_position=random_position,
-        baza_reward_weight=args.baza_reward_weight,
+        reward_config=reward_config,
+        gamma=args.gamma,
         lr=args.lr,
         lr_end=args.lr_end,
         total_steps=args.total_steps,
@@ -270,12 +302,28 @@ def main() -> None:
                         snapshots_desde_ultima_eval = 0
                         try:
                             policy = algo.get_policy()
-                            metricas_bot = evaluar_vs_bots(policy, obs_dim=args.obs_dim)
+                            metricas_bot = evaluar_vs_bots(
+                                policy, obs_dim=args.obs_dim, n_partidas=50
+                            )
                             metricas_bot["tipo"] = "bot_eval"
                             metricas_bot["paso"] = pasos_totales
                             metricas_bot["fase"] = fase_actual
                             with open(bot_eval_log_path, "a", encoding="utf-8") as f:
                                 f.write(json.dumps(metricas_bot) + "\n")
+
+                            # Preservar el mejor modelo (elite) — protege contra
+                            # el pruning y contra la regresión del self-play.
+                            # Score compuesto centrado en el desafío real (experto).
+                            score = (
+                                0.5 * metricas_bot.get("top2_rate_vs_experto", 0.0)
+                                + 0.3 * metricas_bot.get("win_rate_vs_experto", 0.0)
+                                + 0.2 * metricas_bot.get("top2_rate", 0.0)
+                            )
+                            if preservar_elite(ruta, elite_dir, score, pasos_totales):
+                                console.print(
+                                    f"[green][elite] preservado[/green] "
+                                    f"(paso {pasos_totales:,}, score {score:.3f})"
+                                )
                         except Exception as exc:
                             console.print(f"[yellow]bot_eval error: {exc}[/yellow]")
 

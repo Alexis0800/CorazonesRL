@@ -152,6 +152,40 @@ class MotorCorazones:
             jugador.sumar_puntos(pts)
         return puntuaciones
 
+    # ------------------------------------------------------------------
+    # Nivel de partida (múltiples manos hasta el límite de puntos)
+    # ------------------------------------------------------------------
+
+    LIMITE_PARTIDA: int = 100
+
+    def nueva_partida(self) -> None:
+        """Inicia una partida completa: reinicia el marcador acumulado y reparte.
+
+        A diferencia de `repartir()` (que solo prepara una mano nueva conservando
+        el marcador histórico), esto pone a cero la puntuación de los 4 jugadores.
+        Usar al comienzo de cada episodio de partida completa.
+        """
+        for jug in self.jugadores:
+            jug.puntuacion_historica = 0
+        self.repartir()
+
+    def puntuaciones_historicas(self) -> List[int]:
+        """Marcador acumulado de la partida (una entrada por jugador)."""
+        return [j.puntuacion_historica for j in self.jugadores]
+
+    def partida_terminada(self, limite: Optional[int] = None) -> bool:
+        """True si algún jugador alcanzó/superó el límite (fin de partida)."""
+        tope = self.LIMITE_PARTIDA if limite is None else limite
+        return any(j.puntuacion_historica >= tope for j in self.jugadores)
+
+    def ranking_partida(self) -> List[int]:
+        """Índices de jugadores ordenados de menor a mayor puntuación.
+
+        El primer elemento es el ganador (menor puntuación). Los empates se
+        resuelven de forma estable por índice de jugador.
+        """
+        return sorted(range(4), key=lambda i: self.jugadores[i].puntuacion_historica)
+
     def jugar_mano(self, selector_cartas: Optional[Callable] = None) -> List[int]:
         """Ejecuta una mano completa de 13 bazas."""
         self.repartir()

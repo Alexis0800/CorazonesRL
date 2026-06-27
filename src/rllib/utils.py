@@ -110,6 +110,67 @@ def cargar_policy_desde_checkpoint(checkpoint_path: str, policy_id: str = "defau
     return SnapshotPolicy.from_weights(weights, obs_dim=obs_dim)
 
 
+def preservar_elite(
+    snapshot_path: str,
+    elite_dir: str,
+    score: float,
+    paso: int,
+    max_elite: int = 5,
+) -> bool:
+    """Copia un snapshot al directorio `elite/` si su score entra en el top-K.
+
+    El directorio elite NUNCA se poda por el ciclo normal, así que garantiza
+    conservar los mejores modelos aunque `podar_snapshots` borre los snapshots
+    antiguos. Mantiene un índice JSON (`elite_index.json`) con score y paso.
+
+    Args:
+        snapshot_path: Ruta del snapshot recién guardado a considerar.
+        elite_dir:     Directorio elite destino.
+        score:         Métrica de calidad (mayor = mejor).
+        paso:          Paso global del snapshot.
+        max_elite:     Cuántos elites conservar (top-K).
+
+    Returns:
+        True si el snapshot fue preservado, False si no calificó.
+    """
+    import json
+    import shutil
+
+    os.makedirs(elite_dir, exist_ok=True)
+    index_path = os.path.join(elite_dir, "elite_index.json")
+    index: List[dict] = []
+    if os.path.isfile(index_path):
+        try:
+            with open(index_path, "r", encoding="utf-8") as f:
+                index = json.load(f)
+        except Exception:
+            index = []
+
+    # ¿Califica? (hay hueco, o supera al peor del top-K)
+    if len(index) >= max_elite and score <= min(e["score"] for e in index):
+        return False
+
+    nombre = f"elite_{paso:012d}"
+    destino = os.path.join(elite_dir, nombre)
+    if not os.path.exists(destino):
+        try:
+            shutil.copytree(snapshot_path, destino)
+        except Exception:
+            return False
+
+    index.append({"score": round(float(score), 4), "paso": paso, "nombre": nombre})
+    index.sort(key=lambda e: e["score"], reverse=True)
+
+    # Podar elites que sobran (conservar solo top-K)
+    for e in index[max_elite:]:
+        shutil.rmtree(os.path.join(elite_dir, e["nombre"]), ignore_errors=True)
+    index = index[:max_elite]
+
+    with open(index_path, "w", encoding="utf-8") as f:
+        json.dump(index, f, indent=2)
+    return True
+
+
 def podar_snapshots(
     snapshot_dir: str,
     mantener: int = 50,

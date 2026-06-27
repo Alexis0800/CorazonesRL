@@ -4,12 +4,14 @@ Pool de oponentes para self-play en Hearts — curriculum de 5 fases.
   Fase 0  (0–5%):   3 bots simples — bootstrap, aprender reglas básicas.
   Fase 1  (5–15%):  2 bots simples + 1 BotExperto — introducir oponente duro.
   Fase 2 (15–40%):  1 BotExperto + 2 snapshots — mezcla experto + self-play.
-  Fase 3 (40–70%):  3 snapshots del pool completo — self-play puro.
-  Fase 4 (70–100%): 3 snapshots recientes (últimos 10) — presión máxima.
+  Fase 3 (40–70%):  1 BotExperto (ANCLA) + 2 snapshots del pool completo.
+  Fase 4 (70–100%): 1 BotExperto (ANCLA) + 2 snapshots recientes — presión máxima.
 
-BotExperto solo aparece en fases 1 y 2 para que actúe como guía, no como
-ancla permanente. En fases 3-4 el agente se enfrenta solo a sí mismo,
-forzando refinamiento continuo sin el arrastre del experto.
+BotExperto se mantiene como ANCLA fija en todas las fases ≥1. Lección de
+v10_lstm: el self-play PURO (fases 3-4 sin ancla) provoca regresión vs
+oponentes de distribución distinta (el agente olvida el juego robusto y se
+sobre-especializa en su propio estilo). Un ancla de 1 experto en cada mesa
+preserva la robustez sin renunciar al refinamiento por self-play.
 """
 from __future__ import annotations
 
@@ -43,6 +45,12 @@ class SnapshotPolicy:
         self._obs_dim = obs_dim
         self._obs_builder = ObservacionBuilder(dim=obs_dim)
         self._model = None
+        # Estado LSTM por jugador (idx -> [h, c]) y marcador previo por jugador,
+        # para arrastrar la memoria a lo largo de la partida y resetearla al
+        # inicio de cada partida. Dict por idx para el caso de que el mismo
+        # snapshot ocupe varios asientos a la vez.
+        self._lstm_state: dict = {}
+        self._prev_scores_sum: dict = {}
 
     @classmethod
     def from_weights(cls, weights: dict, obs_dim: int = DIM_ENTORNO) -> "SnapshotPolicy":
@@ -52,6 +60,8 @@ class SnapshotPolicy:
         obj._obs_dim = obs_dim
         obj._obs_builder = ObservacionBuilder(dim=obs_dim)
         obj._model = None
+        obj._lstm_state = {}
+        obj._prev_scores_sum = {}
         return obj
 
     def __getstate__(self):
@@ -62,6 +72,8 @@ class SnapshotPolicy:
         self._obs_dim = state["obs_dim"]
         self._obs_builder = ObservacionBuilder(dim=self._obs_dim)
         self._model = None
+        self._lstm_state = {}
+        self._prev_scores_sum = {}
 
     def _get_model(self):
         """Construye el modelo PyTorch desde los pesos la primera vez (lazy).
@@ -122,11 +134,25 @@ class SnapshotPolicy:
             mask_t = torch.tensor(mask, dtype=torch.float32).unsqueeze(0)
             input_dict = {"obs": {"obs": obs_t, "action_mask": mask_t}}
 
-            # Para modelos LSTM, proveer estado inicial zeros (inferencia sin estado previo)
             initial = model.get_initial_state()
-            state = [s.unsqueeze(0) for s in initial] if initial else []
+            es_recurrente = bool(initial)
+            if es_recurrente:
+                # Arrastrar el estado LSTM a lo largo de la PARTIDA (igual que en
+                # entrenamiento, donde el episodio es una partida completa). Se
+                # resetea al inicio de una partida nueva, detectado porque el
+                # marcador acumulado baja (de ~100 a 0) o es la primera llamada.
+                scores_sum = sum(j.puntuacion_historica for j in motor.jugadores)
+                prev = self._prev_scores_sum.get(idx)
+                if idx not in self._lstm_state or prev is None or scores_sum < prev:
+                    self._lstm_state[idx] = [s.unsqueeze(0) for s in initial]
+                self._prev_scores_sum[idx] = scores_sum
+                state = self._lstm_state[idx]
+            else:
+                state = []
 
-            logits, _ = model.forward(input_dict, state, None)
+            logits, new_state = model.forward(input_dict, state, None)
+            if es_recurrente:
+                self._lstm_state[idx] = new_state  # arrastrar al siguiente step
             action = int(logits.argmax(dim=1).item())
 
         carta = Carta._TODAS[action]
@@ -213,15 +239,21 @@ class OpponentPool:
                 fns[opp_indices[2]] = random.choice(snapshots)
 
             elif progress < 0.70:
-                # Fase 3: 3 snapshots del pool completo — self-play puro sin ancla de bots
-                for idx in opp_indices:
-                    fns[idx] = random.choice(snapshots)
+                # Fase 3: 1 BotExperto (ANCLA) + 2 snapshots del pool completo.
+                # El ancla fija evita la regresión del self-play puro vs oponentes
+                # de distribución distinta (ver Rediseño_v10: regresión observada
+                # en v10_lstm al quitar el ancla).
+                fns[opp_indices[0]] = BotExperto()
+                fns[opp_indices[1]] = random.choice(snapshots)
+                fns[opp_indices[2]] = random.choice(snapshots)
 
             else:
-                # Fase 4: 3 snapshots recientes — presión máxima contra versiones propias
+                # Fase 4: 1 BotExperto (ANCLA) + 2 snapshots recientes — presión
+                # máxima contra versiones propias pero conservando robustez.
                 pool = snapshots_recientes if len(snapshots_recientes) >= 1 else snapshots
-                for idx in opp_indices:
-                    fns[idx] = random.choice(pool)
+                fns[opp_indices[0]] = BotExperto()
+                fns[opp_indices[1]] = random.choice(pool)
+                fns[opp_indices[2]] = random.choice(pool)
 
             return fns
 
