@@ -1,0 +1,11 @@
+# Dependencias OPCIONALES del módulo de captura (src/captura/adb.py).
+# NO las necesita el entrenamiento ni la evaluación; instálalas solo si vas a
+# capturar partidas automáticamente vía ADB + visión.
+#
+#   pip install -r requirements-captura.txt
+#
+# Además necesitas 'adb' (Android Platform Tools) instalado y en el PATH:
+#   https://developer.android.com/tools/releases/platform-tools
+
+opencv-python>=4.9.0    # template-matching del parser de pantalla
+numpy>=1.26.0           # (ya viene en requirements.txt; aquí por claridad)

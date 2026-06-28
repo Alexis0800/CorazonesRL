@@ -21,13 +21,13 @@
 Comandos:
 ```bash
 # Entrenar v10a (MLP; LSTM opcional con --use-lstm)
-python train_rllib.py --total-steps 20000000 --workers 8 --output-dir models/v10
+python scripts/train_rllib.py --total-steps 20000000 --workers 8 --output-dir models/v10
 
 # Ver avance en vivo (otra terminal)
-python monitorear.py --dir models/v10 --watch
+python scripts/monitorear.py --dir models/v10 --watch
 
 # Evaluación final con recomendaciones
-python evaluar_final.py --dir models/v10 --partidas 200
+python scripts/evaluar_final.py --dir models/v10 --partidas 200
 ```
 
 > Nota de diseño: la observación se mantiene en 224 dims (DIM_V11). Las features de

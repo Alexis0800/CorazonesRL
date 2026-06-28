@@ -84,10 +84,13 @@ src/
 │   ├── opponent_pool.py  OpponentPool + SnapshotPolicy (con pase neuronal)
 │   ├── eval_bots.py    evaluación en partidas completas (vía env)
 │   ├── callbacks.py, utils.py (elite, snapshots)
-└── torneo/             Elo, evaluación
+├── torneo/             Elo, evaluación
+└── captura/            Recolector de dataset humano vía ADB (Roadmap Fase 2-3)
+scripts/                CLI: ejecutar desde la raíz con `python scripts/<x>.py`
 ```
 
-### Scripts de nivel superior
+### Scripts (`scripts/`) — ejecutar desde la raíz: `python scripts/<x>.py`
+
 | Script | Para qué |
 |---|---|
 | `train_rllib.py` | Entrenar (PPO + self-play). Flags clave: `--con-pase`, `--bc-weights`, `--pool-diverso`, `--ancla-experto`. |
@@ -107,10 +110,10 @@ src/
 .venv\Scripts\Activate.ps1
 
 # Copiloto con el mejor modelo
-python recomendador.py --modelo models/produccion/v10c_campeon
+python scripts/recomendador.py --modelo models/produccion/v10c_campeon
 
 # Ver jugar al modelo
-python jugar_modelo.py --modelo models/produccion/v10c_campeon --ver
+python scripts/jugar_modelo.py --modelo models/produccion/v10c_campeon --ver
 
 # Tests
 python -m pytest tests/ -q
@@ -119,12 +122,12 @@ python -m pytest tests/ -q
 ### Reproducir el entrenamiento de v10c (resumen)
 ```bash
 # 1. dataset BC con pase (etiqueta: pase=BotExperto.pasar, juego=PIMC mixto)
-python generar_dataset_bc.py --partidas 600 --mundos 60 --con-pase \
+python scripts/generar_dataset_bc.py --partidas 600 --mundos 60 --con-pase \
     --teacher mixto --oponentes diverso --out datasets/bc.npz
 # 2. BC
-python entrenar_bc.py --dataset datasets/bc.npz --con-pase --out models/bc/bc.pkl
+python scripts/entrenar_bc.py --dataset datasets/bc.npz --con-pase --out models/bc/bc.pkl
 # 3. PPO fine-tune con pase + self-play diverso (snapshots pasan neuronalmente)
-python train_rllib.py --total-steps 20000000 --workers 8 --con-pase \
+python scripts/train_rllib.py --total-steps 20000000 --workers 8 --con-pase \
     --bc-weights models/bc/bc.pkl --pool-diverso --ancla-experto \
     --lr 1e-4 --lr-end 5e-5 --entropy-coeff 0.02 --output-dir models/v10c
 ```

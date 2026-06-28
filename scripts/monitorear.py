@@ -20,6 +20,12 @@ Métricas (de bot_eval_log.jsonl, evaluación absoluta vs bots fijos):
 """
 from __future__ import annotations
 
+# --- bootstrap path: permite `python scripts/<x>.py` desde la raiz del repo ---
+import sys as _sys
+from pathlib import Path as _Path
+_sys.path.insert(0, str(_Path(__file__).resolve().parents[1]))
+# --- fin bootstrap ---
+
 import argparse
 import json
 import os

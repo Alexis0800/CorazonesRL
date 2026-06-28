@@ -15,6 +15,9 @@ dist/
 *.egg-info/
 .eggs/
 
+# Codegraph (índice local del daemon, no se versiona)
+.codegraph/
+
 # Testing / coverage
 .pytest_cache/
 .coverage

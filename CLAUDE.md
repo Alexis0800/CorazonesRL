@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Reinforcement learning agent for the card game Hearts (Corazones) on **Ray RLlib v2.55.1 + PPO** (old API stack, TorchModelV2). Pipeline: **Behavioral Cloning from a PIMC oracle** → **PPO fine-tune with diverse self-play** against a pool of historical snapshots + heuristic archetypes, evaluated with a least-squares Elo system. The champion **v10c** plays full games to 100 pts including the card pass. Includes a copilot (`recomendador.py`) for real games.
 
-> **Branch `feature/v5`** (current). Legacy SB3 code removed; entry point is `train_rllib.py`. Champion model in `models/produccion/`. Design doc: `docs/Rediseño_v10_partida_completa.md`. Roadmap (copilot, mobile app, human dataset, on-device): `docs/ROADMAP.md`. Obsolete docs archived under `docs/historico/`.
+> **Branch `feature/v5`** (current). Legacy SB3 code removed; entry point is `scripts/train_rllib.py`. Champion model in `models/produccion/`. Design doc: `docs/Rediseño_v10_partida_completa.md`. Roadmap (copilot, mobile app, human dataset, on-device): `docs/ROADMAP.md`. Obsolete docs archived under `docs/historico/`.
 
 ## Commands
 
@@ -35,10 +35,10 @@ python -m pytest tests/torneo/test_elo.py::TestEloConvergente::test_elo_inicial 
 
 ```bash
 # Train from scratch (RLlib PPO)
-python train_rllib.py --total-steps 20000000 --output-dir models/v_rllib
+python scripts/train_rllib.py --total-steps 20000000 --output-dir models/v_rllib
 
 # With more workers and GPU
-python train_rllib.py --total-steps 20000000 --workers 4 --gpus 1 --output-dir models/v_rllib
+python scripts/train_rllib.py --total-steps 20000000 --workers 4 --gpus 1 --output-dir models/v_rllib
 ```
 
 ### Evaluation
@@ -96,11 +96,22 @@ python -m src.torneo.elo --directorio models/v8/elite --partidas 50 --elo-puro -
 - `dataset.py`: Generates `(obs, action)` pairs for BC pretraining (with/without pass).
 - `analisis.py`: error-analysis helpers (used by `analizar_errores.py`).
 
-### Top-level scripts
+### Scripts (`scripts/`)
+
+All CLI entry points live in `scripts/` and are run from the repo root as `python scripts/<name>.py` (each has a `sys.path` bootstrap so it resolves `src` regardless of cwd).
 
 `train_rllib.py` (PPO + self-play; flags `--con-pase`, `--bc-weights`, `--pool-diverso`, `--ancla-experto`), `generar_dataset_bc.py` (PIMC-labeled BC dataset), `entrenar_bc.py` (BC training), `evaluar_final.py`, `monitorear.py` (live training progress), `jugar_modelo.py` (watch/play vs model), `recomendador.py` (**copilot** for real games), `analizar_errores.py`, `comparar_snapshots.py`, `pimc_regret.py`.
 
-> **Planned (Roadmap Fase 2–3):** `src/captura/` — ADB-driven data collector for human games. Will reuse `dominio`/`entorno`, hide ADB+vision behind an `AdaptadorJuego` interface (DIP), and ship optional deps in `requirements-captura.txt`.
+**`src/captura/`** — Human-game dataset collector (Roadmap Fase 2–3). Reuses `dominio`/`entorno`; only `adb.py` needs optional deps (`requirements-captura.txt`).
+
+- `puerto.py`: `AdaptadorJuego` (ABC) — emits an **event stream** (`InicioMano`, `PaseAgente`, `JugadaObservada`, `FinMano`, `FinPartida`). The DIP boundary: the collector knows only events, so the source (ADB / manual / mock) is swappable.
+- `manual.py`: `AdaptadorManual` — console source, **usable today without ADB** (you narrate the game; it computes the scoreboard).
+- `adb.py`: `ClienteADB` (real `adb` subprocess: screencap/tap), `ParserPantalla` (ABC) + `ParserPlantillas` (OpenCV template-matching, **needs per-app calibration**), `AdaptadorADB` (polling loop + plays via a `politica`). Lazy-imports `cv2`.
+- `recolector.py`: `RecolectorPartidas` — aggregates events → `RegistroPartida`.
+- `escritor.py` / `modelos.py`: append-only JSONL I/O + DTOs (cards stored as `carta.id`).
+- `replay.py`: **pure** offline encoder — replays a `RegistroPartida` through `MotorCorazones` + `ObservacionBuilder` to emit `(obs, accion)`. Hands are reconstructed from the recorded plays (each seat plays its 13 cards), so opponents' hands are never needed.
+
+Scripts: `scripts/capturar.py` (run a capture session), `scripts/calibrar_captura.py` (grab a screenshot to crop card templates / define regions), `scripts/jsonl_a_dataset.py` (JSONL → `(obs, accion)` `.npz`). ⚠ Auto-clicking a game app may violate its ToS.
 
 ### Observation Vector (224 dims = v11 no-pass; 228 = v12 with pass)
 
