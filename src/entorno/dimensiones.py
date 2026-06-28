@@ -7,7 +7,10 @@ un único lugar.
 
 Principio: DRY (Don't Repeat Yourself) + SSOT (Single Source of Truth).
 
-Estándar actual: 220 dimensiones (DIM_V10).
+Estándar actual:
+  - 224 (DIM_V11) = default del entorno SIN fase de pase (DIM_ENTORNO).
+  - 228 (DIM_V12) = entorno CON fase de pase (con_pase=True), usado por el
+    modelo campeón v10c (partida completa + pase).
 """
 
 from __future__ import annotations
@@ -37,7 +40,8 @@ DIM_NOMBRES = {
     DIM_V5: "v5 (190) — features básicas + flags estratégicos",
     DIM_V6: "v6 (194) — + all_void por palo (obsoleto)",
     DIM_V10: "v10 (220) — + bloque avanzado (conteo, prob Q♠, alertas)",
-    DIM_V11: "v11 (224) — + quien_jugo_mesa (4 flags de jugadores en baza actual) ← actual",
+    DIM_V11: "v11 (224) — + quien_jugo_mesa (4 flags) ← default sin pase",
+    DIM_V12: "v12 (228) — + fase de PASE (4 features) ← campeón v10c con pase",
 }
 
 __all__ = [

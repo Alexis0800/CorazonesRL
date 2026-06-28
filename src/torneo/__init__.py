@@ -1,13 +1,7 @@
 """
 Torneo — Sistema de evaluación y rating Elo.
 
-Los módulos completos están en src/elo_torneo.py y src/evaluacion.py.
-Las versiones en src/corazones/torneo/ son wrappers parciales.
+- elo.py        : Elo por mínimos cuadrados (sin sesgo de orden).
+- evaluacion.py : win-rate vs bots heurísticos (incluye normalización
+                  VecNormalize para baselines golden SB3).
 """
-from src.torneo.normalizacion import (
-    normalizar_obs_desde_archivo, detectar_vecnorm, cargar_vecnorm_stats,
-)
-
-__all__ = [
-    "normalizar_obs_desde_archivo", "detectar_vecnorm", "cargar_vecnorm_stats",
-]
