@@ -1,91 +1,99 @@
 """
-Evaluación periódica del agente contra bots fijos — PARTIDAS COMPLETAS (v10).
+Evaluación del agente contra bots fijos — PARTIDAS COMPLETAS vía el ENV (v10).
 
-Provee una métrica absoluta (independiente de los oponentes de entrenamiento)
-para diagnosticar si el modelo realmente mejora a lo largo del tiempo.
+IMPORTANTE (fix de obs): la evaluación se hace paso a paso a través de
+CorazonesEnvRLlib, que construye la observación COMPLETA (scores, voids, moon,
+tracker de Q♠…) idéntica a la de entrenamiento. La versión anterior usaba
+SnapshotPolicy.construir_desde_motor (obs mínima, features estratégicas en cero),
+lo que subestimaba al agente. Ahora agente y rivales-snapshot ven la obs completa.
 
-A diferencia de v9 (que medía puntos por mano aislada), aquí se juegan PARTIDAS
-COMPLETAS a 100 puntos y se reportan métricas alineadas con el objetivo real:
-  - win_rate:    fracción de partidas ganadas (1º puesto).
+Métricas alineadas con el objetivo real:
+  - win_rate:    fracción de partidas ganadas (1er puesto).
   - top2_rate:   fracción de partidas en top-2.
   - puesto_medio: puesto promedio (1=mejor, 4=peor).
-
-Uso en train_rllib.py (cada N snapshots):
-    from src.rllib.eval_bots import evaluar_vs_bots
-    metrics = evaluar_vs_bots(algo.get_policy(), obs_dim=224, n_partidas=100)
 """
 from __future__ import annotations
 
-from typing import List
+from typing import Callable, Dict, List
 
 import numpy as np
+import torch
 
 from src.agentes.bot_experto import BotExperto
+from src.agentes.bot_castigador import BotCastigador
+from src.agentes.bot_lunatico import BotLunatico
+from src.agentes.bot_atacante_lider import BotAtacanteLider
 from src.agentes.heuristicos import bot_agresivo, bot_conservador, bot_evasivo
-from src.dominio.motor import MotorCorazones
+from src.entorno.corazones_rllib import CorazonesEnvRLlib
 from src.entorno.dimensiones import DIM_ENTORNO
 
-LIMITE_PARTIDA = 100
+
+def _obtener_modelo(policy, obs_dim: int):
+    """Devuelve el torch model, ya sea de una Ray Policy o de un SnapshotPolicy."""
+    from src.rllib.opponent_pool import SnapshotPolicy
+    if hasattr(policy, "get_weights"):
+        model = SnapshotPolicy(policy, obs_dim=obs_dim)._get_model()
+    else:
+        model = policy._get_model()
+    model.eval()
+    return model
 
 
-def _fin_de_mano(motor: MotorCorazones) -> bool:
-    return motor.numero_baza > 13 or all(
-        len(j.mano) == 0 for j in motor.jugadores
-    )
+def _eval_model_vs_factory(
+    model,
+    opponent_factory: Callable,
+    n_partidas: int,
+    obs_dim: int = DIM_ENTORNO,
+    agente_idx: int = 0,
+    con_pase: bool = False,
+) -> List[dict]:
+    """Juega n partidas completas con `model` como agente, vía el ENV.
 
-
-def _jugar_partida(snap, opponent_factory, agente_idx: int) -> dict:
-    """Juega una PARTIDA COMPLETA y devuelve métricas del agente.
-
-    opponent_factory: callable() -> dict{idx: policy_fn}. Se llama una vez por
-    partida; los bots con estado por mano se resetean entre manos si exponen reset().
+    opponent_factory: callable(agente_idx) -> dict{idx: policy_fn} (estilo env).
+    Devuelve la lista de `info` terminal de cada partida (puesto, gano, etc.).
     """
-    motor = MotorCorazones()
-    motor.nueva_partida()
-    opponents = opponent_factory()
-    hizo_pozo = False
-    manos = 0
+    env = CorazonesEnvRLlib({
+        "obs_dim": obs_dim,
+        "agente_idx": agente_idx,
+        "random_position": False,
+        "opponent_factory": opponent_factory,
+        "gamma": 0.999,
+        "con_pase": con_pase,
+    })
 
-    while not motor.partida_terminada(LIMITE_PARTIDA):
-        while not _fin_de_mano(motor):
-            jugador_actual = motor.obtener_jugador_actual()
-            legales = motor.obtener_jugadas_legales(jugador_actual)
-            if jugador_actual == agente_idx:
-                carta = snap(motor, jugador_actual, legales)
-            else:
-                carta = opponents.get(jugador_actual, bot_evasivo)(
-                    motor, jugador_actual, legales
+    initial = model.get_initial_state()
+    es_recurrente = bool(initial)
+    resultados: List[dict] = []
+
+    for _ in range(n_partidas):
+        obs, _ = env.reset()
+        state = [s.unsqueeze(0) for s in initial] if es_recurrente else []
+        done = False
+        info: dict = {}
+        while not done:
+            with torch.no_grad():
+                o = torch.as_tensor(obs["obs"], dtype=torch.float32).unsqueeze(0)
+                m = torch.as_tensor(obs["action_mask"], dtype=torch.float32).unsqueeze(0)
+                logits, new_state = model.forward(
+                    {"obs": {"obs": o, "action_mask": m}}, state, None
                 )
-            motor.jugar_carta(jugador_actual, carta)
-            if len(motor.mesa) == 4:
-                motor.resolver_baza()
+                if es_recurrente:
+                    state = new_state
+                accion = int(logits.argmax(dim=1).item())
+            obs, _, done, _, info = env.step(accion)
+        resultados.append(info)
 
-        if motor.jugadores[agente_idx].contar_puntos_bazas() == 26:
-            hizo_pozo = True
-        motor.aplicar_puntuacion()
-        manos += 1
+    return resultados
 
-        if not motor.partida_terminada(LIMITE_PARTIDA):
-            motor.repartir()
-            for opp in opponents.values():
-                reset = getattr(opp, "reset", None)
-                if callable(reset):
-                    try:
-                        reset()
-                    except Exception:
-                        pass
 
-    scores = motor.puntuaciones_historicas()
-    mi_score = scores[agente_idx]
-    puesto = 1 + sum(1 for i, s in enumerate(scores)
-                     if i != agente_idx and s < mi_score)
+def _agregar(res: List[dict]) -> dict:
+    puestos = np.array([r["puesto"] for r in res])
     return {
-        "puesto": puesto,
-        "gano": puesto == 1,
-        "top2": puesto <= 2,
-        "score_final": mi_score,
-        "manos": manos,
-        "pozo": hizo_pozo,
+        "win": float((puestos == 1).mean()),
+        "top2": float((puestos <= 2).mean()),
+        "puesto": float(puestos.mean()),
+        "moon": float(np.mean([r.get("shooting_moon", False) for r in res])),
+        "manos": float(np.mean([r.get("manos_jugadas", 0) for r in res])),
     }
 
 
@@ -94,74 +102,57 @@ def evaluar_vs_bots(
     obs_dim: int = DIM_ENTORNO,
     n_partidas: int = 100,
     agente_idx: int = 0,
+    con_pase: bool = False,
 ) -> dict:
-    """Evalúa la política jugando partidas completas contra bots fijos.
+    """Evalúa la política jugando partidas completas (vía env) contra bots fijos.
 
-    Escenarios (3 bots del mismo tipo por escenario):
-      - evasivo / conservador / agresivo: baseline fácil.
-      - experto: 3 BotExperto simultáneos (desafío real).
-
-    Args:
-        policy:     Ray Policy (resultado de algo.get_policy()).
-        obs_dim:    Dimensión del vector de observación.
-        n_partidas: Partidas por escenario (4 escenarios → 4×n partidas totales).
-        agente_idx: Posición fija del agente (0 para consistencia entre evals).
+    Escenarios (3 bots del mismo tipo): evasivo / conservador / agresivo / experto.
 
     Returns:
         Dict con win_rate / top2_rate / puesto_medio por escenario y global,
         más manos_por_partida y moon_rate.
     """
-    from src.rllib.opponent_pool import SnapshotPolicy
-
-    # Acepta tanto una Ray Policy (con get_weights) como un SnapshotPolicy ya
-    # construido (callable directo, p.ej. cargado desde un checkpoint).
-    if hasattr(policy, "get_weights"):
-        snap = SnapshotPolicy(policy, obs_dim=obs_dim)
-    else:
-        snap = policy
+    model = _obtener_modelo(policy, obs_dim)
 
     def _simple_factory(bot_fn):
-        return lambda: {i: bot_fn for i in range(4) if i != agente_idx}
+        return lambda ai=0: {i: bot_fn for i in range(4) if i != ai}
 
-    def _experto_factory():
-        return {i: BotExperto() for i in range(4) if i != agente_idx}
+    def _clase_factory(cls):
+        # Instancias frescas por partida (bots con estado se reinician solos).
+        return lambda ai=0: {i: cls() for i in range(4) if i != ai}
+
+    def _mixto_factory(ai=0):
+        # Mesa de 3 arquetipos DISTINTOS (proxy de juego variado/humano).
+        clases = [BotExperto, BotCastigador, BotLunatico, BotAtacanteLider]
+        idxs = [i for i in range(4) if i != ai]
+        return {i: clases[k]() for k, i in enumerate(idxs)}
 
     escenarios = {
         "evasivo": _simple_factory(bot_evasivo),
         "conservador": _simple_factory(bot_conservador),
         "agresivo": _simple_factory(bot_agresivo),
-        "experto": _experto_factory,
+        "experto": _clase_factory(BotExperto),
+        "castigador": _clase_factory(BotCastigador),
+        "lunatico": _clase_factory(BotLunatico),
+        "atacante": _clase_factory(BotAtacanteLider),
+        "mixto": _mixto_factory,
     }
 
     resultados: dict = {}
-    todos_puestos: List[int] = []
-    todas_victorias: List[bool] = []
-    todos_top2: List[bool] = []
-    total_pozos = 0
-    total_manos = 0
-    total_partidas = 0
-
+    todos: List[dict] = []
     for nombre, factory in escenarios.items():
-        res = [_jugar_partida(snap, factory, agente_idx) for _ in range(n_partidas)]
-        puestos = [r["puesto"] for r in res]
-        victorias = [r["gano"] for r in res]
-        top2 = [r["top2"] for r in res]
+        res = _eval_model_vs_factory(model, factory, n_partidas, obs_dim,
+                                     agente_idx, con_pase=con_pase)
+        ag = _agregar(res)
+        resultados[f"win_rate_vs_{nombre}"] = round(ag["win"], 4)
+        resultados[f"top2_rate_vs_{nombre}"] = round(ag["top2"], 4)
+        resultados[f"puesto_medio_vs_{nombre}"] = round(ag["puesto"], 4)
+        todos.extend(res)
 
-        resultados[f"win_rate_vs_{nombre}"] = round(float(np.mean(victorias)), 4)
-        resultados[f"top2_rate_vs_{nombre}"] = round(float(np.mean(top2)), 4)
-        resultados[f"puesto_medio_vs_{nombre}"] = round(float(np.mean(puestos)), 4)
-
-        todos_puestos.extend(puestos)
-        todas_victorias.extend(victorias)
-        todos_top2.extend(top2)
-        total_pozos += sum(r["pozo"] for r in res)
-        total_manos += sum(r["manos"] for r in res)
-        total_partidas += len(res)
-
-    resultados["win_rate"] = round(float(np.mean(todas_victorias)), 4)
-    resultados["top2_rate"] = round(float(np.mean(todos_top2)), 4)
-    resultados["puesto_medio"] = round(float(np.mean(todos_puestos)), 4)
-    resultados["manos_por_partida"] = round(total_manos / total_partidas, 2)
-    resultados["moon_rate"] = round(total_pozos / total_partidas, 4)
-
+    glob = _agregar(todos)
+    resultados["win_rate"] = round(glob["win"], 4)
+    resultados["top2_rate"] = round(glob["top2"], 4)
+    resultados["puesto_medio"] = round(glob["puesto"], 4)
+    resultados["manos_por_partida"] = round(glob["manos"], 2)
+    resultados["moon_rate"] = round(glob["moon"], 4)
     return resultados

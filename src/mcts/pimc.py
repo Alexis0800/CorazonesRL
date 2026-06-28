@@ -220,6 +220,9 @@ def simular_resto_mano(
 
         idx = motor.obtener_jugador_actual()
         legales = motor.obtener_jugadas_legales(idx)
+        if not legales:
+            # Estado degenerado (jugador sin cartas): la mano terminó, cortar.
+            break
         carta = bots[idx](motor, idx, legales)
         motor.jugar_carta(idx, carta)
 
@@ -338,19 +341,34 @@ def _crear_bots_experto() -> Dict[int, Callable]:
 
 
 def _crear_bots_mixto(rng: np.random.Generator) -> Dict[int, Callable]:
-    """Rollout con mezcla de políticas: BotExperto + heurísticas.
+    """Rollout con mezcla de ARQUETIPOS HUMANOS diversos (para generalizar).
 
-    Cada oponente usa una política distinta, simulando la diversidad
-    de estilos de juego en oponentes reales.
+    Cada uno de los 4 asientos recibe, al azar, uno de los arquetipos fuertes y
+    distintos que juegan los humanos:
+      - experto       (balanceado, conteo, gestión Q♠)
+      - castigador    (presiona picas para forzar la Q♠)
+      - lunático      (intenta el pozo con mano fuerte)
+      - atacante_lider(carga puntos al líder de la partida)
+      - evasivo       (defensivo, minimiza puntos propios)
+
+    Instancias frescas en cada mundo (los bots con estado se reinician solos).
+    Se excluyen los muy débiles (conservador/agresivo puros) para que el modelo
+    de oponente de PIMC sea realista vs juego competente/humano.
     """
     from src.agentes.bot_experto import BotExperto
-    experto = BotExperto()
-    return {
-        0: experto,
-        1: bot_conservador,
-        2: bot_agresivo,
-        3: bot_evasivo,
-    }
+    from src.agentes.bot_castigador import BotCastigador
+    from src.agentes.bot_lunatico import BotLunatico
+    from src.agentes.bot_atacante_lider import BotAtacanteLider
+
+    arquetipos: List[Callable[[], Callable]] = [
+        lambda: BotExperto(),
+        lambda: BotCastigador(),
+        lambda: BotLunatico(),
+        lambda: BotAtacanteLider(),
+        lambda: bot_evasivo,
+    ]
+    elegidos = rng.integers(0, len(arquetipos), size=4)
+    return {i: arquetipos[int(elegidos[i])]() for i in range(4)}
 
 
 def crear_bots_rollout(

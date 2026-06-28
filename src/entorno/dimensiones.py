@@ -20,6 +20,8 @@ DIM_V6: int = 194   # + all_void por palo (obsoleto, solo referencia histórica)
 DIM_V10: int = 220  # + bloque avanzado (conteo, prob Q♠, alertas)
 # + quien_jugo_mesa (4 flags: qué jugadores ya jugaron en la baza)
 DIM_V11: int = 224
+# v10b: + 4 features de la fase de PASE (fase_pase, direccion, n_seleccionadas, reservado)
+DIM_V12: int = 228
 # + 40 features enriquecidas (v3): cartas_restantes, peligro_qs, liderazgo, etc.
 DIM_V3: int = 265
 
@@ -28,7 +30,7 @@ DIM_ENTRENAMIENTO: int = DIM_V11  # usado por train.py
 DIM_ENTORNO: int = DIM_V11        # usado por CorazonesEnv (estándar actual)
 
 # --- Dimensiones aceptadas ---
-DIMS_VALIDAS: Tuple[int, ...] = (DIM_V6, DIM_V10, DIM_V11, DIM_V3)
+DIMS_VALIDAS: Tuple[int, ...] = (DIM_V6, DIM_V10, DIM_V11, DIM_V12, DIM_V3)
 
 # --- Mapeo para referencia humana ---
 DIM_NOMBRES = {
@@ -43,6 +45,7 @@ __all__ = [
     "DIM_V6",
     "DIM_V10",
     "DIM_V11",
+    "DIM_V12",
     "DIM_V3",
     "DIM_ENTRENAMIENTO",
     "DIM_ENTORNO",

@@ -96,6 +96,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--batch-size", type=int, default=8192)
     p.add_argument("--no-random-position", action="store_true",
                    help="Desactivar rotación multi-posición (agente siempre en idx=0)")
+    p.add_argument("--entropy-coeff", type=float, default=0.05,
+                   help="Coef. de entropía. Bajar (~0.01) para fine-tune desde BC "
+                        "(evita que la exploración erosione la política pre-entrenada).")
     p.add_argument("--gamma", type=float, default=0.999,
                    help="Factor de descuento. Alto porque el episodio es una partida "
                         "completa (~100-170 steps). Debe coincidir env↔PPO (PBRS).")
@@ -103,6 +106,18 @@ def parse_args() -> argparse.Namespace:
                    help="Peso del potencial Φ del shaping PBRS (default 0.5)")
     p.add_argument("--limite-partida", type=int, default=100,
                    help="Puntos para terminar la partida (default 100)")
+    p.add_argument("--ancla-experto", action="store_true",
+                   help="Mantener 1 BotExperto como ancla en fases 3-4 (evita "
+                        "regresión del self-play puro). Default off = como v10.")
+    p.add_argument("--bc-weights", type=str, default=None,
+                   help="Pickle de pesos BC (entrenar_bc.py) para inicializar la "
+                        "política PPO por imitación de PIMC. Usar con LR bajo.")
+    p.add_argument("--pool-diverso", action="store_true",
+                   help="El oponente duro de cada fase es un arquetipo humano al "
+                        "azar (experto/castigador/lunatico/atacante), no solo "
+                        "BotExperto. Mejora la generalización a juego variado.")
+    p.add_argument("--con-pase", action="store_true",
+                   help="Habilita la fase de PASE (v10b). Fuerza obs_dim>=228 (DIM_V12).")
     p.add_argument("--baza-reward-weight", type=float, default=0.15,
                    help="OBSOLETO (v9): ignorado en v10. Se mantiene por compatibilidad.")
     p.add_argument("--use-lstm", action="store_true",
@@ -169,6 +184,11 @@ def main() -> None:
     args = parse_args()
     random_position = not args.no_random_position
 
+    # v10b: el pase requiere las 4 features de pase en la obs (DIM_V12=228).
+    if args.con_pase and args.obs_dim < 228:
+        from src.entorno.dimensiones import DIM_V12
+        args.obs_dim = DIM_V12
+
     snapshot_dir = os.path.join(args.output_dir, "snapshots")
     elite_dir = os.path.join(args.output_dir, "elite")
     log_dir = os.path.join(args.output_dir, "logs")
@@ -198,6 +218,8 @@ def main() -> None:
         snapshot_dir=snapshot_dir,
         max_snapshots=args.max_snapshots,
         obs_dim=args.obs_dim,
+        anclar_experto=args.ancla_experto,
+        pool_diverso=args.pool_diverso,
     )
 
     from src.entorno.recompensas_partida import RewardConfigPartida
@@ -211,7 +233,9 @@ def main() -> None:
         obs_dim=args.obs_dim,
         random_position=random_position,
         reward_config=reward_config,
+        con_pase=args.con_pase,
         gamma=args.gamma,
+        entropy_coeff=args.entropy_coeff,
         lr=args.lr,
         lr_end=args.lr_end,
         total_steps=args.total_steps,
@@ -224,6 +248,17 @@ def main() -> None:
     config = config.callbacks(HeartsCallbacks)
 
     algo = config.build_algo()
+
+    # Inicialización por Behavioral Cloning (opcional): carga pesos pre-entrenados
+    # por imitación de PIMC-experto en la política PPO. El value_head queda en su
+    # init (BC solo entrena la política); PPO lo aprende. Usar LR bajo para no
+    # destruir la política BC en las primeras iteraciones.
+    if args.bc_weights:
+        import pickle as _pickle
+        with open(args.bc_weights, "rb") as _f:
+            _bc = _pickle.load(_f)
+        algo.get_policy().set_weights(_bc["weights"])
+        console.print(f"[green]Política inicializada desde BC:[/green] {args.bc_weights}")
 
     # Inyectar factory inicial en todos los envs
     factory_inicial = pool.make_factory(progress=0.0)
@@ -303,7 +338,8 @@ def main() -> None:
                         try:
                             policy = algo.get_policy()
                             metricas_bot = evaluar_vs_bots(
-                                policy, obs_dim=args.obs_dim, n_partidas=50
+                                policy, obs_dim=args.obs_dim, n_partidas=50,
+                                con_pase=args.con_pase,
                             )
                             metricas_bot["tipo"] = "bot_eval"
                             metricas_bot["paso"] = pasos_totales

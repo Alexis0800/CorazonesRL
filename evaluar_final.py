@@ -35,11 +35,8 @@ from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
 
-from src.dominio.motor import MotorCorazones
-from src.agentes.bot_experto import BotExperto
-from src.agentes.heuristicos import bot_agresivo, bot_conservador, bot_evasivo
 from src.entorno.dimensiones import DIM_ENTORNO
-from src.rllib.eval_bots import evaluar_vs_bots, _jugar_partida
+from src.rllib.eval_bots import evaluar_vs_bots, _eval_model_vs_factory
 from src.rllib.utils import cargar_policy_desde_checkpoint, listar_snapshots
 
 console = Console()
@@ -63,16 +60,21 @@ def _leer_jsonl(path: str, tipo: Optional[str] = None) -> List[dict]:
     return out
 
 
-def _simetria_self_play(snap, n_partidas: int, obs_dim: int) -> dict:
-    """El agente juega contra 3 copias de sí mismo. En un juego simétrico,
-    un agente sano debería ganar ≈25% de las partidas. Desviaciones grandes
-    sugieren un sesgo de posición o un bug en el env/observación."""
-    def factory():
-        return {i: snap for i in range(4) if i != 0}
+def _simetria_self_play(snap, n_partidas: int, obs_dim: int,
+                        con_pase: bool = False) -> dict:
+    """El agente juega contra 3 copias de sí mismo (vía env, obs completa). En un
+    juego simétrico, un agente sano debería ganar ≈25% de las partidas.
+    Desviaciones grandes sugieren sesgo de posición o un bug en el env/obs."""
+    model = snap._get_model()
 
-    res = [_jugar_partida(snap, factory, 0) for _ in range(n_partidas)]
-    win = sum(r["gano"] for r in res) / len(res)
-    top2 = sum(r["top2"] for r in res) / len(res)
+    def factory(ai=0):
+        return {i: snap for i in range(4) if i != ai}
+
+    res = _eval_model_vs_factory(model, factory, n_partidas, obs_dim,
+                                 agente_idx=0, con_pase=con_pase)
+    puestos = [r["puesto"] for r in res]
+    win = sum(p == 1 for p in puestos) / len(puestos)
+    top2 = sum(p <= 2 for p in puestos) / len(puestos)
     return {"win_rate": round(win, 4), "top2_rate": round(top2, 4)}
 
 
@@ -150,7 +152,12 @@ def main() -> None:
     p.add_argument("--partidas", type=int, default=100,
                    help="Partidas por escenario (default 100)")
     p.add_argument("--obs-dim", type=int, default=DIM_ENTORNO)
+    p.add_argument("--con-pase", action="store_true",
+                   help="Evaluar con fase de pase (modelos v10b, obs 228).")
     args = p.parse_args()
+    if args.con_pase:
+        from src.entorno.dimensiones import DIM_V12
+        args.obs_dim = max(args.obs_dim, DIM_V12)
 
     snapshot_dir = os.path.join(args.dir, "snapshots")
     if args.snapshot:
@@ -166,14 +173,18 @@ def main() -> None:
     snap = cargar_policy_desde_checkpoint(ckpt)
 
     console.print(f"[bold]Jugando {args.partidas} partidas completas por escenario...[/bold]")
-    bot_metrics = evaluar_vs_bots(snap, obs_dim=args.obs_dim, n_partidas=args.partidas)
-    simetria = _simetria_self_play(snap, max(args.partidas // 2, 20), args.obs_dim)
+    bot_metrics = evaluar_vs_bots(snap, obs_dim=args.obs_dim,
+                                  n_partidas=args.partidas, con_pase=args.con_pase)
+    simetria = _simetria_self_play(snap, max(args.partidas // 2, 20),
+                                   args.obs_dim, con_pase=args.con_pase)
 
     # --- Tabla de resultados vs bots ---
     t = Table(title="Partidas completas vs bots fijos", expand=True)
     t.add_column("Escenario"); t.add_column("win-rate", justify="right")
     t.add_column("top-2", justify="right"); t.add_column("puesto medio", justify="right")
-    for esc in ["evasivo", "conservador", "agresivo", "experto"]:
+    escenarios = [k[len("win_rate_vs_"):] for k in bot_metrics
+                  if k.startswith("win_rate_vs_")]
+    for esc in escenarios:
         t.add_row(esc,
                   f"{bot_metrics[f'win_rate_vs_{esc}']:.3f}",
                   f"{bot_metrics[f'top2_rate_vs_{esc}']:.3f}",

@@ -73,6 +73,9 @@ class ObservacionBuilder:
         moon_prob_agente: float = 0.0,
         moon_prob_rival: float = 0.0,
         puedo_alimentar: bool = False,
+        fase_pase: float = 0.0,
+        direccion_pase: float = 0.0,
+        n_pase_seleccionadas: float = 0.0,
     ) -> np.ndarray:
         """Construye el vector de observación completo de `dim` dimensiones.
 
@@ -159,6 +162,13 @@ class ObservacionBuilder:
         # --- Bloque v11 [220:224]: quien_jugo_mesa ---
         if self.dim >= 224:
             self._construir_bloque_v11(obs, a, motor)
+
+        # --- Bloque v12 [224:228]: fase de PASE (v10b) ---
+        if self.dim >= 228:
+            obs[224] = float(fase_pase)                  # 1.0 si estamos pasando
+            obs[225] = float(direccion_pase)             # izq/der/enfrente normalizado
+            obs[226] = float(n_pase_seleccionadas) / 3.0 # cartas ya elegidas para pasar
+            obs[227] = 0.0                               # reservado
 
         return obs
 

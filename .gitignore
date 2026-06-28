@@ -68,7 +68,12 @@ torneo_v7/
 
 # Training / RL outputs
 checkpoints/
-models/
+# Datasets BC (regenerables con generar_dataset_bc.py; pueden pesar MBs)
+datasets/
+# Ignorar el CONTENIDO de models/ (no el dir) para poder re-incluir produccion/.
+models/*
+# EXCEPCIÓN: los modelos curados de producción SÍ se versionan (vía Git LFS).
+!models/produccion/
 logs/
 runs/
 tensorboard/

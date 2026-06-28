@@ -51,6 +51,64 @@ class BotExperto:
         # Jugador sospechoso de intentar shooting the moon
         self._sospecha_pozo: Optional[int] = None
 
+    def pasar(self, motor: MotorCorazones, idx: int) -> List[Carta]:
+        """Selecciona 3 cartas a pasar con la estrategia completa de los MD.
+
+        Prioridad (Hearts.md §Pase + Estrategias Avanzadas §2):
+          1. Picas altas (A♠/K♠/Q♠) si NO hay ≥2 picas bajas que las protejan.
+             - Trampa de Q♠: si el pase es a la IZQUIERDA, solo soltar la Q♠ si
+               también se sueltan A♠ y K♠ (vaciar picas altas por completo).
+          2. Corazones altos (A♥/K♥/Q♥/J♥) — evitan ganar bazas con puntos.
+          3. Vaciar un palo corto (♣/♦ con 1-2 cartas) para descartar pronto.
+          4. Completar con las cartas más altas restantes.
+        Ajuste de marcador: si el receptor del pase es el LÍDER (menos puntos),
+        se prioriza soltarle lo más peligroso (acuerdo no hablado).
+        """
+        mano = list(motor.jugadores[idx].mano)
+        if len(mano) <= 3:
+            return mano[:3]
+
+        direccion = motor.direccion_pase()
+        receptor = motor.receptor_pase(idx)
+        receptor_es_lider = (
+            receptor is not None
+            and receptor == min((i for i in range(4) if i != idx),
+                                key=lambda i: motor.jugadores[i].puntuacion_historica)
+            and motor.jugadores[receptor].puntuacion_historica
+            <= motor.jugadores[idx].puntuacion_historica
+        )
+
+        picas = [c for c in mano if c.palo == _PICA]
+        picas_bajas = [c for c in picas if c.valor < 12]
+        a_k_picas = [c for c in picas if c.valor >= 13]          # A♠/K♠
+        q_picas = [c for c in picas if c.es_dama_de_picas]
+        seleccion: List[Carta] = []
+
+        def _add(cartas):
+            for c in cartas:
+                if c not in seleccion and len(seleccion) < 3:
+                    seleccion.append(c)
+
+        # 1) Picas altas desprotegidas (o si el receptor es el líder, siempre).
+        if len(picas_bajas) < 2 or receptor_es_lider:
+            _add(sorted(a_k_picas, key=lambda c: -c.valor))
+            # Q♠: evitar pasarla a la izquierda salvo que vayan también A♠ y K♠.
+            soltar_todas_altas = len(a_k_picas) >= 2
+            if q_picas and (direccion != "izquierda" or soltar_todas_altas
+                            or receptor_es_lider):
+                _add(q_picas)
+        # 2) Corazones altos.
+        _add(sorted([c for c in mano if c.es_corazon and c.valor >= 11],
+                    key=lambda c: -c.valor))
+        # 3) Vaciar palo corto (♣/♦).
+        for palo in (_TREBOL, _DIAMANTE):
+            del_palo = [c for c in mano if c.palo == palo]
+            if 1 <= len(del_palo) <= 2:
+                _add(del_palo)
+        # 4) Completar con las más altas restantes.
+        _add(sorted([c for c in mano if c not in seleccion], key=lambda c: -c.valor))
+        return seleccion[:3]
+
     def __call__(self, motor: MotorCorazones, idx: int, legales: List[Carta]) -> Carta:
         self._actualizar_estado(motor, idx)
         carta = self._decidir(motor, idx, legales)
@@ -323,6 +381,15 @@ class BotExperto:
         sin_q = [c for c in legales if not c.es_dama_de_picas]
         candidatos = sin_q if sin_q else legales
 
+        # ── Sangrar picas (Estrategias §4B) ───────────────────────────────────
+        # Mid-game, Q♠ activa, tengo picas pero NINGUNA alta (Q/K/A): liderar una
+        # pica baja repetidamente fuerza a salir la Q♠ o a que A♠/K♠ ganen,
+        # vaciando picas mientras yo no tengo riesgo. Protege mi puntuación.
+        if self._q_activa(motor) and baza <= 8 and modo == "MINIMIZAR":
+            mis_picas = [c for c in candidatos if c.palo == _PICA]
+            if mis_picas and not any(c.valor >= 12 for c in mis_picas):
+                return min(mis_picas, key=lambda c: c.valor)
+
         # ── Final de mano (baza ≥ 9): dar el lead, dump de corazones/picas ─
         # Con pocas cartas restantes, ganar una baza con A♣/A♦ fuerza a liderar
         # de nuevo, quedando atrapado con corazones/picas. Mejor ceder el lead.
@@ -410,6 +477,23 @@ class BotExperto:
                 return max(no_gana, key=lambda c: c.valor)
             # Todas ganan (todas > Q♠): jugar la más baja para minimizar daño futuro
             return min(mismo_palo, key=lambda c: c.valor)
+
+        # ── Duck estratégico (Estrategias Avanzadas §4A) ─────────────────────
+        # Con Q♠ activa y A♠/K♠ en mano, PERDER el lead es mortal (en una baza de
+        # picas me pueden tirar la Q♠ encima). Si lideran corazones con pocos
+        # puntos en mesa, GANAR el truco a propósito (con el corazón más bajo que
+        # gane) conserva el control: yo decido el siguiente palo.
+        if (motor.palo_de_salida == _CORAZON and self._q_activa(motor)
+                and modo == "MINIMIZAR" and puntos_mesa <= 3
+                and ganadora is not None):
+            tengo_ak_picas = any(
+                c.palo == _PICA and c.valor >= 13
+                for c in motor.jugadores[idx].mano
+            )
+            if tengo_ak_picas:
+                gana = [c for c in mismo_palo if c.valor > ganadora.valor]
+                if gana:
+                    return min(gana, key=lambda c: c.valor)
 
         # Evitar ganar baza con corazones: la carta más alta que no gana
         if puntos_mesa > 0 and ganadora is not None:

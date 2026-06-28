@@ -41,6 +41,7 @@ from src.entorno.recompensas_partida import (
     RewardConfigPartida,
 )
 from src.agentes.heuristicos import bot_evasivo
+from src.agentes.pase import pase_heuristico
 
 
 PolicyFn = Callable[[MotorCorazones, int, List[Carta]], Carta]
@@ -80,6 +81,12 @@ class CorazonesEnvRLlib(gym.Env):
         # gamma para el shaping PBRS — DEBE coincidir con el de PPO para que
         # la garantía de invarianza de política se mantenga.
         self._gamma: float = cfg.get("gamma", 0.999)
+        # v10b: habilitar la fase de PASE (requiere obs_dim >= 228 = DIM_V12).
+        self._con_pase: bool = cfg.get("con_pase", False)
+        if self._con_pase and self._obs_dim < 228:
+            raise ValueError(
+                "con_pase=True requiere obs_dim >= 228 (DIM_V12) para las features de pase."
+            )
 
         self.observation_space = spaces.Dict({
             "obs": spaces.Box(0.0, 1.0, shape=(self._obs_dim,), dtype=np.float32),
@@ -101,6 +108,11 @@ class CorazonesEnvRLlib(gym.Env):
         self._phi_prev: float = 0.0
         self._manos_jugadas: int = 0
         self._agente_hizo_pozo: bool = False
+
+        # Estado de la fase de pase (v10b)
+        self._fase_pase: bool = False
+        self._pase_seleccion: List[Carta] = []
+        self._pase_opp_selecciones: Dict[int, List[Carta]] = {}
 
     # ------------------------------------------------------------------
     # Gymnasium API
@@ -134,10 +146,60 @@ class CorazonesEnvRLlib(gym.Env):
                 i: bot_evasivo for i in range(4) if i != self._agente_idx
             }
 
-        self._auto_step_opponents()
+        self._iniciar_mano()
         return self._build_obs(), {}
 
+    def _iniciar_mano(self) -> None:
+        """Tras repartir: entra en fase de pase (si aplica) o avanza al juego."""
+        self._fase_pase = False
+        self._pase_seleccion = []
+        self._pase_opp_selecciones = {}
+        if self._con_pase and self._motor.direccion_pase() is not None:
+            # Fase de pase: precomputar las selecciones de los rivales (simultáneo).
+            # Cada rival pasa según SU perfil (pasar()); fallback a la heurística
+            # genérica para bots-función y SnapshotPolicy.
+            self._fase_pase = True
+            for i in range(4):
+                if i != self._agente_idx:
+                    opp = self._opponents.get(i)
+                    pasar = getattr(opp, "pasar", None)
+                    if callable(pasar):
+                        self._pase_opp_selecciones[i] = pasar(self._motor, i)
+                    else:
+                        self._pase_opp_selecciones[i] = pase_heuristico(self._motor, i)
+            return
+        # Sin pase: avanzar oponentes hasta el turno del agente.
+        self._auto_step_opponents()
+
+    def _step_pase(self, action: int) -> Tuple[dict, float, bool, bool, dict]:
+        """Maneja una de las 3 sub-decisiones de selección de carta para pasar."""
+        carta = Carta._TODAS[action]
+        seleccionables = [
+            c for c in self._motor.jugadores[self._agente_idx].mano
+            if c not in self._pase_seleccion
+        ]
+        if carta not in seleccionables:
+            carta = seleccionables[0]
+        self._pase_seleccion.append(carta)
+
+        if len(self._pase_seleccion) < 3:
+            return self._build_obs(), 0.0, False, False, {}
+
+        # 3 cartas elegidas → ejecutar el intercambio simultáneo.
+        selecciones = dict(self._pase_opp_selecciones)
+        selecciones[self._agente_idx] = list(self._pase_seleccion)
+        self._motor.ejecutar_pase(selecciones)
+        self._fase_pase = False
+        self._pase_seleccion = []
+        self._auto_step_opponents()  # avanzar hasta el turno del agente (a jugar)
+        # Los scores no cambiaron durante el pase → shaping ≈ 0.
+        reward = self._shaping_step(self._motor.puntuaciones_historicas(), False)
+        return self._build_obs(), reward, False, False, {}
+
     def step(self, action: int) -> Tuple[dict, float, bool, bool, dict]:
+        if self._fase_pase:
+            return self._step_pase(action)
+
         carta = Carta._TODAS[action]
         legales = self._motor.obtener_jugadas_legales(self._agente_idx)
         if carta not in legales:
@@ -168,7 +230,7 @@ class CorazonesEnvRLlib(gym.Env):
                 self._motor.repartir()
                 self._reiniciar_estado_mano()
                 self._reset_oponentes_por_mano()
-                self._auto_step_opponents()
+                self._iniciar_mano()  # entra en fase de pase si la mano la tiene
 
         # --- Recompensa: shaping PBRS (+ R_terminal si terminó la partida) ---
         scores = self._motor.puntuaciones_historicas()
@@ -217,14 +279,26 @@ class CorazonesEnvRLlib(gym.Env):
                     pass
 
     def _auto_step_opponents(self) -> None:
-        """Avanza oponentes hasta el turno del agente (o fin de mano)."""
+        """Avanza oponentes hasta el turno del agente (o fin de mano).
+
+        A los rivales que son políticas neuronales (SnapshotPolicy) se les pasa
+        la observación COMPLETA construida por el env (con voids exactos, scores,
+        moon, etc.), idéntica a la que ve el agente — así el self-play enfrenta a
+        rivales que "ven" todo el estado, no una obs mínima en ceros.
+        """
+        from src.rllib.opponent_pool import SnapshotPolicy
         while (
             not self._es_fin_de_mano()
             and self._motor.obtener_jugador_actual() != self._agente_idx
         ):
             idx = self._motor.obtener_jugador_actual()
             legales = self._motor.obtener_jugadas_legales(idx)
-            carta = self._opponents.get(idx, bot_evasivo)(self._motor, idx, legales)
+            opp = self._opponents.get(idx, bot_evasivo)
+            if isinstance(opp, SnapshotPolicy):
+                obs_idx = self._build_obs(agente=idx)["obs"]
+                carta = opp(self._motor, idx, legales, obs_vec=obs_idx)
+            else:
+                carta = opp(self._motor, idx, legales)
             self._motor.jugar_carta(idx, carta)
             self._actualizar_vacios(idx, carta)
             if len(self._motor.mesa) == 4:
@@ -282,8 +356,12 @@ class CorazonesEnvRLlib(gym.Env):
         escape = min(hearts_en_rivales * 0.015, 0.10)
         return max(0.0, min(1.0, control + qs_bonus + progreso - escape))
 
-    def _build_obs(self) -> dict:
-        agente = self._agente_idx
+    def _build_obs(self, agente: Optional[int] = None) -> dict:
+        # Permite construir la obs desde la perspectiva de CUALQUIER jugador
+        # (no solo el agente), para alimentar a rivales SnapshotPolicy con la
+        # MISMA observación completa que ve el agente en entrenamiento.
+        if agente is None:
+            agente = self._agente_idx
         # El marcador histórico ahora ESTÁ VIVO (persiste entre manos).
         puntuacion_historica = self._motor.puntuaciones_historicas()
         moon_prob_agente = self._calcular_moon_prob(agente)
@@ -295,6 +373,14 @@ class CorazonesEnvRLlib(gym.Env):
             for j in range(4) if j != agente
         )
 
+        # Features de la fase de pase (solo aplican al agente).
+        en_pase = self._fase_pase and agente == self._agente_idx
+        dir_norm = 0.0
+        if en_pase:
+            dir_norm = {"izquierda": 0.33, "derecha": 0.66,
+                        "enfrente": 1.0}.get(self._motor.direccion_pase(), 0.0)
+        n_sel = len(self._pase_seleccion) if en_pase else 0
+
         obs_vec = self._obs_builder.construir(
             motor=self._motor,
             agente_idx=agente,
@@ -305,10 +391,19 @@ class CorazonesEnvRLlib(gym.Env):
             moon_prob_agente=moon_prob_agente,
             moon_prob_rival=moon_prob_rival,
             puedo_alimentar=puedo_alimentar,
+            fase_pase=1.0 if en_pase else 0.0,
+            direccion_pase=dir_norm,
+            n_pase_seleccionadas=n_sel,
         )
 
         mask = np.zeros(52, dtype=np.float32)
-        for c in self._motor.obtener_jugadas_legales(agente):
-            mask[c.id] = 1.0
+        if en_pase:
+            # En fase de pase, legal = cartas de la mano aún no seleccionadas.
+            for c in self._motor.jugadores[agente].mano:
+                if c not in self._pase_seleccion:
+                    mask[c.id] = 1.0
+        else:
+            for c in self._motor.obtener_jugadas_legales(agente):
+                mask[c.id] = 1.0
 
         return {"obs": obs_vec, "action_mask": mask}

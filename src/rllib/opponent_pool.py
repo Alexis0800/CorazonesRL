@@ -120,10 +120,14 @@ class SnapshotPolicy:
         motor: MotorCorazones,
         idx: int,
         legales: List[Carta],
+        obs_vec: Optional[np.ndarray] = None,
     ) -> Carta:
         import torch
 
-        obs_vec = self._obs_builder.construir_desde_motor(motor, jugador_idx=idx)
+        # Si el env provee la observación COMPLETA (perspectiva de idx), usarla;
+        # si no (contextos sin env, p.ej. elo legacy), caer a la obs mínima.
+        if obs_vec is None:
+            obs_vec = self._obs_builder.construir_desde_motor(motor, jugador_idx=idx)
         mask = np.zeros(52, dtype=np.float32)
         for c in legales:
             mask[c.id] = 1.0
@@ -160,6 +164,65 @@ class SnapshotPolicy:
             carta = random.choice(legales)
         return carta
 
+    def pasar(self, motor: MotorCorazones, idx: int) -> List[Carta]:
+        """Selecciona 3 cartas a pasar con la POLÍTICA NEURONAL (v10c).
+
+        Replica las 3 sub-decisiones que hace el agente en el env durante la fase
+        de pase: construye la obs de pase (fase_pase=1, dirección, nº seleccionadas;
+        vacíos vacíos porque es inicio de mano) y corre el modelo eligiendo el
+        argmax de las cartas aún no seleccionadas. Así los snapshots pasan igual
+        que el agente → self-play 100% consistente.
+        """
+        import torch
+
+        model = self._get_model()
+        direccion = motor.direccion_pase()
+        dir_norm = {"izquierda": 0.33, "derecha": 0.66,
+                    "enfrente": 1.0}.get(direccion, 0.0)
+        scores = [j.puntuacion_historica for j in motor.jugadores]
+        mano = list(motor.jugadores[idx].mano)
+        seleccion: List[Carta] = []
+
+        initial = model.get_initial_state()
+        es_recurrente = bool(initial)
+        if es_recurrente:
+            st = self._lstm_state.get(idx)
+            if st is None:
+                st = [s.unsqueeze(0) for s in initial]
+        else:
+            st = []
+
+        for k in range(3):
+            obs_vec = self._obs_builder.construir(
+                motor=motor, agente_idx=idx,
+                vacios=[set() for _ in range(4)],
+                puntuacion_historica=scores,
+                puntos_mano_actual=[0, 0, 0, 0],
+                dama_picas_en=None,
+                fase_pase=1.0, direccion_pase=dir_norm, n_pase_seleccionadas=k,
+            )
+            mask = np.zeros(52, dtype=np.float32)
+            for c in mano:
+                if c not in seleccion:
+                    mask[c.id] = 1.0
+            with torch.no_grad():
+                o = torch.as_tensor(obs_vec, dtype=torch.float32).unsqueeze(0)
+                m = torch.as_tensor(mask, dtype=torch.float32).unsqueeze(0)
+                logits, new_st = model.forward(
+                    {"obs": {"obs": o, "action_mask": m}}, st, None)
+                if es_recurrente:
+                    st = new_st
+                action = int(logits.argmax(dim=1).item())
+            carta = Carta._TODAS[action]
+            seleccionables = [c for c in mano if c not in seleccion]
+            if carta not in seleccionables:
+                carta = seleccionables[0]
+            seleccion.append(carta)
+
+        if es_recurrente:
+            self._lstm_state[idx] = st
+        return seleccion
+
 
 class OpponentPool:
     """Pool de oponentes para self-play con bots y snapshots históricos.
@@ -186,11 +249,20 @@ class OpponentPool:
         snapshot_dir: Optional[str] = None,
         max_snapshots: int = 50,
         obs_dim: int = DIM_ENTORNO,
+        anclar_experto: bool = False,
+        pool_diverso: bool = False,
     ):
         self._agente_idx = agente_idx
         self._snapshot_dir = snapshot_dir
         self._max_snapshots = max_snapshots
         self._obs_dim = obs_dim
+        # Si True, mantiene 1 BotExperto como ANCLA en fases 3-4 (evita la
+        # regresión del self-play puro). Default False = self-play puro como v10.
+        self._anclar_experto = anclar_experto
+        # Si True, el oponente "duro" de cada fase es un arquetipo humano al azar
+        # (experto/castigador/lunatico/atacante) en vez de siempre BotExperto.
+        # Hace el self-play robusto a juego variado (generaliza mejor a humanos).
+        self._pool_diverso = pool_diverso
         self._snapshots: List[SnapshotPolicy] = []
 
     def add_snapshot(self, policy) -> None:
@@ -215,6 +287,18 @@ class OpponentPool:
         snapshots = list(self._snapshots)
         # Snapshots recientes: últimos 10 (fase 4 solo usa estos para máxima presión)
         snapshots_recientes = snapshots[-10:] if len(snapshots) >= 10 else snapshots
+        anclar = self._anclar_experto  # capturar local (closure serializable)
+        diverso = self._pool_diverso
+
+        def _bot_dificil():
+            """Oponente 'duro': BotExperto, o un arquetipo humano al azar si pool_diverso."""
+            if diverso:
+                from src.agentes.bot_castigador import BotCastigador
+                from src.agentes.bot_lunatico import BotLunatico
+                from src.agentes.bot_atacante_lider import BotAtacanteLider
+                return random.choice([BotExperto, BotCastigador, BotLunatico,
+                                      BotAtacanteLider])()
+            return BotExperto()
 
         def _factory(agente_idx: int = 0) -> Dict[int, PolicyFn]:
             opp_indices = [i for i in range(4) if i != agente_idx]
@@ -227,33 +311,38 @@ class OpponentPool:
                     fns[idx] = random.choice(_BOTS_SIMPLES)
 
             elif progress < 0.15 or len(snapshots) < 1:
-                # Fase 1: 2 bots simples + 1 BotExperto — introduce oponente duro
+                # Fase 1: 2 bots simples + 1 oponente duro (diverso si pool_diverso)
                 fns[opp_indices[0]] = random.choice(_BOTS_SIMPLES)
                 fns[opp_indices[1]] = random.choice(_BOTS_SIMPLES)
-                fns[opp_indices[2]] = BotExperto()
+                fns[opp_indices[2]] = _bot_dificil()
 
             elif progress < 0.40 or len(snapshots) < 2:
-                # Fase 2: 1 BotExperto + 2 snapshots — mezcla experto + self-play
-                fns[opp_indices[0]] = BotExperto()
+                # Fase 2: 1 oponente duro + 2 snapshots — mezcla + self-play
+                fns[opp_indices[0]] = _bot_dificil()
                 fns[opp_indices[1]] = random.choice(snapshots)
                 fns[opp_indices[2]] = random.choice(snapshots)
 
             elif progress < 0.70:
-                # Fase 3: 1 BotExperto (ANCLA) + 2 snapshots del pool completo.
-                # El ancla fija evita la regresión del self-play puro vs oponentes
-                # de distribución distinta (ver Rediseño_v10: regresión observada
-                # en v10_lstm al quitar el ancla).
-                fns[opp_indices[0]] = BotExperto()
-                fns[opp_indices[1]] = random.choice(snapshots)
-                fns[opp_indices[2]] = random.choice(snapshots)
+                # Fase 3: self-play. Con ancla = 1 oponente duro + 2 snapshots;
+                # sin ancla = 3 snapshots del pool completo (como v10).
+                if anclar:
+                    fns[opp_indices[0]] = _bot_dificil()
+                    fns[opp_indices[1]] = random.choice(snapshots)
+                    fns[opp_indices[2]] = random.choice(snapshots)
+                else:
+                    for idx in opp_indices:
+                        fns[idx] = random.choice(snapshots)
 
             else:
-                # Fase 4: 1 BotExperto (ANCLA) + 2 snapshots recientes — presión
-                # máxima contra versiones propias pero conservando robustez.
+                # Fase 4: presión máxima con snapshots recientes (+ ancla opcional).
                 pool = snapshots_recientes if len(snapshots_recientes) >= 1 else snapshots
-                fns[opp_indices[0]] = BotExperto()
-                fns[opp_indices[1]] = random.choice(pool)
-                fns[opp_indices[2]] = random.choice(pool)
+                if anclar:
+                    fns[opp_indices[0]] = _bot_dificil()
+                    fns[opp_indices[1]] = random.choice(pool)
+                    fns[opp_indices[2]] = random.choice(pool)
+                else:
+                    for idx in opp_indices:
+                        fns[idx] = random.choice(pool)
 
             return fns
 

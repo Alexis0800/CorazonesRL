@@ -32,6 +32,8 @@ class MotorCorazones:
         self.baraja: Baraja = Baraja()
         self.corazones_rotos: bool = False
         self.numero_baza: int = 0
+        # Número de mano dentro de la PARTIDA (para la rotación del pase).
+        self.numero_mano: int = 0
         self.mesa: List[Tuple[int, Carta]] = []
         self.palo_de_salida: Optional[int] = None
         self.indice_jugador_inicial: int = 0
@@ -45,15 +47,74 @@ class MotorCorazones:
             jug.bazas_ganadas = []
         self.corazones_rotos = False
         self.numero_baza = 1
+        self.numero_mano += 1
         self.mesa = []
         self.palo_de_salida = None
         self._mano_activa = True
+        self._fijar_jugador_inicial()
+
+    def _fijar_jugador_inicial(self) -> None:
+        """Fija el jugador inicial como el portador del 2♣ (tras reparto o pase)."""
         for i, jug in enumerate(self.jugadores):
             if any(c.es_dos_de_treboles for c in jug.mano):
                 self.indice_jugador_inicial = i
                 return
         raise RuntimeError(
-            "Ningún jugador tiene el 2 de Tréboles tras el reparto.")
+            "Ningún jugador tiene el 2 de Tréboles.")
+
+    # ------------------------------------------------------------------
+    # El Pase (passing) — rotación izquierda/derecha/enfrente/sin pase
+    # ------------------------------------------------------------------
+
+    def direccion_pase(self) -> Optional[str]:
+        """Dirección del pase para la mano actual según la rotación estándar.
+
+        Ciclo por número de mano: 1→izquierda, 2→derecha, 3→enfrente, 4→sin pase.
+        Retorna None si esta mano no tiene pase.
+        """
+        if self.numero_mano <= 0:
+            return None
+        fase = (self.numero_mano - 1) % 4
+        return {0: "izquierda", 1: "derecha", 2: "enfrente", 3: None}[fase]
+
+    # Offset de asiento del receptor según dirección (orden de juego = +1 = izquierda).
+    _OFFSET_PASE = {"izquierda": 1, "derecha": 3, "enfrente": 2}
+
+    def receptor_pase(self, jugador_idx: int) -> Optional[int]:
+        """Índice del jugador que recibe el pase de `jugador_idx` (o None si no hay pase)."""
+        direccion = self.direccion_pase()
+        if direccion is None:
+            return None
+        return (jugador_idx + self._OFFSET_PASE[direccion]) % 4
+
+    def ejecutar_pase(self, selecciones: dict) -> None:
+        """Ejecuta el intercambio de 3 cartas y recalcula el portador del 2♣.
+
+        Args:
+            selecciones: {jugador_idx: [3 Cartas]} — las cartas que cada jugador pasa.
+
+        El intercambio es simultáneo. Tras él, el jugador inicial se recalcula
+        porque el 2♣ pudo haber cambiado de manos.
+        """
+        direccion = self.direccion_pase()
+        if direccion is None:
+            return  # mano sin pase
+        offset = self._OFFSET_PASE[direccion]
+
+        # 1) Retirar las cartas salientes de cada mano (simultáneo).
+        for idx, cartas in selecciones.items():
+            if len(cartas) != 3:
+                raise ValueError(f"El jugador {idx} debe pasar exactamente 3 cartas.")
+            for c in cartas:
+                self.jugadores[idx].mano.remove(c)
+
+        # 2) Entregar a los receptores.
+        for idx, cartas in selecciones.items():
+            receptor = (idx + offset) % 4
+            self.jugadores[receptor].mano.extend(cartas)
+
+        # 3) El portador del 2♣ pudo cambiar → recalcular quién abre.
+        self._fijar_jugador_inicial()
 
     def obtener_jugador_actual(self) -> int:
         """Retorna el índice del jugador que debe jugar en este momento."""
@@ -167,6 +228,7 @@ class MotorCorazones:
         """
         for jug in self.jugadores:
             jug.puntuacion_historica = 0
+        self.numero_mano = 0  # repartir() lo pone en 1 (primera mano de la partida)
         self.repartir()
 
     def puntuaciones_historicas(self) -> List[int]:

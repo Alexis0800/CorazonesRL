@@ -30,6 +30,7 @@ def build_ppo_config(
     agente_idx: int = 0,
     random_position: bool = True,
     reward_config=None,
+    con_pase: bool = False,
     baza_reward_weight: float = 0.15,  # obsoleto (v9), ignorado en v10
     # PPO hiperparámetros
     lr: float = 3e-4,
@@ -89,6 +90,8 @@ def build_ppo_config(
         "opponent_factory": opponent_factory,
         # gamma del shaping PBRS — debe ser idéntico al gamma de PPO.
         "gamma": gamma,
+        # v10b: fase de pase (requiere obs_dim >= 228).
+        "con_pase": con_pase,
     }
     if reward_config is not None:
         env_config["reward_config"] = reward_config

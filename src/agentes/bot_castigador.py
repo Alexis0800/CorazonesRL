@@ -56,6 +56,37 @@ class BotCastigador:
     # Interfaz Strategy
     # ──────────────────────────────────────────────────────────────
 
+    def pasar(self, motor: MotorCorazones, idx: int) -> List[Carta]:
+        """Pase acorde al perfil castigador: CONSERVA las picas (su arma para
+        presionar la Q♠) y suelta el resto de liabilities.
+
+        Prioridad: Q♠ si la tiene (no quiere comérsela) → corazones altos →
+        cartas altas de ♣/♦ → completa con altas. Evita soltar picas bajas/medias.
+        """
+        mano = list(motor.jugadores[idx].mano)
+        if len(mano) <= 3:
+            return mano[:3]
+        seleccion: List[Carta] = []
+
+        def _add(cartas):
+            for c in cartas:
+                if c not in seleccion and len(seleccion) < 3:
+                    seleccion.append(c)
+
+        # 1) Q♠ (no quiere ser ella quien la cargue) — pero no otras picas.
+        _add([c for c in mano if c.es_dama_de_picas])
+        # 2) Corazones altos.
+        _add(sorted([c for c in mano if c.es_corazon and c.valor >= 11],
+                    key=lambda c: -c.valor))
+        # 3) Altas de ♣/♦ (conservar picas).
+        _add(sorted([c for c in mano if c.palo in (_TREBOL, _DIAMANTE) and c.valor >= 12],
+                    key=lambda c: -c.valor))
+        # 4) Completar evitando picas bajas/medias mientras sea posible.
+        _add(sorted([c for c in mano if c.palo != _PICA and c not in seleccion],
+                    key=lambda c: -c.valor))
+        _add(sorted([c for c in mano if c not in seleccion], key=lambda c: -c.valor))
+        return seleccion[:3]
+
     def __call__(
         self,
         motor: MotorCorazones,
