@@ -90,3 +90,18 @@ vecnormalize/
 .env.*
 *.key
 *.pem
+
+videos/
+# Captura visión: salida cruda del agrupado (regenerable)
+calibracion/hearts_app/*_descubiertos/
+datos/capturas/
+
+# Recursos extraidos de la APK (no redistribuir; regenerables)
+# OJO: las plantillas derivadas que usa el código se versionan en
+# calibracion/hearts_app/ (banners, cartas, cartas_completas). Aquí solo se ignora
+# el volcado crudo de la APK (sprites originales, drawable, layouts, raw, ...).
+calibracion/Corazones/
+
+# Android platform-tools (ADB): binarios grandes, descargables aparte
+herramientas/
+platform-tools.zip

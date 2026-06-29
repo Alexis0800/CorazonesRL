@@ -53,3 +53,35 @@ def test_flujo_completo_una_mano():
     # todos los puntos del juego (26) se reparten; con pleno serían 78
     assert sum(p.manos[0].puntuacion_mano) in (26, 78)
     assert sum(p.marcador_final) == sum(p.manos[0].puntuacion_mano)
+
+
+def test_flujo_con_resto():
+    rng = random.Random(1)
+    ids = list(range(52))
+    rng.shuffle(ids)
+    mano = ids[:13]
+    pase = mano[:3]
+    k = 10  # se juegan 10 bazas y se concede el resto
+    tricks = [ids[i * 4:(i + 1) * 4] for i in range(k)]   # 40 cartas
+    pool = ids[40:52]                                      # 12 restantes
+    restantes = [pool[s * 3:(s + 1) * 3] for s in range(4)]
+
+    lineas = [" ".join(carta_a_str(c) for c in mano),
+              " ".join(carta_a_str(c) for c in pase), ""]
+    lineas.append("0")  # asiento que abre
+    lineas += [" ".join(carta_a_str(c) for c in t) for t in tricks]
+    lineas.append("resto")   # baza 11 -> concesión
+    lineas.append("2")       # asiento que se lleva el resto
+    lineas += [" ".join(carta_a_str(c) for c in restantes[s]) for s in range(4)]
+    lineas.append("n")
+
+    adaptador = AdaptadorManual(
+        asiento_agente=0, entrada=_entrada_de(lineas), salida=lambda *a, **k: None,
+    )
+    p = RecolectorPartidas(adaptador=adaptador).ejecutar()[0]
+    m = p.manos[0]
+    assert m.remate_asiento == 2
+    assert len(m.jugadas) == 40
+    assert [len(h) for h in m.manos_restantes] == [3, 3, 3, 3]
+    assert len(m.jugadas) + sum(len(h) for h in m.manos_restantes) == 52
+    assert sum(m.puntuacion_mano) in (26, 78)

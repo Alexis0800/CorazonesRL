@@ -25,17 +25,37 @@ Ejemplo = Tuple[np.ndarray, int]  # (obs, carta_id elegida)
 
 
 def reconstruir_manos(mano: RegistroMano) -> List[List[Carta]]:
-    """Deriva las 4 manos (post-pase) a partir de las jugadas registradas."""
+    """Deriva las 4 manos (post-pase) a partir de las jugadas registradas.
+
+    Si la mano terminó por concesión ("se llevará el resto"), completa cada mano
+    con las `manos_restantes` reveladas, de modo que cada asiento sume 13 cartas.
+    """
     manos: List[List[Carta]] = [[], [], [], []]
     for j in mano.jugadas:
         manos[j.asiento].append(Carta._TODAS[j.carta_id])
+    if mano.manos_restantes:
+        if len(mano.manos_restantes) != 4:
+            raise ValueError(
+                f"Mano {mano.numero_mano}: manos_restantes debe tener 4 listas."
+            )
+        for asiento, restantes in enumerate(mano.manos_restantes):
+            manos[asiento].extend(Carta._TODAS[c] for c in restantes)
     for asiento, m in enumerate(manos):
         if len(m) != 13:
             raise ValueError(
                 f"Mano {mano.numero_mano}: el asiento {asiento} tiene {len(m)} "
-                f"cartas (esperaba 13). Jugadas incompletas o corruptas."
+                f"cartas (esperaba 13). Jugadas/restantes incompletas o corruptas."
             )
     return manos
+
+
+def mano_reconstruible(mano: RegistroMano) -> bool:
+    """True si la mano puede re-jugarse (4 manos de 13 cartas coherentes)."""
+    try:
+        reconstruir_manos(mano)
+        return True
+    except Exception:
+        return False
 
 
 def _preparar_motor(mano: RegistroMano) -> MotorCorazones:
@@ -105,6 +125,6 @@ def partidas_a_arrays(
 
 
 __all__ = [
-    "Ejemplo", "reconstruir_manos", "ejemplos_de_mano",
+    "Ejemplo", "reconstruir_manos", "mano_reconstruible", "ejemplos_de_mano",
     "ejemplos_de_partida", "partidas_a_arrays",
 ]

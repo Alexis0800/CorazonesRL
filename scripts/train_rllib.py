@@ -66,7 +66,9 @@ from src.rllib.callbacks import HeartsCallbacks
 from src.rllib.config import build_ppo_config
 from src.rllib.eval_bots import evaluar_vs_bots
 from src.rllib.opponent_pool import OpponentPool
-from src.rllib.utils import guardar_snapshot, podar_snapshots, preservar_elite
+from src.rllib.utils import (
+    guardar_snapshot, podar_snapshots, preservar_elite, listar_snapshots,
+)
 
 console = Console()
 
@@ -94,6 +96,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--snapshot-interval", type=int, default=100_000,
                    help="Pasos entre cada snapshot guardado (default 100k)")
     p.add_argument("--max-snapshots", type=int, default=50)
+    p.add_argument("--resume", default=None,
+                   help="Reanuda desde un checkpoint. 'auto' = último snapshot de "
+                        "output-dir/snapshots; o pasa la ruta a un snapshot concreto.")
     p.add_argument("--obs-dim", type=int, default=DIM_ENTORNO)
     p.add_argument("--lr", type=float, default=3e-4,
                    help="LR inicial (default 3e-4)")
@@ -123,7 +128,9 @@ def parse_args() -> argparse.Namespace:
                         "azar (experto/castigador/lunatico/atacante), no solo "
                         "BotExperto. Mejora la generalización a juego variado.")
     p.add_argument("--con-pase", action="store_true",
-                   help="Habilita la fase de PASE (v10b). Fuerza obs_dim>=228 (DIM_V12).")
+                   help="Habilita la fase de PASE. Fuerza obs_dim>=228 (DIM_V12). "
+                        "Con --obs-dim 332 (DIM_V13) añade memoria del pase: "
+                        "cartas dadas al receptor + recibidas del dador.")
     p.add_argument("--baza-reward-weight", type=float, default=0.15,
                    help="OBSOLETO (v9): ignorado en v10. Se mantiene por compatibilidad.")
     p.add_argument("--use-lstm", action="store_true",
@@ -252,25 +259,59 @@ def main() -> None:
         lstm_hidden_size=args.lstm_hidden,
     )
     config = config.callbacks(HeartsCallbacks)
+    # Tolerancia a fallos: en Windows un worker puede morir (RAM/Ray). Que Ray los
+    # reinicie en vez de tumbar el entrenamiento con un access violation.
+    config = config.fault_tolerance(
+        restart_failed_env_runners=True,
+        ignore_env_runner_failures=True,
+        restart_failed_sub_environments=True,
+    )
 
     algo = config.build_algo()
 
-    # Inicialización por Behavioral Cloning (opcional): carga pesos pre-entrenados
-    # por imitación de PIMC-experto en la política PPO. El value_head queda en su
-    # init (BC solo entrena la política); PPO lo aprende. Usar LR bajo para no
-    # destruir la política BC en las primeras iteraciones.
-    if args.bc_weights:
+    # --- Reanudar desde checkpoint (--resume) O inicializar por BC ---
+    resume_path = None
+    if args.resume:
+        if args.resume == "auto":
+            _snaps = listar_snapshots(snapshot_dir)
+            resume_path = _snaps[-1][1] if _snaps else None
+        elif os.path.isdir(args.resume):
+            resume_path = args.resume
+        if not resume_path:
+            console.print(
+                f"[yellow]--resume='{args.resume}' sin checkpoint válido; "
+                f"empezando de cero.[/yellow]"
+            )
+
+    paso_reanudado = 0
+    if resume_path:
+        # pyarrow (que usa RLlib para leer el checkpoint) exige ruta ABSOLUTA en
+        # Windows; una relativa da "URI has empty scheme".
+        algo.restore(os.path.abspath(resume_path))
+        try:
+            paso_reanudado = int(os.path.basename(resume_path).split("_")[1])
+        except (IndexError, ValueError):
+            paso_reanudado = 0
+        console.print(
+            f"[green]Reanudado desde:[/green] {resume_path} (paso {paso_reanudado:,})"
+        )
+    elif args.bc_weights:
+        # BC (opcional): carga pesos pre-entrenados por imitación de PIMC. El
+        # value_head queda en su init (PPO lo aprende). LR bajo para no destruir BC.
         import pickle as _pickle
         with open(args.bc_weights, "rb") as _f:
             _bc = _pickle.load(_f)
         algo.get_policy().set_weights(_bc["weights"])
         console.print(f"[green]Política inicializada desde BC:[/green] {args.bc_weights}")
 
-    # Inyectar factory inicial en todos los envs
-    factory_inicial = pool.make_factory(progress=0.0)
-    algo.env_runner_group.foreach_env(
-        lambda env: setattr(env, "_opponent_factory", factory_inicial)
-    )
+    # Inyectar factory inicial (en la FASE correcta si se reanuda).
+    factory_inicial = pool.make_factory(progress=paso_reanudado / args.total_steps)
+    try:
+        algo.env_runner_group.foreach_env(
+            lambda env: setattr(env, "_opponent_factory", factory_inicial)
+        )
+    except Exception as _exc:
+        console.print(f"[yellow]Aviso inyectando factory inicial: {_exc}[/yellow]")
 
     console.print("[bold green]Algoritmo construido. Iniciando entrenamiento...[/bold green]\n")
 
@@ -287,15 +328,15 @@ def main() -> None:
     )
     task = progress_bar.add_task("Steps", total=args.total_steps)
 
-    pasos_totales = 0
-    ultimo_snapshot = 0
-    ultimo_factory_refresh = 0
-    fase_actual = 0
+    pasos_totales = paso_reanudado
+    ultimo_snapshot = paso_reanudado
+    ultimo_factory_refresh = paso_reanudado
+    fase_actual = _fase(paso_reanudado / args.total_steps)
     iter_count = 0
     reward_medio = float("nan")
     reward_max = float("nan")
     ep_len = float("nan")
-    num_snapshots = 0
+    num_snapshots = len(listar_snapshots(snapshot_dir))
     snapshots_desde_ultima_eval = 0
 
     try:
@@ -344,7 +385,7 @@ def main() -> None:
                         try:
                             policy = algo.get_policy()
                             metricas_bot = evaluar_vs_bots(
-                                policy, obs_dim=args.obs_dim, n_partidas=50,
+                                policy, obs_dim=args.obs_dim, n_partidas=150,
                                 con_pase=args.con_pase,
                             )
                             metricas_bot["tipo"] = "bot_eval"
@@ -361,7 +402,8 @@ def main() -> None:
                                 + 0.3 * metricas_bot.get("win_rate_vs_experto", 0.0)
                                 + 0.2 * metricas_bot.get("top2_rate", 0.0)
                             )
-                            if preservar_elite(ruta, elite_dir, score, pasos_totales):
+                            if preservar_elite(ruta, elite_dir, score,
+                                               pasos_totales, max_elite=10):
                                 console.print(
                                     f"[green][elite] preservado[/green] "
                                     f"(paso {pasos_totales:,}, score {score:.3f})"
@@ -379,9 +421,14 @@ def main() -> None:
                     fase_actual = nueva_fase
                     ultimo_factory_refresh = pasos_totales
                     new_factory = pool.make_factory(progress=progress)
-                    algo.env_runner_group.foreach_env(
-                        lambda env: setattr(env, "_opponent_factory", new_factory)
-                    )
+                    try:
+                        algo.env_runner_group.foreach_env(
+                            lambda env: setattr(env, "_opponent_factory", new_factory)
+                        )
+                    except Exception as _exc:
+                        console.print(
+                            f"[yellow]Aviso refrescando factory (continuo): {_exc}[/yellow]"
+                        )
 
                 progress_bar.update(task, completed=min(pasos_totales, args.total_steps))
                 live.update(Group(

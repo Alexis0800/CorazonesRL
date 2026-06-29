@@ -76,6 +76,8 @@ class ObservacionBuilder:
         fase_pase: float = 0.0,
         direccion_pase: float = 0.0,
         n_pase_seleccionadas: float = 0.0,
+        cartas_pasadas: Optional[List[int]] = None,
+        cartas_recibidas: Optional[List[int]] = None,
     ) -> np.ndarray:
         """Construye el vector de observación completo de `dim` dimensiones.
 
@@ -170,7 +172,34 @@ class ObservacionBuilder:
             obs[226] = float(n_pase_seleccionadas) / 3.0 # cartas ya elegidas para pasar
             obs[227] = 0.0                               # reservado
 
+        # --- Bloque v13 [228:332]: memoria del pase (por perspectiva) ---
+        if self.dim >= 332:
+            self._construir_bloque_v13(obs, a, motor, cartas_pasadas, cartas_recibidas)
+
         return obs
+
+    def _construir_bloque_v13(
+        self, obs: np.ndarray, a: int, motor,
+        cartas_pasadas: Optional[List[int]], cartas_recibidas: Optional[List[int]],
+    ) -> None:
+        """Memoria determinista del pase, desde la perspectiva del jugador `a`.
+
+        [228:280] cartas que `a` DIO a su receptor y aún NO se han jugado
+                  (⇒ siguen en la mano del receptor: ubicación conocida).
+        [280:332] cartas que `a` RECIBIÓ de su dador y aún tiene en la mano
+                  (señal sobre lo que el dador se quitó; valor exacto, no conteo).
+        """
+        if cartas_pasadas:
+            jugadas = {c.id for jug in motor.jugadores for c in jug.bazas_ganadas}
+            jugadas.update(c.id for _, c in motor.mesa)
+            for cid in cartas_pasadas:
+                if cid not in jugadas:
+                    obs[228 + cid] = 1.0
+        if cartas_recibidas:
+            mano_ids = {c.id for c in motor.jugadores[a].mano}
+            for cid in cartas_recibidas:
+                if cid in mano_ids:
+                    obs[280 + cid] = 1.0
 
     def _construir_bloque_v9(
         self,

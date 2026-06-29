@@ -74,8 +74,13 @@ class RegistroMano:
     mano_inicial_agente: List[int]         # 13 ids (PRE-pase)
     pase_dado: List[int] = field(default_factory=list)      # 3 ids (o vacío)
     pase_recibido: List[int] = field(default_factory=list)  # 3 ids (opcional)
-    jugadas: List[Jugada] = field(default_factory=list)     # 52 en orden global
+    jugadas: List[Jugada] = field(default_factory=list)     # jugadas REALES en orden
     puntuacion_mano: List[int] = field(default_factory=list)  # 4 (por asiento)
+    # --- "se llevará el resto" (concesión): la ronda termina antes de las 13 bazas ---
+    # `remate_asiento` se lleva TODAS las bazas restantes; `manos_restantes` son las
+    # cartas reveladas de cada asiento en ese momento (4 listas). None/[] = mano normal.
+    remate_asiento: Optional[int] = None
+    manos_restantes: List[List[int]] = field(default_factory=list)
 
 
 @dataclass
@@ -103,6 +108,8 @@ class RegistroPartida:
                 pase_recibido=list(m.get("pase_recibido", [])),
                 jugadas=[Jugada(**j) for j in m.get("jugadas", [])],
                 puntuacion_mano=list(m.get("puntuacion_mano", [])),
+                remate_asiento=m.get("remate_asiento"),
+                manos_restantes=[list(h) for h in m.get("manos_restantes", [])],
             )
             for m in d.get("manos", [])
         ]

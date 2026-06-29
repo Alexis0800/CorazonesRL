@@ -46,10 +46,12 @@ def _eval_model_vs_factory(
     obs_dim: int = DIM_ENTORNO,
     agente_idx: int = 0,
     con_pase: bool = False,
+    pase_memoria: bool = True,
 ) -> List[dict]:
     """Juega n partidas completas con `model` como agente, vía el ENV.
 
     opponent_factory: callable(agente_idx) -> dict{idx: policy_fn} (estilo env).
+    pase_memoria: si False, ablaciona los planos v13 (memoria del pase) a cero.
     Devuelve la lista de `info` terminal de cada partida (puesto, gano, etc.).
     """
     env = CorazonesEnvRLlib({
@@ -59,6 +61,7 @@ def _eval_model_vs_factory(
         "opponent_factory": opponent_factory,
         "gamma": 0.999,
         "con_pase": con_pase,
+        "pase_memoria": pase_memoria,
     })
 
     initial = model.get_initial_state()
@@ -103,6 +106,7 @@ def evaluar_vs_bots(
     n_partidas: int = 100,
     agente_idx: int = 0,
     con_pase: bool = False,
+    pase_memoria: bool = True,
 ) -> dict:
     """Evalúa la política jugando partidas completas (vía env) contra bots fijos.
 
@@ -142,7 +146,8 @@ def evaluar_vs_bots(
     todos: List[dict] = []
     for nombre, factory in escenarios.items():
         res = _eval_model_vs_factory(model, factory, n_partidas, obs_dim,
-                                     agente_idx, con_pase=con_pase)
+                                     agente_idx, con_pase=con_pase,
+                                     pase_memoria=pase_memoria)
         ag = _agregar(res)
         resultados[f"win_rate_vs_{nombre}"] = round(ag["win"], 4)
         resultados[f"top2_rate_vs_{nombre}"] = round(ag["top2"], 4)

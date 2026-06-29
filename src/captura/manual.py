@@ -16,7 +16,7 @@ from src.dominio.carta import Carta
 from src.captura.modelos import carta_a_str, str_a_carta_id
 from src.captura.puerto import (
     AdaptadorJuego, Evento, FinMano, FinPartida, InicioMano, InicioPartida,
-    JugadaObservada, PaseAgente,
+    JugadaObservada, PaseAgente, RemateResto,
 )
 
 _DIRECCION = {0: "izquierda", 1: "derecha", 2: "enfrente", 3: None}
@@ -33,17 +33,34 @@ def _ganador_baza(cartas: List[int], asiento_inicial: int) -> int:
     return (asiento_inicial + mejor_i) % 4
 
 
-def _puntuacion_mano(bazas: List[tuple]) -> List[int]:
-    """`bazas` = lista de (asiento_ganador, [4 carta_id]). Aplica regla de pleno."""
-    crudos = [0, 0, 0, 0]
-    for ganador, cartas in bazas:
-        crudos[ganador] += sum(Carta._TODAS[c].puntos for c in cartas)
+def _aplicar_pleno(crudos: List[int]) -> List[int]:
     for i, pts in enumerate(crudos):
         if pts == 26:  # pleno (shoot the moon)
             res = [26, 26, 26, 26]
             res[i] = 0
             return res
     return crudos
+
+
+def _puntuacion_mano(bazas: List[tuple]) -> List[int]:
+    """`bazas` = lista de (asiento_ganador, [4 carta_id]). Aplica regla de pleno."""
+    crudos = [0, 0, 0, 0]
+    for ganador, cartas in bazas:
+        crudos[ganador] += sum(Carta._TODAS[c].puntos for c in cartas)
+    return _aplicar_pleno(crudos)
+
+
+def _puntuacion_con_remate(
+    bazas: List[tuple], asiento_remate: int, manos_restantes: List[List[int]],
+) -> List[int]:
+    """Puntuación cuando un asiento se lleva TODAS las bazas restantes."""
+    crudos = [0, 0, 0, 0]
+    for ganador, cartas in bazas:
+        crudos[ganador] += sum(Carta._TODAS[c].puntos for c in cartas)
+    crudos[asiento_remate] += sum(
+        Carta._TODAS[c].puntos for h in manos_restantes for c in h
+    )
+    return _aplicar_pleno(crudos)
 
 
 class AdaptadorManual(AdaptadorJuego):
@@ -72,6 +89,22 @@ class AdaptadorManual(AdaptadorJuego):
                 continue
             if len(ids) != n:
                 self._out(f"  ⚠ esperaba {n} cartas, recibí {len(ids)} — reintenta.")
+                continue
+            return ids
+
+    def _pedir_baza(self, prompt: str) -> List[int] | None:
+        """Devuelve [4 ids] de la baza, o None si el usuario escribe 'resto'."""
+        while True:
+            crudo = self._in(prompt).strip()
+            if crudo.lower() in ("resto", "r"):
+                return None
+            try:
+                ids = [str_a_carta_id(t) for t in crudo.split()]
+            except ValueError as e:
+                self._out(f"  ⚠ {e} — reintenta.")
+                continue
+            if len(ids) != 4:
+                self._out(f"  ⚠ esperaba 4 cartas, recibí {len(ids)} — reintenta.")
                 continue
             return ids
 
@@ -109,11 +142,30 @@ class AdaptadorManual(AdaptadorJuego):
                 yield PaseAgente(dadas=dadas, recibidas=recibidas)
 
             bazas: List[tuple] = []
+            remate = False
             lider = self._pedir_int("Asiento que abre la baza 1 [0-3]: ", 0, 3)
             for baza in range(1, 14):
-                cartas = self._pedir_cartas(
-                    f"Baza {baza} — 4 cartas en orden desde asiento {lider}: ", 4
+                cartas = self._pedir_baza(
+                    f"Baza {baza} — 4 cartas desde asiento {lider} (o 'resto'): "
                 )
+                if cartas is None:  # "se llevará el resto"
+                    ganador = self._pedir_int(
+                        "¿Qué asiento se lleva el resto? [0-3]: ", 0, 3)
+                    faltan = 13 - (baza - 1)
+                    restantes = [
+                        self._pedir_cartas(
+                            f"Cartas restantes del asiento {s} ({faltan}): ", faltan)
+                        for s in range(4)
+                    ]
+                    puntuacion = _puntuacion_con_remate(bazas, ganador, restantes)
+                    for i in range(4):
+                        marcador[i] += puntuacion[i]
+                    self._out(f"Resto para asiento {ganador} | puntuación: "
+                              f"{puntuacion} | marcador: {marcador}")
+                    yield RemateResto(asiento=ganador, manos_restantes=restantes)
+                    yield FinMano(puntuacion=puntuacion)
+                    remate = True
+                    break
                 for k, cid in enumerate(cartas):
                     asiento = (lider + k) % 4
                     yield JugadaObservada(asiento=asiento, carta_id=cid, baza=baza)
@@ -121,11 +173,12 @@ class AdaptadorManual(AdaptadorJuego):
                 bazas.append((ganador, cartas))
                 lider = ganador
 
-            puntuacion = _puntuacion_mano(bazas)
-            for i in range(4):
-                marcador[i] += puntuacion[i]
-            self._out(f"Puntuación mano: {puntuacion} | marcador: {marcador}")
-            yield FinMano(puntuacion=puntuacion)
+            if not remate:
+                puntuacion = _puntuacion_mano(bazas)
+                for i in range(4):
+                    marcador[i] += puntuacion[i]
+                self._out(f"Puntuación mano: {puntuacion} | marcador: {marcador}")
+                yield FinMano(puntuacion=puntuacion)
 
             if max(marcador) >= self.limite:
                 break

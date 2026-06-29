@@ -15,7 +15,7 @@ from src.captura.escritor import EscritorJsonl
 from src.captura.modelos import Jugada, RegistroMano, RegistroPartida
 from src.captura.puerto import (
     AdaptadorJuego, FinMano, FinPartida, InicioMano, InicioPartida,
-    JugadaObservada, PaseAgente,
+    JugadaObservada, PaseAgente, RemateResto,
 )
 
 
@@ -71,6 +71,10 @@ class RecolectorPartidas:
                     mano.jugadas.append(
                         Jugada(asiento=ev.asiento, carta_id=ev.carta_id, baza=ev.baza)
                     )
+                elif isinstance(ev, RemateResto):
+                    self._exigir(mano, "RemateResto sin InicioMano")
+                    mano.remate_asiento = ev.asiento
+                    mano.manos_restantes = [list(h) for h in ev.manos_restantes]
                 elif isinstance(ev, FinMano):
                     self._exigir(mano, "FinMano sin InicioMano")
                     mano.puntuacion_mano = list(ev.puntuacion)

@@ -64,7 +64,7 @@ python -m src.torneo.elo --directorio models/v8/elite --partidas 50 --elo-puro -
 - `corazones_rllib.py`: `CorazonesEnvRLlib(gym.Env)` — **primary RLlib training env**. **One episode = one FULL GAME to 100 pts** (multiple hands, scoreboard persists). Obs space `Dict({"obs": Box(obs_dim,), "action_mask": Box(52,)})` where `obs_dim` defaults to `DIM_ENTORNO=224`; with `con_pase=True` (the pass phase) it requires `obs_dim>=228` (v10c uses 228). Reward = R_terminal by final placement (1st=+1, 2nd=+0.3, 3rd=−0.3, 4th=−1) + PBRS potential shaping on the scoreboard (`reward_config`/`gamma` in env_config; gamma must match PPO). Opponents managed inside via `opponent_factory`. Passes `gymnasium.check_env`. See `docs/Rediseño_v10_partida_completa.md`.
 - `observacion.py`: `ObservacionBuilder` — SSOT for the observation vector. Supports 224 (v11, no pass) and 228 (v12, with pass) via the `dim` constructor arg. Scoreboard features (`[172:176]`, near-100, leader, terminal-hand) are LIVE because score persists across hands.
 - `recompensas_partida.py`: **SSOT for rewards** — `RewardConfigPartida` + `CalculadoraRecompensasPartida` (R_terminal + PBRS Φ). This is what `CorazonesEnvRLlib` uses.
-- `dimensiones.py`: SSOT for observation dimensions (`DIM_V11=224` default sin pase, `DIM_V12=228` con pase; `DIM_ENTORNO=224`). Always import from here — never hardcode `224`/`228`.
+- `dimensiones.py`: SSOT for observation dimensions (`DIM_V11=224` default sin pase, `DIM_V12=228` con pase, `DIM_V13=332` con pase + memoria del pase; `DIM_ENTORNO=224`). Always import from here — never hardcode `224`/`228`/`332`.
 
 **`src/agentes/`** — Agent strategies (Strategy pattern: `(motor, idx, legales) → Carta`).
 
@@ -104,16 +104,24 @@ All CLI entry points live in `scripts/` and are run from the repo root as `pytho
 
 **`src/captura/`** — Human-game dataset collector (Roadmap Fase 2–3). Reuses `dominio`/`entorno`; only `adb.py` needs optional deps (`requirements-captura.txt`).
 
-- `puerto.py`: `AdaptadorJuego` (ABC) — emits an **event stream** (`InicioMano`, `PaseAgente`, `JugadaObservada`, `FinMano`, `FinPartida`). The DIP boundary: the collector knows only events, so the source (ADB / manual / mock) is swappable.
-- `manual.py`: `AdaptadorManual` — console source, **usable today without ADB** (you narrate the game; it computes the scoreboard).
-- `adb.py`: `ClienteADB` (real `adb` subprocess: screencap/tap), `ParserPantalla` (ABC) + `ParserPlantillas` (OpenCV template-matching, **needs per-app calibration**), `AdaptadorADB` (polling loop + plays via a `politica`). Lazy-imports `cv2`.
+- `puerto.py`: `AdaptadorJuego` (ABC) — emits an **event stream** (`InicioMano`, `PaseAgente`, `JugadaObservada`, `RemateResto`, `FinMano`, `FinPartida`). The DIP boundary: the collector knows only events, so the source (ADB / manual / sim) is swappable. `RemateResto` models the app's "se llevará el resto" (a player claims all remaining tricks): it records the conceding seat + the revealed remaining hands instead of fabricating plays.
+- `manual.py`: `AdaptadorManual` — console source, **usable today without ADB** (you narrate the game; it computes the scoreboard, incl. concession when you type `resto`).
+- `simulado.py`: `AdaptadorSimulado` — motor-played games (random-legal, with pass) to validate the whole pipeline without a device. Backs `capturar.py --fuente demo`.
+- `adb.py`: `ClienteADB` (real `adb` subprocess: screencap/tap), `ParserPantalla` (ABC) + `ParserPlantillas` (legacy template-matching skeleton), `AdaptadorADB` (old polling skeleton). Lazy-imports `cv2`.
+- **Visión por captura de pantalla (app Hearts es, 1080×1728)** — pipeline nuevo, calibrado en `calibracion/hearts_app/` (ver su README):
+  - `vision_hearts.py`: `Regiones` (cajas en fracciones), `BannerClasificador` (lee el banner de texto por plantillas → fase/dirección de pase/turno/ganador de baza, sin OCR de sistema), `leer_mesa`/`leer_estado` → `EstadoVisual`, y **`leer_mano`** (mano del agente, 13 cartas — **100% en la captura real**).
+  - `vision_cartas.py`: dos reconocedores de carta. (1) `Reconocedor` híbrido para la **mesa** — `detectar_cartas` + color (rojo/negro) + rango (glifo por plantilla) + palo (forma del pip: lóbulos ♥/♦, *solidez* ♣/♠). (2) **`ReconocedorPlantilla`** para la **mano** — `matchTemplate` (correlación normalizada **multiescala**, `_ESCALAS`) contra los **naipes completos del sprite de la APK** (arte idéntico al renderizado); la ventana de búsqueda absorbe el desajuste de pocos píxeles que rompe la firma de esquina. `leer_mano` localiza las 13 cartas solapadas (`localizar_cartas`: franja fina + interpolación de **posiciones uniformes**, ya que el paso del abanico es constante), saca el palo por bloque (la app agrupa la mano por palo) y el rango por carta. Ambos devuelven `None`/carta omitida si la confianza es baja (no emiten carta errónea). Las plantillas se generan del sprite con `cartas_desde_sprite.py` → `calibracion/hearts_app/cartas_completas/` (versionadas).
+  - `maquina.py`: `MaquinaCaptura` — pura; convierte la secuencia de `EstadoVisual` en eventos del puerto. Bufferiza las 4 cartas de cada baza y las emite en **orden de turno** (líder = quien juega el 2♣ en la baza 1; ganador del banner "X recoge la baza" en las siguientes). **Confirmación temporal** (una carta debe verse estable ≥`min_confirmaciones` frames) para filtrar misreads de animación; lee la mesa solo en estados asentados (`turno`/`baza`).
+  - `adaptador_visual.py`: `AdaptadorVisual(AdaptadorJuego)` — conduce la máquina desde una **fuente de fotogramas** (carpeta/video o poll ADB). El mismo cerebro valida offline y captura en vivo.
 - `recolector.py`: `RecolectorPartidas` — aggregates events → `RegistroPartida`.
 - `escritor.py` / `modelos.py`: append-only JSONL I/O + DTOs (cards stored as `carta.id`).
-- `replay.py`: **pure** offline encoder — replays a `RegistroPartida` through `MotorCorazones` + `ObservacionBuilder` to emit `(obs, accion)`. Hands are reconstructed from the recorded plays (each seat plays its 13 cards), so opponents' hands are never needed.
+- `replay.py`: **pure** offline encoder — replays a `RegistroPartida` through `MotorCorazones` + `ObservacionBuilder` to emit `(obs, accion)`. Hands are reconstructed from the recorded plays plus `manos_restantes` (each seat totals 13 cards), so opponents' hands are never needed and conceded rounds still replay. ⚠ Currently emits the **minimal** obs (`construir_desde_motor`): it does NOT yet rebuild strategic features nor v13 pass-memory, so human-data BC isn't yet aligned with a v13-trained model. Aligning the encoder to full v13 obs (incl. `pase_dado`/`direccion` → di/recibí planes) is a TODO before fine-tuning on human data.
 
-Scripts: `scripts/capturar.py` (run a capture session), `scripts/calibrar_captura.py` (grab a screenshot to crop card templates / define regions), `scripts/jsonl_a_dataset.py` (JSONL → `(obs, accion)` `.npz`). ⚠ Auto-clicking a game app may violate its ToS.
+Scripts: `scripts/capturar.py` (`--fuente manual|demo|adb`), `scripts/inspeccionar_captura.py` (decode a `.jsonl` to readable form + integrity check), `scripts/calibrar_captura.py` (grab a screenshot via ADB), `scripts/jsonl_a_dataset.py` (JSONL → `(obs, accion)` `.npz`). ⚠ Auto-clicking a game app may violate its ToS.
 
-### Observation Vector (224 dims = v11 no-pass; 228 = v12 with pass)
+Visión por captura (app Hearts, ver `calibracion/hearts_app/README.md`): `scripts/capturar_visual.py` (`--fuente carpeta|adb`, captura por visión → JSONL; `--solo-validas` filtra por replay → dataset limpio; `--validar` re-juega), `scripts/diagnostico_captura.py` (un frame → imprime banner + mesa + mano legibles; `--overlay` dibuja las regiones), `scripts/monitor_vivo.py` (poll ADB → consola en vivo, **solo observa**; `--frame` para probar sin ADB), `scripts/cartas_desde_sprite.py` (genera `cartas_completas/` + esquinas desde el sprite de la APK), `scripts/calibrar_regiones.py` (dibuja las regiones sobre un frame para verificarlas), `scripts/agrupar_banners.py` / `scripts/agrupar_cartas.py` (descubren plantillas nuevas agrupando recortes por similitud → etiquetar a mano), `scripts/mapear_frames.py` (mapea cada frame → estado de banner). Estado: **mano inicial 13/13 perfecto** (matchTemplate multiescala del sprite); banner OK (generaliza entre dispositivos); mesa rango+color+palo OK en el video. Falta: aplicar el mismo `ReconocedorPlantilla` a la **mesa** (validar con frames en-juego), pase recibido, y **auto-juego** (tap por ADB con el modelo). ⚠ ADB para visión necesita `adb` en PATH (binarios en `herramientas/`, gitignored); auto-tap puede violar la ToS de la app.
+
+### Observation Vector (224 = v11 no-pass; 228 = v12 with pass; 332 = v13 + pass memory)
 
 | Range | Content |
 | ------- | --------- |
@@ -143,8 +151,10 @@ Scripts: `scripts/capturar.py` (run a capture session), `scripts/calibrar_captur
 | `[219]` | Led suit (`palo_salida`): 0.0 if None, else suit/3.0 |
 | `[220:224]` | Who played in current trick (4 bits, relative positions) |
 | `[224:228]` | **v12 pass phase** (`con_pase`): `fase_pase`, `direccion`, `n_seleccionadas`, reserved |
+| `[228:280]` | **v13 pass memory**: cards I gave to the receiver, still unplayed (one-hot) |
+| `[280:332]` | **v13 pass memory**: cards I received from the giver, still in hand (one-hot) |
 
-All positions are **relative to the agent** (`(player_idx - agent_idx) % 4`).
+All positions are **relative to the agent** (`(player_idx - agent_idx) % 4`). v13 pass-memory is computed **per perspective** (each player knows only its own give/receive) and is deterministic, legal info — so it transfers to real games. Receiver/giver positions derive from `direccion` (`[225]`). Train it with `--con-pase --obs-dim 332`.
 
 ### Model Storage Layout
 

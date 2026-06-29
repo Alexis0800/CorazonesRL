@@ -5,7 +5,7 @@ import random
 
 from src.captura.modelos import Jugada, RegistroMano, RegistroPartida
 from src.captura.replay import (
-    ejemplos_de_partida, partidas_a_arrays, reconstruir_manos,
+    ejemplos_de_mano, ejemplos_de_partida, partidas_a_arrays, reconstruir_manos,
 )
 from src.dominio.motor import MotorCorazones
 from src.entorno.dimensiones import DIM_ENTORNO
@@ -61,6 +61,36 @@ def test_replay_para_cualquier_asiento():
     for ag in range(4):
         p = _simular_mano(7 + ag, agente=ag)
         assert len(ejemplos_de_partida(p)) == 13
+
+
+def test_replay_con_remate_resto():
+    """Una mano que termina por concesión se reconstruye y re-juega bien."""
+    rng = random.Random(5)
+    motor = MotorCorazones()
+    motor.repartir()
+    agente = 0
+    ini = [c.id for c in motor.jugadores[agente].mano]
+    jug = []
+    k_bazas = 8
+    for baza in range(1, k_bazas + 1):
+        for _ in range(4):
+            a = motor.obtener_jugador_actual()
+            legales = motor.obtener_jugadas_legales(a)
+            c = legales[rng.randrange(len(legales))]
+            jug.append(Jugada(asiento=a, carta_id=c.id, baza=baza))
+            motor.jugar_carta(a, c)
+        motor.resolver_baza()
+    restantes = [[c.id for c in motor.jugadores[s].mano] for s in range(4)]
+    rm = RegistroMano(
+        numero_mano=1, direccion_pase="izquierda", mano_inicial_agente=ini,
+        jugadas=jug, remate_asiento=motor.indice_jugador_inicial,
+        manos_restantes=restantes, puntuacion_mano=[],
+    )
+    manos = reconstruir_manos(rm)
+    assert all(len(m) == 13 for m in manos)
+    from src.entorno.observacion import ObservacionBuilder
+    ejemplos = ejemplos_de_mano(rm, agente, ObservacionBuilder(dim=DIM_ENTORNO))
+    assert len(ejemplos) == k_bazas  # una decisión del agente por baza jugada
 
 
 def test_partidas_a_arrays_shapes():

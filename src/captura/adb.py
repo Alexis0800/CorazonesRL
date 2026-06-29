@@ -61,10 +61,17 @@ class ClienteADB:
         return cmd
 
     def _run(self, *args: str, binario: bool = False) -> bytes:
-        res = subprocess.run(
-            self._base() + list(args),
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True,
-        )
+        try:
+            res = subprocess.run(
+                self._base() + list(args),
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True,
+            )
+        except FileNotFoundError as e:
+            raise FileNotFoundError(
+                f"No se encontro el ejecutable '{self.adb}'. Instala Android "
+                "Platform Tools y ponlo en el PATH, o pasa la ruta con --adb "
+                "(p.ej. --adb C:/platform-tools/adb.exe)."
+            ) from e
         return res.stdout
 
     def dispositivos(self) -> List[str]:

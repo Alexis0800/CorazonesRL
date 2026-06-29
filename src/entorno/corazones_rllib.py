@@ -87,6 +87,9 @@ class CorazonesEnvRLlib(gym.Env):
             raise ValueError(
                 "con_pase=True requiere obs_dim >= 228 (DIM_V12) para las features de pase."
             )
+        # Ablación (v13): si False, los planos de memoria del pase [228:332] quedan
+        # en cero aunque obs_dim sea 332. Sirve para medir su contribución real.
+        self._pase_memoria: bool = cfg.get("pase_memoria", True)
 
         self.observation_space = spaces.Dict({
             "obs": spaces.Box(0.0, 1.0, shape=(self._obs_dim,), dtype=np.float32),
@@ -113,6 +116,9 @@ class CorazonesEnvRLlib(gym.Env):
         self._fase_pase: bool = False
         self._pase_seleccion: List[Carta] = []
         self._pase_opp_selecciones: Dict[int, List[Carta]] = {}
+        # Memoria del pase por jugador (v13): ids de cartas dadas/recibidas esta mano.
+        self._pase_dado_por: List[List[int]] = [[], [], [], []]
+        self._pase_recibido_por: List[List[int]] = [[], [], [], []]
 
     # ------------------------------------------------------------------
     # Gymnasium API
@@ -154,6 +160,8 @@ class CorazonesEnvRLlib(gym.Env):
         self._fase_pase = False
         self._pase_seleccion = []
         self._pase_opp_selecciones = {}
+        self._pase_dado_por = [[], [], [], []]
+        self._pase_recibido_por = [[], [], [], []]
         if self._con_pase and self._motor.direccion_pase() is not None:
             # Fase de pase: precomputar las selecciones de los rivales (simultáneo).
             # Cada rival pasa según SU perfil (pasar()); fallback a la heurística
@@ -188,7 +196,14 @@ class CorazonesEnvRLlib(gym.Env):
         # 3 cartas elegidas → ejecutar el intercambio simultáneo.
         selecciones = dict(self._pase_opp_selecciones)
         selecciones[self._agente_idx] = list(self._pase_seleccion)
+        # Memoria del pase (v13): capturar manos ANTES para derivar lo recibido.
+        antes = [set(self._motor.jugadores[i].mano) for i in range(4)]
         self._motor.ejecutar_pase(selecciones)
+        for i in range(4):
+            self._pase_dado_por[i] = [c.id for c in selecciones.get(i, [])]
+            self._pase_recibido_por[i] = [
+                c.id for c in self._motor.jugadores[i].mano if c not in antes[i]
+            ]
         self._fase_pase = False
         self._pase_seleccion = []
         self._auto_step_opponents()  # avanzar hasta el turno del agente (a jugar)
@@ -394,6 +409,10 @@ class CorazonesEnvRLlib(gym.Env):
             fase_pase=1.0 if en_pase else 0.0,
             direccion_pase=dir_norm,
             n_pase_seleccionadas=n_sel,
+            cartas_pasadas=self._pase_dado_por[agente] if self._pase_memoria else None,
+            cartas_recibidas=(
+                self._pase_recibido_por[agente] if self._pase_memoria else None
+            ),
         )
 
         mask = np.zeros(52, dtype=np.float32)

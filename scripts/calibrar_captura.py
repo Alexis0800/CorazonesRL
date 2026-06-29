@@ -34,11 +34,13 @@ def main() -> None:
     p = argparse.ArgumentParser(description="Captura un screenshot vía ADB.")
     p.add_argument("--salida", default="calibracion/captura.png")
     p.add_argument("--serial", default=None)
+    p.add_argument("--adb", default="adb",
+                   help="Ruta al ejecutable adb si no esta en el PATH.")
     args = p.parse_args()
 
     import cv2  # dep opcional
 
-    cliente = ClienteADB(serial=args.serial)
+    cliente = ClienteADB(serial=args.serial, adb=args.adb)
     disp = cliente.dispositivos()
     if not disp:
         raise SystemExit("No hay dispositivos ADB conectados (revisa `adb devices`).")

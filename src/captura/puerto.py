@@ -47,6 +47,18 @@ class JugadaObservada:
 
 
 @dataclass
+class RemateResto:
+    """Concesión: `asiento` se lleva todas las bazas restantes ("se llevará el resto").
+
+    `manos_restantes` son las cartas reveladas de cada asiento (4 listas) en el
+    momento de conceder. Se emite tras la última `JugadaObservada` real y antes
+    de `FinMano`. Las bazas concedidas NO se emiten como jugadas.
+    """
+    asiento: int
+    manos_restantes: List[List[int]]      # cartas reveladas por asiento (4 listas)
+
+
+@dataclass
 class FinMano:
     puntuacion: List[int]                 # 4, por asiento
 
@@ -57,7 +69,8 @@ class FinPartida:
 
 
 Evento = Union[
-    InicioPartida, InicioMano, PaseAgente, JugadaObservada, FinMano, FinPartida
+    InicioPartida, InicioMano, PaseAgente, JugadaObservada,
+    RemateResto, FinMano, FinPartida,
 ]
 
 
@@ -83,5 +96,5 @@ class AdaptadorJuego(ABC):
 __all__ = [
     "AdaptadorJuego", "Evento",
     "InicioPartida", "InicioMano", "PaseAgente",
-    "JugadaObservada", "FinMano", "FinPartida",
+    "JugadaObservada", "RemateResto", "FinMano", "FinPartida",
 ]

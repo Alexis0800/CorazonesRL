@@ -34,6 +34,10 @@ from src.captura.recolector import RecolectorPartidas
 def _construir_adaptador(args):
     if args.fuente == "manual":
         return AdaptadorManual(asiento_agente=args.asiento, limite=args.limite)
+    if args.fuente == "demo":
+        from src.captura.simulado import AdaptadorSimulado
+        return AdaptadorSimulado(asiento_agente=args.asiento, limite=args.limite,
+                                 max_manos=args.manos_demo, seed=args.seed)
     # adb
     from src.captura.adb import AdaptadorADB, ClienteADB, ParserPlantillas
 
@@ -49,11 +53,14 @@ def _construir_adaptador(args):
 
 def main() -> None:
     p = argparse.ArgumentParser(description="Recolector de partidas de Corazones.")
-    p.add_argument("--fuente", choices=["manual", "adb"], default="manual")
+    p.add_argument("--fuente", choices=["manual", "demo", "adb"], default="manual")
     p.add_argument("--salida", default="datasets/humano/partidas.jsonl")
     p.add_argument("--asiento", type=int, default=0, help="Asiento del agente (0-3).")
     p.add_argument("--limite", type=int, default=100, help="Puntos para fin de partida.")
     p.add_argument("--partidas", type=int, default=1, help="(adb) nº de partidas.")
+    # demo
+    p.add_argument("--manos-demo", type=int, default=2, help="(demo) manos a simular.")
+    p.add_argument("--seed", type=int, default=0, help="(demo) semilla.")
     # adb
     p.add_argument("--serial", default=None, help="(adb) serial del dispositivo.")
     p.add_argument("--app", default="desconocida", help="(adb) etiqueta de la app.")
