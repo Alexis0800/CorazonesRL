@@ -81,13 +81,19 @@ def main() -> None:
     p.add_argument(
         "--regiones", default="calibracion/hearts_app/regiones.json")
     p.add_argument("--banners", default="calibracion/hearts_app/banners")
+    p.add_argument("--umbral-banner", type=float, default=None,
+                   help="Umbral de distancia euclidea para clasificar el banner "
+                        "(default: 1.5, reduce a 0.8 si hay muchos 'desconocido').")
     p.add_argument(
         "--completas", default="calibracion/hearts_app/cartas_completas")
     p.add_argument("--confirmar-tpl", default=None,
                    help="PNG del botón círculo-check para localizarlo por correlación. "
                         "Por defecto busca calibracion/hearts_app/confirmar.png.")
     p.add_argument("--debug", default=None,
-                   help="Guarda screenshots de cada paso en el directorio indicado.")
+                   help="Guarda screenshots de cada paso en el directorio indicado. "
+                        "También guarda recortes del banner en 'banners/' dentro del "
+                        "directorio de debug para crear plantillas especificas del "
+                        "dispositivo.")
     args = p.parse_args()
 
     # --- default inteligente: prefiere confirmar_check.png (check blanco) ---
@@ -105,7 +111,8 @@ def main() -> None:
     from src.captura.vision_hearts import BannerClasificador, Regiones
 
     reg = Regiones.cargar(args.regiones)
-    clf = BannerClasificador(args.banners)
+    umbral_banner = args.umbral_banner or 1.5
+    clf = BannerClasificador(args.banners, umbral=umbral_banner)
     rec_mano = ReconocedorPlantilla(args.completas)
     recomendar = _construir_recomendar(args.modelo)
 

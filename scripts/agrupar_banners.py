@@ -37,7 +37,7 @@ import json
 import numpy as np
 
 # Rejilla de la firma perceptual (ancho x alto en celdas).
-_GW, _GH = 32, 8
+_GW, _GH = 64, 16
 
 
 def _firma(roi) -> np.ndarray:
@@ -66,7 +66,7 @@ def main() -> None:
     p.add_argument("--regiones", default="calibracion/hearts_app/regiones.json")
     p.add_argument("--region", default="banner")
     p.add_argument("--salida", default="calibracion/hearts_app/banners_descubiertos")
-    p.add_argument("--umbral", type=int, default=12,
+    p.add_argument("--umbral", type=int, default=48,
                    help="Distancia Hamming maxima para considerar el mismo grupo.")
     args = p.parse_args()
 

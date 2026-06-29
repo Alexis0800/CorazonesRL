@@ -81,13 +81,17 @@ class ClienteADB:
     def captura(self) -> np.ndarray:
         """Screenshot actual como array BGR (requiere OpenCV)."""
         import cv2  # import perezoso (dep opcional)
+        import time
 
-        png = self._run("exec-out", "screencap", "-p")
-        arr = np.frombuffer(png, dtype=np.uint8)
-        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-        if img is None:
-            raise RuntimeError("No se pudo decodificar el screenshot de ADB.")
-        return img
+        for intento in range(3):
+            png = self._run("exec-out", "screencap", "-p")
+            arr = np.frombuffer(png, dtype=np.uint8)
+            img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+            if img is not None:
+                return img
+            time.sleep(0.1)
+        raise RuntimeError("No se pudo decodificar el screenshot de ADB "
+                           "tras 3 intentos.")
 
     def tap(self, x: int, y: int) -> None:
         self._run("shell", "input", "tap", str(int(x)), str(int(y)))
@@ -108,7 +112,8 @@ class EstadoVisto:
     mano_agente: List[int] = field(default_factory=list)
     # carta_id -> (x, y) en píxeles, para poder tocarla
     posiciones_mano: Dict[int, Tuple[int, int]] = field(default_factory=dict)
-    mesa: List[Tuple[int, int]] = field(default_factory=list)  # (asiento, carta_id)
+    mesa: List[Tuple[int, int]] = field(
+        default_factory=list)  # (asiento, carta_id)
     turno_de: Optional[int] = None
     marcador: List[int] = field(default_factory=lambda: [0, 0, 0, 0])
 

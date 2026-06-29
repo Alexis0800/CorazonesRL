@@ -62,7 +62,7 @@ def main() -> None:
     from src.captura.modelos import carta_a_str
     from src.captura.vision_cartas import ReconocedorPlantilla
     from src.captura.vision_hearts import (BannerClasificador, Regiones,
-                                           leer_estado, leer_mano)
+                                           leer_estado, leer_mano_posiciones)
 
     img = cv2.imread(args.frame, cv2.IMREAD_COLOR)
     if img is None:
@@ -90,13 +90,19 @@ def main() -> None:
             print(f"  {pos:10s} -> {carta_a_str(cid) if cid is not None else '-'}")
 
     print("\n== TU MANO ==")
-    mano = leer_mano(img, reg, rec)
-    n_ok = sum(1 for c in mano if c is not None)
-    print(f"  cartas localizadas: {len(mano)}  |  rango reconocido: {n_ok}")
-    print("  " + " ".join(carta_a_str(c) if c is not None else "??" for c in mano))
-    if n_ok < len(mano):
-        print("  (los '??' = rango no reconocido: re-genera plantillas de cartas "
-              "de ESTE dispositivo con scripts/agrupar_cartas.py)")
+    cartas = leer_mano_posiciones(img, reg, rec)
+    mano_ids = [c.carta_id for c in cartas]
+    n_ok = sum(1 for c in mano_ids if c is not None)
+    print(f"  cartas localizadas: {len(cartas)}  |  reconocidas: {n_ok}")
+    # ── línea de carta_id ──
+    print("  " + " ".join(carta_a_str(c) if c is not None else "??" for c in mano_ids))
+    # ── línea de método ──
+    metodos = "  " + " ".join(f"{c.metodo or '--':>6s}" for c in cartas)
+    if any(c.metodo for c in cartas):
+        print(metodos)
+    if n_ok < len(cartas):
+        print("  (los '??' = no reconocido: re-genera plantillas de ESTE "
+              "dispositivo con scripts/cartas_desde_sprite.py)")
 
     if args.overlay:
         from subprocess import run

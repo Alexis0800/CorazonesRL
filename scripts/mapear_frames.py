@@ -38,7 +38,7 @@ def main() -> None:
     p.add_argument("--regiones", default="calibracion/hearts_app/regiones.json")
     p.add_argument("--banners", default="calibracion/hearts_app/banners")
     p.add_argument("--salida", default="calibracion/hearts_app/mapa_frames.csv")
-    p.add_argument("--umbral", type=int, default=40)
+    p.add_argument("--umbral", type=float, default=1.5)
     args = p.parse_args()
 
     import cv2
@@ -56,7 +56,7 @@ def main() -> None:
         img = cv2.imread(str(fp), cv2.IMREAD_COLOR)
         if img is None:
             continue
-        r = clf.clasificar(img, reg)
+        r = clf.clasificar_con_regiones(img, reg)
         filas.append((fp.name, r.categoria, r.dato or "", r.tag, r.distancia))
         cat_cnt[r.categoria] += 1
         tag_cnt[r.tag] += 1

@@ -169,10 +169,13 @@ def firma_esquina(esquina: np.ndarray) -> np.ndarray:
 
 # Recorte de esquina del template para leer el RANGO (frac. de la carta).
 _TPL_RANK_WF, _TPL_RANK_HF = 0.24, 0.34
+# Recorte mitad-izquierda del template para cartas APILADAS (frac. de la carta).
+# ~45% del ancho × 95% del alto: captura rango + cuerpo con pips distintivos.
+_TPL_MITAD_WF, _TPL_MITAD_HF = 0.45, 0.95
 # Escalas a probar (multiescala): la mano levantada para pasar y la mano en la
 # mesa se renderizan a tamanos algo distintos; probar varias escalas y quedarse
 # con la mejor correlacion absorbe esa diferencia (sube de ~0.6 ambiguo a ~1.0).
-_ESCALAS = (0.85, 0.90, 0.95, 1.0, 1.05, 1.10, 1.15)
+_ESCALAS = (0.85, 0.90, 0.95, 1.0, 1.05, 1.10, 1.15, 1.25, 1.40, 1.55)
 
 
 class ReconocedorPlantilla:
@@ -182,9 +185,11 @@ class ReconocedorPlantilla:
 
     - `buscar_carta`: empareja la CARTA ENTERA (para una carta visible completa,
       p.ej. la mas a la derecha de un bloque de la mano, o una carta de la mesa).
-    - `buscar_rango`: empareja solo la esquina del rango (para cartas solapadas
-      de las que solo se ve el indice). Devuelve la mejor correlacion; el llamante
-      filtra por umbral.
+    - `buscar_mitad`: empareja la MITAD IZQUIERDA (45% ancho) de la carta. Para
+      cartas APILADAS en la mano, donde solo se ve la porcion izquierda. Devuelve
+      el ID COMPLETO (rango+palo), no solo el rango.
+    - `buscar_rango`: empareja solo la esquina del rango (24% ancho). Mas ligero
+      pero menos distintivo; el llamante decide el palo por bloque.
     """
 
     def __init__(self, dir_completas: str | Path, umbral: float = 0.5) -> None:
@@ -224,14 +229,23 @@ class ReconocedorPlantilla:
         w = max(1, int(sub.shape[1] * h / sub.shape[0]))
         return cv2.resize(sub, (w, h))
 
-    def _buscar(self, win_bgr: np.ndarray, alto_carta: int, wf: float, hf: float
-                ) -> Tuple[float, Optional[str]]:
+    def _buscar_filtrado(self, win_bgr: np.ndarray, alto_carta: int,
+                         wf: float, hf: float,
+                         rank_prefix: str = "") -> Tuple[float, Optional[str]]:
+        """Como `_buscar`, pero solo prueba plantillas cuyo nombre empieza
+        con `rank_prefix`. Si es cadena vacia, prueba TODAS (igual que _buscar).
+
+        Para busqueda de rango ("3") → solo 4 plantillas (3T,3D,3C,3P) en vez
+        de 52 → ~13× mas rapido."""
         import cv2
 
         self._cargar()
         win = cv2.cvtColor(win_bgr, cv2.COLOR_BGR2GRAY)
         mejor: Tuple[float, Optional[str]] = (-2.0, None)
+
         for nombre, tpl in self._tpl:
+            if rank_prefix and not nombre.startswith(rank_prefix):
+                continue
             for esc in _ESCALAS:
                 t = self._escalar(tpl, alto_carta, wf, hf, esc)
                 if t.shape[0] > win.shape[0] or t.shape[1] > win.shape[1]:
@@ -242,6 +256,11 @@ class ReconocedorPlantilla:
                     mejor = (s, nombre)
         return mejor
 
+    def _buscar(self, win_bgr: np.ndarray, alto_carta: int, wf: float, hf: float
+                ) -> Tuple[float, Optional[str]]:
+        """(score, carta_str). Prueba TODAS las 52 plantillas."""
+        return self._buscar_filtrado(win_bgr, alto_carta, wf, hf, "")
+
     def buscar_carta(self, win_bgr: np.ndarray, alto_carta: int
                      ) -> Tuple[float, Optional[str]]:
         """(score, carta_str) emparejando la carta entera (alto ~95% de la carta)."""
@@ -251,7 +270,38 @@ class ReconocedorPlantilla:
                      ) -> Tuple[float, Optional[str]]:
         """(score, carta_str) emparejando solo la esquina del rango. Usa el RANGO
         del resultado; el palo de la esquina no es fiable (decídelo por bloque)."""
-        return self._buscar(win_bgr, alto_carta, _TPL_RANK_WF, _TPL_RANK_HF)
+        return self._buscar_filtrado(win_bgr, alto_carta,
+                                     _TPL_RANK_WF, _TPL_RANK_HF, "")
+
+    def buscar_rango_por_rank(self, win_bgr: np.ndarray, alto_carta: int,
+                              rank_prefix: str
+                              ) -> Tuple[float, Optional[str]]:
+        """Como `buscar_rango`, pero SOLO prueba las 4 plantillas del rango
+        dado (ej. rank_prefix="3" → solo 3T,3D,3C,3P). ~13× mas rapido que
+        `buscar_rango` en la busqueda rapida de auto_pase."""
+        return self._buscar_filtrado(win_bgr, alto_carta,
+                                     _TPL_RANK_WF, _TPL_RANK_HF, rank_prefix)
+
+    def buscar_mitad(self, win_bgr: np.ndarray, alto_carta: int
+                     ) -> Tuple[float, Optional[str]]:
+        """(score, carta_str) emparejando la MITAD IZQUIERDA de la carta (~45%
+        ancho × 95% alto). Devuelve el ID COMPLETO (rango+palo): tiene suficiente
+        cuerpo (pips, figuras) para distinguir el palo, a diferencia de la esquina
+        sola. Para cartas APILADAS en la mano donde solo se ve la porcion izquierda.
+        """
+        return self._buscar_filtrado(win_bgr, alto_carta,
+                                     _TPL_MITAD_WF, _TPL_MITAD_HF, "")
+
+    def buscar_mitad_por_rank(self, win_bgr: np.ndarray, alto_carta: int,
+                              rank_prefix: str
+                              ) -> Tuple[float, Optional[str]]:
+        """Como `buscar_mitad`, pero SOLO prueba las 4 plantillas del rango
+        dado (ej. rank_prefix="Q" → QT,QD,QC,QP). Ideal para DESAMBIGUAR
+        el palo cuando ya sabemos el rango: comparacion RELATIVA entre los
+        4 palos, mucho mas fiable que umbral absoluto contra una sola plantilla.
+        Solo 4 tpl × 10 esc = 40 matchTemplate."""
+        return self._buscar_filtrado(win_bgr, alto_carta,
+                                     _TPL_MITAD_WF, _TPL_MITAD_HF, rank_prefix)
 
 
 __all__ = [
