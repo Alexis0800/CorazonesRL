@@ -91,7 +91,17 @@ python scripts/monitor_vivo.py --serial <SERIAL> --poll 0.5
 - Sólido (en el video 1080×1728): clasificación de banner (374/391; el resto son
   popups), lectura de carta de **mesa** (rango+color+palo), máquina de estados con
   orden de baza correcto (líder del 2♣ en la baza 1), validación por replay.
+- **Auto-pase** (tap por ADB con el modelo) implementado: `scripts/auto_pase.py`
+  + `src/captura/auto_pase.py`. Lee la mano con `leer_mano_posiciones` (id +
+  punto de toque), pide las 3 cartas al modelo, las toca **releyendo la mano
+  antes de cada toque** (las seleccionadas suben sobre el banner y los bloques se
+  re-flujen ♣♦♠♥), confirma y deduce las recibidas por diferencia
+  (`mano_nueva − (mano_vieja − pasadas)`). Pendiente de calibrar: el botón
+  **círculo-check** de confirmar (`regiones.confirmar` o plantilla `confirmar.png`;
+  solo aparece tras seleccionar 3 cartas). Probar en seco: `python
+  scripts/auto_pase.py --modelo models/produccion/v10c_campeon --frame
+  calibracion/hearts_app/captura_real.png --seco`.
 - Pendiente: aplicar el mismo `ReconocedorPlantilla` (matchTemplate del sprite) a
-  la **mesa** y validar con frames en-juego del teléfono; leer el **pase recibido**;
-  popups de centro (concesión "se llevará el resto" → `manos_restantes`, "Pulsa
-  para continuar", tabla de fin de mano); **auto-juego** (tap por ADB con el modelo).
+  la **mesa** y validar con frames en-juego del teléfono; popups de centro
+  (concesión "se llevará el resto" → `manos_restantes`, "Pulsa para continuar",
+  tabla de fin de mano); **auto-juego** de las bazas (no solo el pase).

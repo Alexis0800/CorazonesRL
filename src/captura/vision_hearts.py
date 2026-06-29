@@ -72,12 +72,16 @@ class Regiones:
     marcador: Dict[str, List[float]]
     mesa: Dict[str, List[float]]
     mano: List[float]
+    # Boton de confirmar el pase (circulo con check). Opcional: solo se necesita
+    # para AUTO-PASE (tap por ADB). Si no esta calibrado, queda None.
+    confirmar: Optional[List[float]] = None
 
     @staticmethod
     def cargar(path: str | Path) -> "Regiones":
         d = json.loads(Path(path).read_text(encoding="utf-8"))
         return Regiones(banner=d["banner"], marcador=d["marcador"],
-                        mesa=d["mesa"], mano=d["mano"])
+                        mesa=d["mesa"], mano=d["mano"],
+                        confirmar=d.get("confirmar"))
 
     @staticmethod
     def recortar(img: np.ndarray, caja_frac: List[float]) -> np.ndarray:
@@ -164,29 +168,34 @@ def leer_estado(img: np.ndarray, regiones: Regiones,
 _ANCHO_CARTA_FRAC = 0.774   # ancho / alto de un naipe (sprite APK 168x217)
 
 
-def leer_mano(img: np.ndarray, regiones: Regiones, reconocedor,
-              umbral_rango: float = 0.45, umbral_palo: float = 0.45
-              ) -> List[Optional[int]]:
-    """Lee las cartas de la mano del agente (zona inferior), en orden de lectura.
+@dataclass
+class CartaMano:
+    """Una carta localizada en la mano: su id (o None) y el punto donde tocarla."""
+    carta_id: Optional[int]
+    centro: Tuple[int, int]   # (x, y) en PIXELES del screenshot completo
 
-    Devuelve una lista de `carta_id` (o `None` si la confianza es baja) por carta
-    localizada. Aprovecha que la app AGRUPA la mano por palo en bloques blancos
-    separados: el PALO de un bloque se decide una vez con su carta mas a la
-    derecha (visible entera) y se aplica a todas las de ese bloque; el RANGO se lee
-    por carta. Si el bloque no resuelve palo, se omite el palo (carta = None).
 
-    `reconocedor` es un `vision_cartas.ReconocedorPlantilla` (matchTemplate contra
-    los naipes completos del sprite de la APK): robusto al solapamiento porque la
-    ventana de busqueda absorbe el desajuste de pocos pixeles. Las plantillas
-    salen del sprite de ESTA app (`scripts/cartas_desde_sprite.py`), asi que no
-    dependen de la resolucion del dispositivo.
+def leer_mano_posiciones(img: np.ndarray, regiones: Regiones, reconocedor,
+                         umbral_rango: float = 0.45, umbral_palo: float = 0.45
+                         ) -> List[CartaMano]:
+    """Como `leer_mano`, pero ademas devuelve el PUNTO de toque de cada carta en
+    coordenadas del screenshot completo (para auto-juego por ADB).
+
+    El punto de toque es el centro de la franja VISIBLE de la carta (entre su
+    borde izquierdo y la siguiente carta solapada; la ultima del bloque usa su
+    ancho completo): asi un tap cae siempre dentro de la carta correcta, no en la
+    de encima. Recalcula posiciones cada vez que se llama, asi que tolera el
+    reordenamiento de bloques tras seleccionar una carta en el pase.
     """
     from src.captura.modelos import str_a_carta_id
     from src.captura.vision_cartas import _filas_de_cartas, localizar_cartas
 
+    H, W = img.shape[:2]
+    mx, my = regiones.mano[0], regiones.mano[1]
+    mx0, my0 = int(mx * W), int(my * H)
     mano_roi = Regiones.recortar(img, regiones.mano)
     filas = sorted(_filas_de_cartas(mano_roi, 0.01), key=lambda b: (b[1] // 50, b[0]))
-    out: List[Optional[int]] = []
+    out: List[CartaMano] = []
     for (fx, fy, fw, fh) in filas:
         blob = mano_roi[fy:fy + fh, fx:fx + fw]
         cajas = localizar_cartas(blob, 0.01)
@@ -205,16 +214,43 @@ def leer_mano(img: np.ndarray, regiones: Regiones, reconocedor,
         s_palo, name_palo = reconocedor.buscar_carta(
             blob[0:fh, bx:min(bx + int(1.20 * cardw), blob.shape[1])], fh)
         palo_blk = name_palo[-1] if (name_palo and s_palo >= umbral_palo) else None
-        for cx in pos:
+        for i, cx in enumerate(pos):
             x0 = max(0, cx - int(0.12 * cardw))   # ventana con holgura (multiescala)
             x1 = min(cx + int(0.40 * cardw), blob.shape[1])
             win = blob[0:int(0.52 * fh), x0:x1]
             s_rango, name_rango = reconocedor.buscar_rango(win, fh)
-            if name_rango is None or s_rango < umbral_rango or palo_blk is None:
-                out.append(None)
-                continue
-            out.append(str_a_carta_id(name_rango[:-1] + palo_blk))
+            # Centro de la franja visible: hasta la siguiente carta (o ancho total
+            # si es la ultima, acotado al borde del bloque).
+            visible = (pos[i + 1] - cx) if i + 1 < n else min(cardw, fw - cx)
+            tx = mx0 + fx + cx + max(1, visible) // 2
+            ty = my0 + fy + fh // 2
+            cid = None
+            if (name_rango is not None and s_rango >= umbral_rango
+                    and palo_blk is not None):
+                cid = str_a_carta_id(name_rango[:-1] + palo_blk)
+            out.append(CartaMano(cid, (tx, ty)))
     return out
+
+
+def leer_mano(img: np.ndarray, regiones: Regiones, reconocedor,
+              umbral_rango: float = 0.45, umbral_palo: float = 0.45
+              ) -> List[Optional[int]]:
+    """Lee las cartas de la mano del agente (zona inferior), en orden de lectura.
+
+    Devuelve una lista de `carta_id` (o `None` si la confianza es baja) por carta
+    localizada. Aprovecha que la app AGRUPA la mano por palo en bloques blancos
+    separados: el PALO de un bloque se decide una vez con su carta mas a la
+    derecha (visible entera) y se aplica a todas las de ese bloque; el RANGO se lee
+    por carta. Si el bloque no resuelve palo, se omite el palo (carta = None).
+
+    `reconocedor` es un `vision_cartas.ReconocedorPlantilla` (matchTemplate contra
+    los naipes completos del sprite de la APK): robusto al solapamiento porque la
+    ventana de busqueda absorbe el desajuste de pocos pixeles. Las plantillas
+    salen del sprite de ESTA app (`scripts/cartas_desde_sprite.py`), asi que no
+    dependen de la resolucion del dispositivo.
+    """
+    return [c.carta_id for c in
+            leer_mano_posiciones(img, regiones, reconocedor, umbral_rango, umbral_palo)]
 
 
 def leer_mesa(img: np.ndarray, regiones: Regiones, reconocedor
@@ -240,4 +276,5 @@ def leer_mesa(img: np.ndarray, regiones: Regiones, reconocedor
 __all__ = [
     "POSICIONES", "Regiones", "BannerClasificador", "ResultadoBanner",
     "EstadoVisual", "leer_estado", "leer_mesa", "leer_mano",
+    "CartaMano", "leer_mano_posiciones",
 ]
