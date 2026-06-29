@@ -72,6 +72,9 @@ class Regiones:
     marcador: Dict[str, List[float]]
     mesa: Dict[str, List[float]]
     mano: List[float]
+    # Zona donde aparecen las cartas seleccionadas para pasar / recibidas.
+    # Opcional: solo se necesita para AUTO-PASE (lectura de cartas recibidas).
+    pases: Optional[List[float]] = None
     # Boton de confirmar el pase (circulo con check). Opcional: solo se necesita
     # para AUTO-PASE (tap por ADB). Si no esta calibrado, queda None.
     confirmar: Optional[List[float]] = None
@@ -81,6 +84,7 @@ class Regiones:
         d = json.loads(Path(path).read_text(encoding="utf-8"))
         return Regiones(banner=d["banner"], marcador=d["marcador"],
                         mesa=d["mesa"], mano=d["mano"],
+                        pases=d.get("pases"),
                         confirmar=d.get("confirmar"))
 
     @staticmethod
@@ -160,7 +164,10 @@ class EstadoVisual:
 
 def leer_estado(img: np.ndarray, regiones: Regiones,
                 banner_clf: "BannerClasificador", reconocedor) -> EstadoVisual:
-    """Visión completa de un fotograma: clasifica el banner y lee la mesa."""
+    """Visión completa de un fotograma: clasifica el banner y lee la mesa.
+
+    `reconocedor` es un `vision_cartas.ReconocedorPlantilla` (matchTemplate
+    contra los naipes completos del sprite de la APK)."""
     return EstadoVisual(banner=banner_clf.clasificar(img, regiones),
                         mesa=leer_mesa(img, regiones, reconocedor))
 
@@ -194,7 +201,8 @@ def leer_mano_posiciones(img: np.ndarray, regiones: Regiones, reconocedor,
     mx, my = regiones.mano[0], regiones.mano[1]
     mx0, my0 = int(mx * W), int(my * H)
     mano_roi = Regiones.recortar(img, regiones.mano)
-    filas = sorted(_filas_de_cartas(mano_roi, 0.01), key=lambda b: (b[1] // 50, b[0]))
+    filas = sorted(_filas_de_cartas(mano_roi, 0.01),
+                   key=lambda b: (b[1] // 50, b[0]))
     out: List[CartaMano] = []
     for (fx, fy, fw, fh) in filas:
         blob = mano_roi[fy:fy + fh, fx:fx + fw]
@@ -213,9 +221,11 @@ def leer_mano_posiciones(img: np.ndarray, regiones: Regiones, reconocedor,
         bx = pos[-1]
         s_palo, name_palo = reconocedor.buscar_carta(
             blob[0:fh, bx:min(bx + int(1.20 * cardw), blob.shape[1])], fh)
-        palo_blk = name_palo[-1] if (name_palo and s_palo >= umbral_palo) else None
+        palo_blk = name_palo[-1] if (name_palo and s_palo >=
+                                     umbral_palo) else None
         for i, cx in enumerate(pos):
-            x0 = max(0, cx - int(0.12 * cardw))   # ventana con holgura (multiescala)
+            # ventana con holgura (multiescala)
+            x0 = max(0, cx - int(0.12 * cardw))
             x1 = min(cx + int(0.40 * cardw), blob.shape[1])
             win = blob[0:int(0.52 * fh), x0:x1]
             s_rango, name_rango = reconocedor.buscar_rango(win, fh)
@@ -257,7 +267,9 @@ def leer_mesa(img: np.ndarray, regiones: Regiones, reconocedor
               ) -> Dict[str, Optional[int]]:
     """Lee la carta de cada posicion de la mesa (en cruz). Devuelve
     {posicion_pantalla: carta_id o None}. `reconocedor` es un
-    `vision_cartas.Reconocedor`."""
+    `vision_cartas.ReconocedorPlantilla` (matchTemplate contra los naipes
+    completos del sprite de la APK)."""
+    from src.captura.modelos import str_a_carta_id
     from src.captura.vision_cartas import detectar_cartas
 
     out: Dict[str, Optional[int]] = {}
@@ -269,12 +281,44 @@ def leer_mesa(img: np.ndarray, regiones: Regiones, reconocedor
             continue
         cx, cy, cw, ch = max(cartas, key=lambda b: b[2] * b[3])
         card = roi[cy:cy + ch, cx:cx + cw]
-        out[pos] = reconocedor.reconocer_carta(card).carta_id
+        score, name = reconocedor.buscar_carta(card, ch)
+        if name is not None and score >= reconocedor.umbral:
+            out[pos] = str_a_carta_id(name)
+        else:
+            out[pos] = None
+    return out
+
+
+def leer_pases(img: np.ndarray, regiones: Regiones, reconocedor
+               ) -> List[Optional[int]]:
+    """Lee las cartas en la zona de pases (hasta 3, seleccionadas o recibidas).
+
+    Devuelve una lista de `carta_id` (o `None` si la confianza es baja),
+    ordenada de izquierda a derecha. Si `regiones.pases` no esta calibrado,
+    devuelve lista vacia.
+
+    `reconocedor` es un `vision_cartas.ReconocedorPlantilla`.
+    """
+    from src.captura.modelos import str_a_carta_id
+    from src.captura.vision_cartas import detectar_cartas
+
+    if regiones.pases is None:
+        return []
+    roi = Regiones.recortar(img, regiones.pases)
+    cartas = detectar_cartas(roi, min_area_frac=0.02)
+    out: List[Optional[int]] = []
+    for cx, cy, cw, ch in sorted(cartas, key=lambda b: b[0]):
+        card = roi[cy:cy + ch, cx:cx + cw]
+        score, name = reconocedor.buscar_carta(card, ch)
+        if name is not None and score >= reconocedor.umbral:
+            out.append(str_a_carta_id(name))
+        else:
+            out.append(None)
     return out
 
 
 __all__ = [
     "POSICIONES", "Regiones", "BannerClasificador", "ResultadoBanner",
     "EstadoVisual", "leer_estado", "leer_mesa", "leer_mano",
-    "CartaMano", "leer_mano_posiciones",
+    "CartaMano", "leer_mano_posiciones", "leer_pases",
 ]

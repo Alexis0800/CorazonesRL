@@ -33,7 +33,7 @@ from src.captura.adaptador_visual import AdaptadorVisual, fuente_carpeta
 from src.captura.escritor import EscritorJsonl
 from src.captura.maquina import ROTACION_ANTIHORARIA, ROTACION_HORARIA
 from src.captura.recolector import RecolectorPartidas
-from src.captura.vision_cartas import Reconocedor
+from src.captura.vision_cartas import ReconocedorPlantilla
 from src.captura.vision_hearts import BannerClasificador, Regiones
 
 
@@ -83,7 +83,8 @@ def main() -> None:
     p.add_argument("--max-frames", type=int, default=0)
     p.add_argument("--regiones", default="calibracion/hearts_app/regiones.json")
     p.add_argument("--banners", default="calibracion/hearts_app/banners")
-    p.add_argument("--cartas", default="calibracion/hearts_app/cartas")
+    p.add_argument("--cartas", default="calibracion/hearts_app/cartas_completas",
+                   help="Naipes completos del sprite (para la mesa).")
     p.add_argument("--rotacion", choices=["horaria", "antihoraria"],
                    default="horaria")
     p.add_argument("--asiento-agente", type=int, default=0)
@@ -96,7 +97,7 @@ def main() -> None:
 
     reg = Regiones.cargar(args.regiones)
     banner_clf = BannerClasificador(args.banners)
-    rec = Reconocedor(args.cartas)
+    rec = ReconocedorPlantilla(args.cartas)
     rot = ROTACION_HORARIA if args.rotacion == "horaria" else ROTACION_ANTIHORARIA
 
     if args.fuente == "carpeta":

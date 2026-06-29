@@ -16,6 +16,8 @@ Uso:
 responsabilidad, para fines personales/de investigación.
 """
 from __future__ import annotations
+from typing import List
+import argparse
 
 # --- bootstrap path ---
 import sys as _sys
@@ -27,11 +29,10 @@ try:
 except Exception:
     pass
 
-import argparse
-from typing import List
 
 # banner dato -> dirección que entiende el Recomendador
-_DIR_BANNER = {"izquierda": "izquierda", "derecha": "derecha", "enfrente": "frente"}
+_DIR_BANNER = {"izquierda": "izquierda",
+               "derecha": "derecha", "enfrente": "frente"}
 
 
 def _construir_recomendar(modelo: str):
@@ -41,7 +42,8 @@ def _construir_recomendar(modelo: str):
 
     rec = Recomendador(modelo)
     if not rec.con_pase:
-        raise SystemExit("El modelo no tiene fase de pase (obs<228). Usa un v12+/v13.")
+        raise SystemExit(
+            "El modelo no tiene fase de pase (obs<228). Usa un v12+/v13.")
 
     def recomendar(mano_ids: List[int], direccion: str) -> List[int]:
         rec.reset_mano([Carta._TODAS[i] for i in mano_ids])
@@ -76,12 +78,26 @@ def main() -> None:
                    help="Frame fijo para prueba en seco (sin ADB).")
     p.add_argument("--seco", action="store_true",
                    help="No toca nada: solo imprime qué tocaría (requiere --frame).")
-    p.add_argument("--regiones", default="calibracion/hearts_app/regiones.json")
+    p.add_argument(
+        "--regiones", default="calibracion/hearts_app/regiones.json")
     p.add_argument("--banners", default="calibracion/hearts_app/banners")
-    p.add_argument("--completas", default="calibracion/hearts_app/cartas_completas")
+    p.add_argument(
+        "--completas", default="calibracion/hearts_app/cartas_completas")
     p.add_argument("--confirmar-tpl", default=None,
-                   help="PNG del botón círculo-check para localizarlo por correlación.")
+                   help="PNG del botón círculo-check para localizarlo por correlación. "
+                        "Por defecto busca calibracion/hearts_app/confirmar.png.")
+    p.add_argument("--debug", default=None,
+                   help="Guarda screenshots de cada paso en el directorio indicado.")
     args = p.parse_args()
+
+    # --- default inteligente: prefiere confirmar_check.png (check blanco) ---
+    _confirmar_tpl = args.confirmar_tpl
+    if _confirmar_tpl is None:
+        for cand in ["calibracion/hearts_app/confirmar_check.png",
+                     "calibracion/hearts_app/confirmar.png"]:
+            if _Path(cand).is_file():
+                _confirmar_tpl = str(_Path(cand))
+                break
 
     from src.captura.adb import ClienteADB
     from src.captura.auto_pase import ConfigAutoPase, ControladorPase
@@ -102,10 +118,13 @@ def main() -> None:
         if not cliente.dispositivos():
             raise SystemExit("No hay dispositivos ADB (revisa `adb devices`).")
 
+    cfg = ConfigAutoPase()
+    if args.debug:
+        cfg.debug_dir = args.debug
     ctrl = ControladorPase(
         cliente=cliente, regiones=reg, banner_clf=clf, reconocedor_mano=rec_mano,
-        recomendar=recomendar, config=ConfigAutoPase(),
-        plantilla_confirmar=args.confirmar_tpl,
+        recomendar=recomendar, config=cfg,
+        plantilla_confirmar=_confirmar_tpl,
     )
     res = ctrl.ejecutar()
     print("\n== RESULTADO ==")

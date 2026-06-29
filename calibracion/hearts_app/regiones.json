@@ -1,18 +1,83 @@
 {
   "_comment": "Regiones de la app Hearts (es) calibradas sobre fotogramas 1080x1728. Todas las cajas son [x, y, w, h] en FRACCIONES (0..1) del ancho/alto, para tolerar otras resoluciones. 'mesa' son las 4 cajas de carta en cruz: indice 0=arriba(enfrente), 1=izquierda, 2=derecha, 3=abajo(agente), relativas a la pantalla (NO al asiento). El mapeo asiento->posicion lo resuelve el parser segun asiento_agente.",
-  "resolucion_referencia": [1080, 1728],
-  "banner": [0.24, 0.695, 0.63, 0.05],
+  "resolucion_referencia": [
+    1080,
+    1728
+  ],
+  "banner": [
+    0.2362,
+    0.6937,
+    0.63,
+    0.05
+  ],
   "marcador": {
-    "arriba": [0.585, 0.293, 0.235, 0.05],
-    "izquierda": [0.009, 0.58, 0.225, 0.052],
-    "derecha": [0.764, 0.58, 0.225, 0.052],
-    "abajo": [0.009, 0.69, 0.225, 0.058]
+    "arriba": [
+      0.5813,
+      0.282,
+      0.235,
+      0.05
+    ],
+    "izquierda": [
+      0.0069,
+      0.5754,
+      0.225,
+      0.052
+    ],
+    "derecha": [
+      0.7669,
+      0.573,
+      0.225,
+      0.052
+    ],
+    "abajo": [
+      0.0031,
+      0.6832,
+      0.225,
+      0.0563
+    ]
   },
   "mesa": {
-    "arriba": [0.42, 0.35, 0.16, 0.135],
-    "izquierda": [0.27, 0.46, 0.16, 0.135],
-    "derecha": [0.58, 0.46, 0.16, 0.135],
-    "abajo": [0.42, 0.57, 0.16, 0.135]
+    "arriba": [
+      0.4176,
+      0.3264,
+      0.1593,
+      0.1343
+    ],
+    "izquierda": [
+      0.2593,
+      0.4433,
+      0.1593,
+      0.1343
+    ],
+    "derecha": [
+      0.5843,
+      0.4462,
+      0.1593,
+      0.1343
+    ],
+    "abajo": [
+      0.4213,
+      0.5637,
+      0.1593,
+      0.1343
+    ]
   },
-  "mano": [0.0, 0.745, 1.0, 0.255]
+  "mano": [
+    0.0,
+    0.7395,
+    1.0,
+    0.2547
+  ],
+  "pases": [
+    0.245,
+    0.552,
+    0.5138,
+    0.1313
+  ],
+  "confirmar": [
+    0.405,
+    0.434,
+    0.19,
+    0.1184
+  ]
 }

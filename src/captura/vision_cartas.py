@@ -1,32 +1,30 @@
 """
-Vision de cartas de la app (Fase 2, hibrida): detecta cartas en una region y
-reconoce cada una por la ESQUINA (rango + palo), con plantillas calibradas.
+Vision de cartas de la app: detecta cartas en una region y las reconoce por
+matchTemplate contra los naipes completos del sprite de la APK
+(`ReconocedorPlantilla`).
 
 Pipeline:
-  1. `detectar_cartas(roi)`  -> bounding boxes de cartas (blancas sobre fondo).
-  2. `recortar_esquina(carta)` -> recorte del indice superior-izquierdo.
-  3. `Reconocedor.reconocer(esquina)` -> carta_id (0-51) por plantillas.
+  1. `detectar_cartas(roi)` -> bounding boxes de cartas sueltas (mesa/pases).
+  2. `localizar_cartas(roi)` -> cajas de cartas solapadas (mano en abanico).
+  3. `ReconocedorPlantilla.buscar_carta()` -> carta_id por correlacion (carta entera).
+  4. `ReconocedorPlantilla.buscar_rango()` -> rango por correlacion (esquina solapada).
 
-El reconocimiento es por plantillas de esquina (firma perceptual + Hamming),
-descubiertas con `scripts/agrupar_cartas.py` y curadas en
-`calibracion/hearts_app/cartas/<carta>__<i>.png` (nombre = str de carta, p.ej.
-'QP' = Q de picas; ver modelos.carta_a_str / str_a_carta_id).
+Las plantillas se generan del sprite de la APK con
+`scripts/cartas_desde_sprite.py` y viven en
+`calibracion/hearts_app/cartas_completas/`.
+
+`firma_esquina` se conserva solo para CLUSTERING (scripts/agrupar_cartas.py).
 
 OpenCV perezoso (dependencia opcional).
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
 
 import numpy as np
 
-from src.captura.modelos import str_a_carta_id
-
-# Fraccion de la carta que ocupa el recorte de esquina (alto y ancho).
-_ESQ_W, _ESQ_H = 0.42, 0.30
-# Firma perceptual de la esquina.
+# Firma perceptual de la esquina (para firma_esquina, usado por agrupar_cartas.py).
 _GW, _GH = 16, 16
 
 
@@ -143,27 +141,7 @@ def detectar_cartas(
     return filas
 
 
-def recortar_esquina(carta_bgr: np.ndarray) -> np.ndarray:
-    """Recorte del indice superior-izquierdo (rango + palo) de una carta entera."""
-    h, w = carta_bgr.shape[:2]
-    return carta_bgr[0:int(_ESQ_H * h), 0:int(_ESQ_W * w)]
-
-
-# --- Reconocimiento hibrido: color + rango (glifo) + pip (forma) -----------
-#
-# La firma en gris no separa treboles de picas (mismo negro; solo cambia la
-# forma del pip). Por eso reconocemos en 3 piezas, dentro de la esquina canonica
-# 70x96: el COLOR (rojo->corazon/diamante, negro->pica/trebol) acota a 2 palos;
-# el RANGO se lee por el glifo (independiente del color); y el PIP desempata los
-# 2 palos del color por su forma.
-
-_CW, _CH = 70, 96
-_RANK_BOX = (0, 40, 2, 58)    # x0, x1, y0, y1 en la esquina canonica (glifo rango)
-_PIP_BOX = (2, 52, 50, 96)    # pip de cuerpo bajo el rango: el mas consistente
-_RG_W, _RG_H = 20, 26         # rejilla de firma del rango
-_PG_W, _PG_H = 28, 26         # rejilla de firma del pip (forma del palo)
-
-# palo -> es_rojo
+# palo -> es_rojo (usado por ReconocedorPlantilla._cargar para filtrar PNGs)
 _PALO_ROJO = {"C": True, "D": True, "P": False, "T": False}
 
 
@@ -175,172 +153,6 @@ def firma_esquina(esquina: np.ndarray) -> np.ndarray:
     g = cv2.cvtColor(esquina, cv2.COLOR_BGR2GRAY)
     g = cv2.resize(g, (_GW, _GH), interpolation=cv2.INTER_AREA)
     return (g > g.mean()).astype(np.uint8).ravel()
-
-
-def _canon(corner: np.ndarray) -> np.ndarray:
-    import cv2
-
-    return cv2.resize(corner, (_CW, _CH), interpolation=cv2.INTER_AREA)
-
-
-def _bits(region: np.ndarray, gw: int, gh: int) -> np.ndarray:
-    import cv2
-
-    g = cv2.cvtColor(region, cv2.COLOR_BGR2GRAY)
-    g = cv2.resize(g, (gw, gh), interpolation=cv2.INTER_AREA)
-    return (g < g.mean()).astype(np.uint8).ravel()   # tinta (oscuro) = 1
-
-
-def _sub(corner_canon: np.ndarray, box) -> np.ndarray:
-    x0, x1, y0, y1 = box
-    return corner_canon[y0:y1, x0:x1]
-
-
-def firma_rango(corner_canon: np.ndarray) -> np.ndarray:
-    return _bits(_sub(corner_canon, _RANK_BOX), _RG_W, _RG_H)
-
-
-def firma_pip(corner_canon: np.ndarray) -> np.ndarray:
-    return _bits(_sub(corner_canon, _PIP_BOX), _PG_W, _PG_H)
-
-
-def es_rojo(corner_canon: np.ndarray) -> bool:
-    """True si la tinta del indice es roja (corazon/diamante)."""
-    c = corner_canon.astype(np.int32)
-    b, g, r = c[:, :, 0], c[:, :, 1], c[:, :, 2]
-    ink = (r + g + b) < 620                       # pixel no-blanco
-    if int(ink.sum()) < 12:
-        return False
-    return (r[ink].mean() - np.maximum(g[ink].mean(), b[ink].mean())) > 28
-
-
-# Region (fracciones de la carta) donde vive el pip de cuerpo bajo el indice.
-_PIP_REG = (0.0, 0.30, 0.10, 0.46)   # x0,x1,y0,y1 fracciones de la carta
-_SOLID_CLUB = 0.81                    # solidez < => trebol; >= => pica
-
-
-def _palo_por_forma(card_bgr: np.ndarray, rojo: bool) -> Tuple[Optional[str], float]:
-    """Desempata el palo dentro del color por la FORMA del pip de cuerpo.
-
-    Reglas geometricas (invariantes a escala/posicion):
-      - rojo:  corazon tiene 2 lobulos arriba; diamante 1 punta (y muy convexo).
-      - negro: trebol tiene huecos entre lobulos (solidez baja); pica es un
-               arrowhead mas solido (solidez alta).
-    Devuelve (palo, solidez) o (None, 0) si no halla pip.
-    """
-    import cv2
-
-    h, w = card_bgr.shape[:2]
-    x0, x1, y0, y1 = _PIP_REG
-    reg = card_bgr[int(y0 * h):int(y1 * h), int(x0 * w):int(x1 * w)]
-    if reg.size == 0:
-        return None, 0.0
-    g = cv2.cvtColor(reg, cv2.COLOR_BGR2GRAY)
-    ink = (g < 120).astype(np.uint8)
-    cnts, _ = cv2.findContours(ink, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if not cnts:
-        return None, 0.0
-    c = max(cnts, key=cv2.contourArea)
-    bx, by, bw, bh = cv2.boundingRect(c)
-    if bw * bh < 60:
-        return None, 0.0
-    area = float(cv2.contourArea(c))
-    harea = float(cv2.contourArea(cv2.convexHull(c))) or 1.0
-    solid = area / harea
-    pip = ink[by:by + bh, bx:bx + bw]
-    top = pip[0:max(1, int(0.30 * bh)), :]
-    col = top.sum(axis=0) > 0
-    runs, prev = 0, False
-    for v in col:
-        if v and not prev:
-            runs += 1
-        prev = v
-    if rojo:
-        palo = "C" if (runs >= 2 and solid < 0.88) else "D"
-    else:
-        palo = "T" if solid < _SOLID_CLUB else "P"
-    return palo, round(solid, 3)
-
-
-@dataclass
-class ResultadoCarta:
-    carta_id: Optional[int]
-    distancia: int                # distancia del rango (menor = mejor)
-    rojo: Optional[bool] = None
-    solidez: float = 0.0
-
-
-class Reconocedor:
-    """Reconoce una carta: color (rojo/negro) + rango (glifo, por plantilla) +
-    palo (forma del pip de cuerpo). El rango usa la biblioteca de esquinas
-    `<carta>__<i>.png`; el palo es por reglas geometricas (sin plantilla).
-
-    Devuelve `carta_id=None` si la confianza del rango es baja: mejor no emitir
-    una carta equivocada (el naipe sigue en la mesa varios fotogramas y se
-    reintenta). La validacion final la hace el motor en el replay.
-    """
-
-    def __init__(self, dir_plantillas: str | Path, umbral_rango: int = 130) -> None:
-        self.dir = Path(dir_plantillas)
-        self.umbral_rango = umbral_rango
-        self._rango_tpl: List[Tuple[str, np.ndarray]] = []   # (rango, firma)
-
-    def _cargar(self) -> None:
-        import cv2
-
-        if self._rango_tpl:
-            return
-        if not self.dir.is_dir():
-            raise FileNotFoundError(
-                f"No existe la biblioteca de cartas: {self.dir}. "
-                "Genera plantillas con scripts/agrupar_cartas.py y curalas."
-            )
-        for f in sorted(self.dir.glob("*.png")):
-            nombre = f.stem.split("__")[0]
-            if len(nombre) < 2 or nombre[-1] not in _PALO_ROJO:
-                continue
-            img = cv2.imread(str(f), cv2.IMREAD_COLOR)
-            if img is None:
-                continue
-            self._rango_tpl.append((nombre[:-1], firma_rango(_canon(img))))
-        if not self._rango_tpl:
-            raise FileNotFoundError(f"Biblioteca de cartas vacia: {self.dir}")
-
-    def reconocer_carta(self, card_bgr: np.ndarray) -> ResultadoCarta:
-        """Reconoce a partir de la CARTA entera detectada (no solo la esquina):
-        necesita el cuerpo para leer la forma del pip."""
-        self._cargar()
-        corner = recortar_esquina(card_bgr)
-        c = _canon(corner)
-        rojo = es_rojo(c)
-        rb = firma_rango(c)
-        rango, rd = None, 10 ** 9
-        for rg, tf in self._rango_tpl:
-            d = int(np.count_nonzero(rb != tf))
-            if d < rd:
-                rango, rd = rg, d
-        palo, solid = _palo_por_forma(card_bgr, rojo)
-        if rango is None or palo is None or rd > self.umbral_rango:
-            return ResultadoCarta(None, rd, rojo, solid)
-        return ResultadoCarta(str_a_carta_id(rango + palo), rd, rojo, solid)
-
-    def reconocer(self, esquina: np.ndarray) -> ResultadoCarta:
-        """Compat: reconoce desde un recorte de esquina (sin forma de pip ->
-        palo solo por color). Prefiere `reconocer_carta` con la carta entera."""
-        self._cargar()
-        c = _canon(esquina)
-        rojo = es_rojo(c)
-        rb = firma_rango(c)
-        rango, rd = None, 10 ** 9
-        for rg, tf in self._rango_tpl:
-            d = int(np.count_nonzero(rb != tf))
-            if d < rd:
-                rango, rd = rg, d
-        if rango is None or rd > self.umbral_rango:
-            return ResultadoCarta(None, rd, rojo)
-        # sin cuerpo no se puede la forma: elige el palo "por defecto" del color
-        palo = "C" if rojo else "P"
-        return ResultadoCarta(str_a_carta_id(rango + palo), rd, rojo)
 
 
 # --- Reconocimiento por plantilla del sprite (matchTemplate) ----------------
@@ -438,7 +250,6 @@ class ReconocedorPlantilla:
 
 
 __all__ = [
-    "localizar_cartas", "detectar_cartas", "recortar_esquina",
-    "firma_esquina", "firma_rango", "firma_pip", "es_rojo",
-    "Reconocedor", "ResultadoCarta", "ReconocedorPlantilla",
+    "localizar_cartas", "detectar_cartas", "firma_esquina",
+    "ReconocedorPlantilla",
 ]

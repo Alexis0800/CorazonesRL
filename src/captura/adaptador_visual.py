@@ -22,7 +22,7 @@ from src.captura.puerto import AdaptadorJuego, Evento, InicioPartida
 from src.captura.vision_hearts import (
     BannerClasificador, Regiones, leer_estado,
 )
-from src.captura.vision_cartas import Reconocedor
+from src.captura.vision_cartas import ReconocedorPlantilla
 
 
 def fuente_carpeta(carpeta: str | Path, patron: str = "*.png",
@@ -53,7 +53,7 @@ class AdaptadorVisual(AdaptadorJuego):
         fuente_frames: Iterable[np.ndarray],
         regiones: Regiones,
         banner_clf: BannerClasificador,
-        reconocedor: Reconocedor,
+        reconocedor: ReconocedorPlantilla,
         asiento_agente: int = 0,
         app: str = "hearts",
         rotacion: Optional[dict] = None,

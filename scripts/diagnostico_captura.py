@@ -50,9 +50,8 @@ def main() -> None:
     p.add_argument("--frame", required=True, help="PNG de la captura.")
     p.add_argument("--regiones", default="calibracion/hearts_app/regiones.json")
     p.add_argument("--banners", default="calibracion/hearts_app/banners")
-    p.add_argument("--cartas", default="calibracion/hearts_app/cartas")
-    p.add_argument("--completas", default="calibracion/hearts_app/cartas_completas",
-                   help="Naipes completos del sprite (para leer la mano).")
+    p.add_argument("--cartas", default="calibracion/hearts_app/cartas_completas",
+                   help="Naipes completos del sprite (para mesa y mano).")
     p.add_argument("--overlay", action="store_true",
                    help="Guardar overlay de regiones (_overlay.png junto al frame).")
     args = p.parse_args()
@@ -60,7 +59,7 @@ def main() -> None:
     import cv2
 
     from src.captura.modelos import carta_a_str
-    from src.captura.vision_cartas import Reconocedor, ReconocedorPlantilla
+    from src.captura.vision_cartas import ReconocedorPlantilla
     from src.captura.vision_hearts import (BannerClasificador, Regiones,
                                            leer_estado, leer_mano)
 
@@ -72,8 +71,7 @@ def main() -> None:
 
     reg = Regiones.cargar(args.regiones)
     clf = BannerClasificador(args.banners)
-    rec = Reconocedor(args.cartas)
-    rec_mano = ReconocedorPlantilla(args.completas)
+    rec = ReconocedorPlantilla(args.cartas)
 
     est = leer_estado(img, reg, clf, rec)
 
@@ -91,7 +89,7 @@ def main() -> None:
             print(f"  {pos:10s} -> {carta_a_str(cid) if cid is not None else '-'}")
 
     print("\n== TU MANO ==")
-    mano = leer_mano(img, reg, rec_mano)
+    mano = leer_mano(img, reg, rec)
     n_ok = sum(1 for c in mano if c is not None)
     print(f"  cartas localizadas: {len(mano)}  |  rango reconocido: {n_ok}")
     print("  " + " ".join(carta_a_str(c) if c is not None else "??" for c in mano))

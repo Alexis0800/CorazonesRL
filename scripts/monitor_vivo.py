@@ -84,21 +84,20 @@ def main() -> None:
                    help="Un PNG fijo (modo prueba sin ADB).")
     p.add_argument("--regiones", default="calibracion/hearts_app/regiones.json")
     p.add_argument("--banners", default="calibracion/hearts_app/banners")
-    p.add_argument("--cartas", default="calibracion/hearts_app/cartas")
-    p.add_argument("--completas", default="calibracion/hearts_app/cartas_completas")
+    p.add_argument("--cartas", default="calibracion/hearts_app/cartas_completas",
+                   help="Naipes completos del sprite (para mesa y mano).")
     args = p.parse_args()
 
     import cv2
 
     from src.captura.modelos import carta_a_str
-    from src.captura.vision_cartas import Reconocedor, ReconocedorPlantilla
+    from src.captura.vision_cartas import ReconocedorPlantilla
     from src.captura.vision_hearts import (BannerClasificador, Regiones,
                                            leer_estado, leer_mano)
 
     reg = Regiones.cargar(args.regiones)
     clf = BannerClasificador(args.banners)
-    rec = Reconocedor(args.cartas)
-    rec_mano = ReconocedorPlantilla(args.completas)
+    rec = ReconocedorPlantilla(args.cartas)
 
     if args.frame:
         img = cv2.imread(args.frame, cv2.IMREAD_COLOR)
@@ -113,7 +112,7 @@ def main() -> None:
             if img is None:
                 continue
             est = leer_estado(img, reg, clf, rec)
-            mano = leer_mano(img, reg, rec_mano)
+            mano = leer_mano(img, reg, rec)
             _render(est, mano, carta_a_str, args.poll, n)
             if args.frame:
                 break
