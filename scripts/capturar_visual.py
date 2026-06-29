@@ -16,6 +16,13 @@ Uso:
       --salida datos/capturas/sesion.jsonl
 """
 from __future__ import annotations
+from src.captura.vision_hearts import BannerClasificador, Regiones
+from src.captura.vision_cartas import ReconocedorPlantilla
+from src.captura.recolector import RecolectorPartidas
+from src.captura.maquina import ROTACION_ANTIHORARIA, ROTACION_HORARIA
+from src.captura.escritor import EscritorJsonl
+from src.captura.adaptador_visual import AdaptadorVisual, fuente_carpeta
+import argparse
 
 # --- bootstrap path ---
 import sys as _sys
@@ -26,15 +33,6 @@ try:
     _sys.stdout.reconfigure(encoding="utf-8")
 except Exception:
     pass
-
-import argparse
-
-from src.captura.adaptador_visual import AdaptadorVisual, fuente_carpeta
-from src.captura.escritor import EscritorJsonl
-from src.captura.maquina import ROTACION_ANTIHORARIA, ROTACION_HORARIA
-from src.captura.recolector import RecolectorPartidas
-from src.captura.vision_cartas import ReconocedorPlantilla
-from src.captura.vision_hearts import BannerClasificador, Regiones
 
 
 def _fuente_adb(serial, app, poll_s, max_frames, adb="adb"):
@@ -71,7 +69,8 @@ def _validar(partidas) -> None:
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description="Captura por vision (carpeta/ADB).")
+    p = argparse.ArgumentParser(
+        description="Captura por vision (carpeta/ADB).")
     p.add_argument("--fuente", choices=["carpeta", "adb"], default="carpeta")
     p.add_argument("--carpeta", default="videos/fotogramas")
     p.add_argument("--patron", default="*.png")
@@ -81,14 +80,16 @@ def main() -> None:
                    help="Ruta al ejecutable adb si no esta en el PATH.")
     p.add_argument("--poll", type=float, default=0.4)
     p.add_argument("--max-frames", type=int, default=0)
-    p.add_argument("--regiones", default="calibracion/hearts_app/regiones.json")
+    p.add_argument(
+        "--regiones", default="calibracion/hearts_app/regiones.json")
     p.add_argument("--banners", default="calibracion/hearts_app/banners")
     p.add_argument("--cartas", default="calibracion/hearts_app/cartas_completas",
                    help="Naipes completos del sprite (para la mesa).")
     p.add_argument("--rotacion", choices=["horaria", "antihoraria"],
                    default="horaria")
     p.add_argument("--asiento-agente", type=int, default=0)
-    p.add_argument("--salida", default=None, help="JSONL de salida (opcional).")
+    p.add_argument("--salida", default=None,
+                   help="JSONL de salida (opcional).")
     p.add_argument("--validar", action="store_true",
                    help="Re-jugar cada partida con el motor para validarla.")
     p.add_argument("--solo-validas", action="store_true",

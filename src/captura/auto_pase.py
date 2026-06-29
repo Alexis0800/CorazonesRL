@@ -274,14 +274,16 @@ class ControladorPase:
         time.sleep(0.15)  # margen para animación de selección
         for intento in range(3):
             img = self.cli.captura()
-            pases = [p for p in leer_pases(img, self.reg, self.rec) if p is not None]
+            pases = [p for p in leer_pases(
+                img, self.reg, self.rec) if p is not None]
             if len(pases) >= 3:
                 break
             time.sleep(0.2)
         else:
             # Último intento
             img = self.cli.captura()
-            pases = [p for p in leer_pases(img, self.reg, self.rec) if p is not None]
+            pases = [p for p in leer_pases(
+                img, self.reg, self.rec) if p is not None]
 
         if sorted(pases) == sorted(esperadas):
             self.log(f"  ✅ pases verificados: "
@@ -465,7 +467,8 @@ class ControladorPase:
         # ── intentar leer de la zona de pases (más fiable) ──
         for _ in range(self.cfg.intentos_recibidas):
             img = self.cli.captura()
-            pases = [p for p in leer_pases(img, self.reg, self.rec) if p is not None]
+            pases = [p for p in leer_pases(
+                img, self.reg, self.rec) if p is not None]
             if len(pases) >= 3:
                 from src.captura.modelos import carta_a_str
                 self.log(f"  📥 recibidas por pases: "

@@ -56,7 +56,8 @@ def _filas_de_cartas(roi: np.ndarray, min_area_frac: float
 
     H, W = roi.shape[:2]
     mask = _mascara_blanco(roi)
-    cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    cnts, _ = cv2.findContours(
+        mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     filas = []
     for c in cnts:
         x, y, w, h = cv2.boundingRect(c)
@@ -69,8 +70,10 @@ def _filas_de_cartas(roi: np.ndarray, min_area_frac: float
 # Parametros de separacion de la mano (cartas solapadas en abanico). Calibrados
 # sobre capturas reales: la franja superior debe ser FINA para ver solo el glifo
 # del rango (no los pips del cuerpo, que estan mas abajo y fusionarian todo).
-_FRANJA_FRAC = 0.08      # alto de la franja con el glifo de rango (frac. de la carta)
-_GAP_FUSION_FRAC = 0.10  # runs mas cercanos que esto = misma carta (rango+pip esquina)
+# alto de la franja con el glifo de rango (frac. de la carta)
+_FRANJA_FRAC = 0.08
+# runs mas cercanos que esto = misma carta (rango+pip esquina)
+_GAP_FUSION_FRAC = 0.10
 _MARGEN_FRAC = 0.04      # margen a la izquierda del glifo hasta el borde de la carta
 _ANCHO_CARTA_FRAC = 0.774  # ancho de carta / alto (sprite APK 168x217)
 
@@ -207,7 +210,8 @@ class ReconocedorPlantilla:
             if im is not None:
                 self._tpl.append((nombre, im))
         if not self._tpl:
-            raise FileNotFoundError(f"Biblioteca de cartas completas vacía: {self.dir}")
+            raise FileNotFoundError(
+                f"Biblioteca de cartas completas vacía: {self.dir}")
 
     @staticmethod
     def _escalar(tpl: np.ndarray, alto: int, wf: float, hf: float,
@@ -232,7 +236,8 @@ class ReconocedorPlantilla:
                 t = self._escalar(tpl, alto_carta, wf, hf, esc)
                 if t.shape[0] > win.shape[0] or t.shape[1] > win.shape[1]:
                     continue
-                s = float(cv2.matchTemplate(win, t, cv2.TM_CCOEFF_NORMED).max())
+                s = float(cv2.matchTemplate(
+                    win, t, cv2.TM_CCOEFF_NORMED).max())
                 if s > mejor[0]:
                     mejor = (s, nombre)
         return mejor

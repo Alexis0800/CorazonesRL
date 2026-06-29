@@ -13,6 +13,7 @@ Uso:
   python scripts/diagnostico_captura.py --frame mi_captura.png --overlay
 """
 from __future__ import annotations
+import argparse
 
 # --- bootstrap path ---
 import sys as _sys
@@ -24,7 +25,6 @@ try:
 except Exception:
     pass
 
-import argparse
 
 # Banner tag -> descripcion humana de que significa.
 _DESC_BANNER = {
@@ -48,7 +48,8 @@ _DESC_BANNER = {
 def main() -> None:
     p = argparse.ArgumentParser(description="Diagnostico de un fotograma.")
     p.add_argument("--frame", required=True, help="PNG de la captura.")
-    p.add_argument("--regiones", default="calibracion/hearts_app/regiones.json")
+    p.add_argument(
+        "--regiones", default="calibracion/hearts_app/regiones.json")
     p.add_argument("--banners", default="calibracion/hearts_app/banners")
     p.add_argument("--cartas", default="calibracion/hearts_app/cartas_completas",
                    help="Naipes completos del sprite (para mesa y mano).")

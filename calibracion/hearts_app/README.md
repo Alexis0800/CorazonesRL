@@ -95,34 +95,42 @@ validez final de una captura la da el motor en el replay.
 ## Flujo de trabajo
 
 ### 1. Calibrar regiones
+
 ```bash
 python scripts/calibrar_todo.py
 # Teclas 1-9,0,p,c = seleccionar región | arrastrar = editar | s = guardar
 ```
+
 Esto guarda en `regiones.json`. El overlay de verificación:
+
 ```bash
 python scripts/overlay_xml_ui.py
 # → calibracion/hearts_app/_overlay_XML_UI.png
 ```
 
 ### 2. Validar offline sobre el video (sin móvil)
+
 ```bash
 python scripts/capturar_visual.py --fuente carpeta \
     --carpeta "videos/fotogramas" --solo-validas \
     --salida datos/capturas/video.jsonl
 ```
+
 `--solo-validas` descarta las manos que el motor no puede reconstruir → el JSONL
 nunca queda corrupto.
 
 ### 3. Capturar en vivo por ADB (tú juegas; el ADB solo observa)
+
 ```bash
 python scripts/capturar_visual.py --fuente adb --serial <SERIAL> \
     --salida datos/capturas/sesion.jsonl --solo-validas
 ```
+
 Requiere `adb` en el PATH y depuración USB. Poll por defecto 0.4 s (varios polls
 por turno → la confirmación temporal funciona).
 
 ### 4. Extender / corregir plantillas (recomendado en el dispositivo real)
+
 ```bash
 # banners nuevos (p.ej. "Pasar 3 cartas a la derecha", mano sin pase):
 python scripts/agrupar_banners.py --frames <carpeta_frames>
@@ -155,7 +163,7 @@ python scripts/monitor_vivo.py --serial <SERIAL> --poll 0.5
   popups), lectura de carta de **mesa** (rango+color+palo), máquina de estados con
   orden de baza correcto (líder del 2♣ en la baza 1), validación por replay.
 - **Auto-pase** (tap por ADB con el modelo) implementado: `scripts/auto_pase.py`
-  + `src/captura/auto_pase.py`. Lee la mano con `leer_mano_posiciones` (id +
+  - `src/captura/auto_pase.py`. Lee la mano con `leer_mano_posiciones` (id +
   punto de toque), pide las 3 cartas al modelo, las toca **releyendo la mano
   antes de cada toque** (las seleccionadas suben sobre el banner y los bloques se
   re-flujen ♣♦♠♥), confirma y deduce las recibidas por diferencia
