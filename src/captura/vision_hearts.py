@@ -35,6 +35,7 @@ POSICIONES = ("arriba", "izquierda", "derecha", "abajo")
 
 # --- Regiones --------------------------------------------------------------
 
+
 @dataclass
 class Regiones:
     """Cajas de la UI en fracciones [x, y, w, h] (0..1)."""
@@ -65,6 +66,7 @@ class Regiones:
         return img[y0:y0 + int(ch * h), x0:x0 + int(cw * w)]
 
 # --- Estado visual ----------------------------------------------------------
+
 
 @dataclass
 class EstadoVisual:

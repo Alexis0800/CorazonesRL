@@ -20,6 +20,9 @@ descubrir variantes de una caja). El manifiesto (grupo -> frames) se escribe en
 `<salida>/_manifiesto.json`.
 """
 from __future__ import annotations
+import numpy as np
+import json
+import argparse
 
 # --- bootstrap path ---
 import sys as _sys
@@ -31,10 +34,6 @@ try:
 except Exception:
     pass
 
-import argparse
-import json
-
-import numpy as np
 
 # Rejilla de la firma perceptual (ancho x alto en celdas).
 _GW, _GH = 64, 16
@@ -61,11 +60,15 @@ def _caja_px(reg, region, w, h):
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description="Agrupa recortes de banner por similitud.")
-    p.add_argument("--frames", required=True, help="Directorio de fotogramas PNG.")
-    p.add_argument("--regiones", default="calibracion/hearts_app/regiones.json")
+    p = argparse.ArgumentParser(
+        description="Agrupa recortes de banner por similitud.")
+    p.add_argument("--frames", required=True,
+                   help="Directorio de fotogramas PNG.")
+    p.add_argument(
+        "--regiones", default="calibracion/hearts_app/regiones.json")
     p.add_argument("--region", default="banner")
-    p.add_argument("--salida", default="calibracion/hearts_app/banners_descubiertos")
+    p.add_argument(
+        "--salida", default="calibracion/hearts_app/banners_descubiertos")
     p.add_argument("--umbral", type=int, default=48,
                    help="Distancia Hamming maxima para considerar el mismo grupo.")
     args = p.parse_args()
@@ -77,7 +80,8 @@ def main() -> None:
     if not frames:
         raise SystemExit(f"No hay PNG en {args.frames}")
 
-    grupos = []  # cada uno: {"firma", "repr_roi", "repr_frame", "frames":[...]}
+    # cada uno: {"firma", "repr_roi", "repr_frame", "frames":[...]}
+    grupos = []
     for fp in frames:
         img = cv2.imread(str(fp), cv2.IMREAD_COLOR)
         if img is None:

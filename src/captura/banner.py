@@ -172,7 +172,8 @@ class BannerClasificador(IBannerClasificador):
             distancias.append((tag, d))
             if d < mejor_d:
                 mejor_tag, mejor_d = tag, d
-        resultado = ResultadoBanner("desconocido", mejor_d, "desconocido", None)
+        resultado = ResultadoBanner(
+            "desconocido", mejor_d, "desconocido", None)
         if mejor_d <= self.umbral:
             cat, dato = _BANNER_SEMANTICA.get(mejor_tag, ("desconocido", None))
             resultado = ResultadoBanner(mejor_tag, mejor_d, cat, dato)

@@ -14,6 +14,10 @@ Imprime un resumen por categoria y avisa de banners 'desconocido' (candidatos a
 nuevas plantillas: vuelve a correr agrupar_banners.py sobre esos frames).
 """
 from __future__ import annotations
+from src.captura.vision_hearts import BannerClasificador, Regiones
+from collections import Counter
+import csv
+import argparse
 
 # --- bootstrap path ---
 import sys as _sys
@@ -25,19 +29,16 @@ try:
 except Exception:
     pass
 
-import argparse
-import csv
-from collections import Counter
-
-from src.captura.vision_hearts import BannerClasificador, Regiones
-
 
 def main() -> None:
-    p = argparse.ArgumentParser(description="Mapea fotogramas -> estado por banner.")
+    p = argparse.ArgumentParser(
+        description="Mapea fotogramas -> estado por banner.")
     p.add_argument("--frames", required=True)
-    p.add_argument("--regiones", default="calibracion/hearts_app/regiones.json")
+    p.add_argument(
+        "--regiones", default="calibracion/hearts_app/regiones.json")
     p.add_argument("--banners", default="calibracion/hearts_app/banners")
-    p.add_argument("--salida", default="calibracion/hearts_app/mapa_frames.csv")
+    p.add_argument(
+        "--salida", default="calibracion/hearts_app/mapa_frames.csv")
     p.add_argument("--umbral", type=float, default=1.5)
     args = p.parse_args()
 

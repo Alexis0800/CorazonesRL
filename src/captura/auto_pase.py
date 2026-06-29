@@ -154,7 +154,8 @@ class ControladorPase:
         """Devuelve la direccion del pase si el banner es de pase, si no None."""
         r, distancias = self.clf.clasificar_verbose_con_regiones(img, self.reg)
         top_str = "  ".join(f"{t}={d:.2f}" for t, d in distancias)
-        self.log(f"  📊 banner: {r.tag} d={r.distancia:.2f} → {r.categoria}/{r.dato}  |  top: {top_str}")
+        self.log(
+            f"  📊 banner: {r.tag} d={r.distancia:.2f} → {r.categoria}/{r.dato}  |  top: {top_str}")
 
         # ── guardar recorte del banner para crear plantillas del dispositivo ──
         self._guardar_banner_device(img)
@@ -167,7 +168,8 @@ class ControladorPase:
         if not self.cfg.debug_dir:
             return
         from src.captura.banner import capturar_banner
-        capturar_banner(img, self.reg, Path(self.cfg.debug_dir) / "banners_device")
+        capturar_banner(img, self.reg, Path(
+            self.cfg.debug_dir) / "banners_device")
 
     def _leer_mano_completa(self) -> tuple[np.ndarray, List[CartaMano]]:
         """Captura y lee la mano; reintenta hasta tener 13 cartas reconocidas."""
@@ -283,7 +285,7 @@ class ControladorPase:
         mw, mh = self.reg.mano[2], self.reg.mano[3]
         x0, y0 = int(mx * W), int(my * H)
         mano_roi = img[int(my * H):int((my + mh) * H),
-                        int(mx * W):int((mx + mw) * W)]
+                       int(mx * W):int((mx + mw) * W)]
 
         from src.captura.vision_cartas import _filas_de_cartas
 
@@ -338,7 +340,7 @@ class ControladorPase:
             # ── buscar el RANGO dentro de este bloque ──
             for i, cx in enumerate(pos):
                 visible = (pos[i + 1] - cx) if i + 1 < n else min(cardw,
-                                                                   fw - cx)
+                                                                  fw - cx)
                 wx0 = max(0, cx - int(0.12 * cardw))
                 wx1 = min(cx + min(int(0.40 * cardw),
                                    visible + int(0.10 * cardw)),
@@ -512,7 +514,8 @@ class ControladorPase:
             except Exception:
                 time.sleep(0.3)
                 continue
-            r, distancias = self.clf.clasificar_verbose_con_regiones(img, self.reg)
+            r, distancias = self.clf.clasificar_verbose_con_regiones(
+                img, self.reg)
             ultimo_tag, ultima_d = r.tag, r.distancia
             if r.categoria == categoria:
                 return r.tag
@@ -523,8 +526,10 @@ class ControladorPase:
         # Releer una ultima vez para loggear el top-5 y guardar banner
         try:
             img = self.cli.captura()
-            _, distancias = self.clf.clasificar_verbose_con_regiones(img, self.reg)
-            top_str = "    top: " + "  ".join(f"{t}={d:.2f}" for t, d in distancias)
+            _, distancias = self.clf.clasificar_verbose_con_regiones(
+                img, self.reg)
+            top_str = "    top: " + \
+                "  ".join(f"{t}={d:.2f}" for t, d in distancias)
             self.log(top_str)
             self._debug_shot(f"banner_fail_{categoria}", img=img)
             self._guardar_banner_device(img)
