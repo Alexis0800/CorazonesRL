@@ -94,6 +94,7 @@ vecnormalize/
 videos/
 # Captura visión: salida cruda del agrupado (regenerable)
 calibracion/hearts_app/*_descubiertos/
+calibracion/hearts_app/*_descubiertas/
 datos/capturas/
 
 # Recursos extraidos de la APK (no redistribuir; regenerables)
