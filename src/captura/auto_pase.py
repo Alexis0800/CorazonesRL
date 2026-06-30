@@ -311,7 +311,7 @@ class ControladorPase:
             blk_x1 = min(bx + int(1.20 * cardw), blob.shape[1])
 
             # 1) carta completa
-            s_c, name_c = self.rec.buscar_carta(
+            s_c, name_c, _ = self.rec.buscar_carta(
                 blob[0:fh, bx:blk_x1], fh)
             if name_c and s_c >= self._UMBRAL_PALO_BLOQUE:
                 palo_blk = name_c[-1]
@@ -322,7 +322,7 @@ class ControladorPase:
                 if b_visible < 0.85 * cardw:
                     b_x1_m = min(bx + int(0.48 * cardw), blob.shape[1])
                     b_win_m = blob[0:int(0.95 * fh), bx:b_x1_m]
-                    s_bm, name_bm = self.rec.buscar_mitad(b_win_m, fh)
+                    s_bm, name_bm, _ = self.rec.buscar_mitad(b_win_m, fh)
                     if name_bm and s_bm >= self._UMBRAL_PALO_BLOQUE:
                         palo_blk = name_bm[-1]
 
@@ -330,7 +330,7 @@ class ControladorPase:
             if palo_blk is None:
                 b_x1_r = min(bx + int(0.40 * cardw), blob.shape[1])
                 b_win_r = blob[0:int(0.52 * fh), bx:b_x1_r]
-                s_br, name_br = self.rec.buscar_rango(b_win_r, fh)
+                s_br, name_br, _ = self.rec.buscar_rango(b_win_r, fh)
                 if name_br and s_br >= self._UMBRAL_PALO_BLOQUE + 0.15:
                     palo_blk = name_br[-1]
 
@@ -353,7 +353,7 @@ class ControladorPase:
                 if win.size == 0:
                     continue
 
-                score, encontrada = self.rec.buscar_rango_por_rank(
+                score, encontrada, _ = self.rec.buscar_rango_por_rank(
                     win, fh, rank)
                 if encontrada is None or score < self._UMBRAL_RANGO_FILTRADO:
                     continue
@@ -418,7 +418,7 @@ class ControladorPase:
         out: List[tuple[int, tuple[int, int]]] = []
         for cx, cy, cw, ch in sorted(cartas, key=lambda b: b[0]):
             card = roi[cy:cy + ch, cx:cx + cw]
-            score, name = self.rec.buscar_carta(card, ch)
+            score, name, _ = self.rec.buscar_carta(card, ch)
             if name is not None and score >= self.rec.umbral:
                 cid = str_a_carta_id(name)
                 centro = (px0 + cx + cw // 2, py0 + cy + ch // 2)

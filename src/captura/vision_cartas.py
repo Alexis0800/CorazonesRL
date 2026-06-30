@@ -196,6 +196,10 @@ class ReconocedorPlantilla:
         self.dir = Path(dir_completas)
         self.umbral = umbral
         self._tpl: List[Tuple[str, np.ndarray]] = []   # (carta_str, gris full)
+        # cache de plantillas escaladas: (nombre, alto, wf, hf, escala) -> gris.
+        # La mano se lee a UNA sola escala/alto, asi que las mismas plantillas
+        # escaladas se reusan en las 13 cartas en vez de recalcular cv2.resize.
+        self._cache_esc: dict = {}
 
     def _cargar(self) -> None:
         import cv2
@@ -218,83 +222,101 @@ class ReconocedorPlantilla:
             raise FileNotFoundError(
                 f"Biblioteca de cartas completas vacía: {self.dir}")
 
-    @staticmethod
-    def _escalar(tpl: np.ndarray, alto: int, wf: float, hf: float,
-                 escala: float = 1.0) -> np.ndarray:
+    def _escalar(self, nombre: str, tpl: np.ndarray, alto: int, wf: float,
+                 hf: float, escala: float = 1.0) -> np.ndarray:
         import cv2
 
+        clave = (nombre, alto, round(wf, 3), round(hf, 3), round(escala, 3))
+        cached = self._cache_esc.get(clave)
+        if cached is not None:
+            return cached
         H, W = tpl.shape[:2]
         sub = tpl[0:max(1, int(hf * H)), 0:max(1, int(wf * W))]
         h = max(1, int(alto * hf * escala))
         w = max(1, int(sub.shape[1] * h / sub.shape[0]))
-        return cv2.resize(sub, (w, h))
+        t = cv2.resize(sub, (w, h))
+        self._cache_esc[clave] = t
+        return t
 
     def _buscar_filtrado(self, win_bgr: np.ndarray, alto_carta: int,
-                         wf: float, hf: float,
-                         rank_prefix: str = "") -> Tuple[float, Optional[str]]:
-        """Como `_buscar`, pero solo prueba plantillas cuyo nombre empieza
-        con `rank_prefix`. Si es cadena vacia, prueba TODAS (igual que _buscar).
+                         wf: float, hf: float, rank_prefix: str = "",
+                         palo_suffix: str = "", escalas: Optional[Tuple] = None
+                         ) -> Tuple[float, Optional[str], float]:
+        """(score, carta_str, escala) emparejando solo las plantillas cuyo nombre
+        empieza con `rank_prefix` Y termina en `palo_suffix` (cualquiera vacio =
+        sin filtrar). `escalas` restringe las escalas probadas (None = todas).
 
-        Para busqueda de rango ("3") → solo 4 plantillas (3T,3D,3C,3P) en vez
-        de 52 → ~13× mas rapido."""
+        Filtrar por palo del bloque (`palo_suffix="P"`) reduce 52→13 plantillas;
+        filtrar por rango ("3") → 4 plantillas. Devuelve tambien la mejor escala
+        para poder fijarla en busquedas posteriores del mismo abanico."""
         import cv2
 
         self._cargar()
         win = cv2.cvtColor(win_bgr, cv2.COLOR_BGR2GRAY)
-        mejor: Tuple[float, Optional[str]] = (-2.0, None)
+        mejor: Tuple[float, Optional[str], float] = (-2.0, None, 1.0)
+        escalas = escalas or _ESCALAS
 
         for nombre, tpl in self._tpl:
             if rank_prefix and not nombre.startswith(rank_prefix):
                 continue
-            for esc in _ESCALAS:
-                t = self._escalar(tpl, alto_carta, wf, hf, esc)
+            if palo_suffix and not nombre.endswith(palo_suffix):
+                continue
+            for esc in escalas:
+                t = self._escalar(nombre, tpl, alto_carta, wf, hf, esc)
                 if t.shape[0] > win.shape[0] or t.shape[1] > win.shape[1]:
                     continue
                 s = float(cv2.matchTemplate(
                     win, t, cv2.TM_CCOEFF_NORMED).max())
                 if s > mejor[0]:
-                    mejor = (s, nombre)
+                    mejor = (s, nombre, esc)
         return mejor
 
     def _buscar(self, win_bgr: np.ndarray, alto_carta: int, wf: float, hf: float
                 ) -> Tuple[float, Optional[str]]:
         """(score, carta_str). Prueba TODAS las 52 plantillas."""
-        return self._buscar_filtrado(win_bgr, alto_carta, wf, hf, "")
+        s, name, _ = self._buscar_filtrado(win_bgr, alto_carta, wf, hf, "")
+        return s, name
 
-    def buscar_carta(self, win_bgr: np.ndarray, alto_carta: int
-                     ) -> Tuple[float, Optional[str]]:
-        """(score, carta_str) emparejando la carta entera (alto ~95% de la carta)."""
-        return self._buscar(win_bgr, alto_carta, 1.0, 0.95)
+    def buscar_carta(self, win_bgr: np.ndarray, alto_carta: int,
+                     palo: str = "", escalas: Optional[Tuple] = None
+                     ) -> Tuple[float, Optional[str], float]:
+        """(score, carta_str, escala) emparejando la carta entera (alto ~95%).
+        `palo` restringe a ese palo del bloque; `escalas` fija las escalas."""
+        return self._buscar_filtrado(win_bgr, alto_carta, 1.0, 0.95,
+                                     palo_suffix=palo, escalas=escalas)
 
-    def buscar_rango(self, win_bgr: np.ndarray, alto_carta: int
-                     ) -> Tuple[float, Optional[str]]:
-        """(score, carta_str) emparejando solo la esquina del rango. Usa el RANGO
-        del resultado; el palo de la esquina no es fiable (decídelo por bloque)."""
+    def buscar_rango(self, win_bgr: np.ndarray, alto_carta: int,
+                     escalas: Optional[Tuple] = None
+                     ) -> Tuple[float, Optional[str], float]:
+        """(score, carta_str, escala) emparejando solo la esquina del rango. Usa
+        el RANGO del resultado; el palo de la esquina no es fiable (por bloque)."""
         return self._buscar_filtrado(win_bgr, alto_carta,
-                                     _TPL_RANK_WF, _TPL_RANK_HF, "")
+                                     _TPL_RANK_WF, _TPL_RANK_HF, escalas=escalas)
 
     def buscar_rango_por_rank(self, win_bgr: np.ndarray, alto_carta: int,
                               rank_prefix: str
-                              ) -> Tuple[float, Optional[str]]:
+                              ) -> Tuple[float, Optional[str], float]:
         """Como `buscar_rango`, pero SOLO prueba las 4 plantillas del rango
         dado (ej. rank_prefix="3" → solo 3T,3D,3C,3P). ~13× mas rapido que
         `buscar_rango` en la busqueda rapida de auto_pase."""
         return self._buscar_filtrado(win_bgr, alto_carta,
                                      _TPL_RANK_WF, _TPL_RANK_HF, rank_prefix)
 
-    def buscar_mitad(self, win_bgr: np.ndarray, alto_carta: int
-                     ) -> Tuple[float, Optional[str]]:
-        """(score, carta_str) emparejando la MITAD IZQUIERDA de la carta (~45%
-        ancho × 95% alto). Devuelve el ID COMPLETO (rango+palo): tiene suficiente
-        cuerpo (pips, figuras) para distinguir el palo, a diferencia de la esquina
-        sola. Para cartas APILADAS en la mano donde solo se ve la porcion izquierda.
-        """
+    def buscar_mitad(self, win_bgr: np.ndarray, alto_carta: int,
+                     palo: str = "", escalas: Optional[Tuple] = None
+                     ) -> Tuple[float, Optional[str], float]:
+        """(score, carta_str, escala) emparejando la MITAD IZQUIERDA de la carta
+        (~45% ancho × 95% alto). Devuelve el ID COMPLETO (rango+palo): tiene
+        suficiente cuerpo (pips, figuras) para distinguir el palo. Para cartas
+        APILADAS en la mano donde solo se ve la porcion izquierda. `palo`
+        restringe al palo del bloque (52→13 plantillas); `escalas` fija escalas."""
         return self._buscar_filtrado(win_bgr, alto_carta,
-                                     _TPL_MITAD_WF, _TPL_MITAD_HF, "")
+                                     _TPL_MITAD_WF, _TPL_MITAD_HF,
+                                     palo_suffix=palo, escalas=escalas)
 
     def buscar_mitad_por_rank(self, win_bgr: np.ndarray, alto_carta: int,
                               rank_prefix: str
-                              ) -> Tuple[float, Optional[str]]:
+                              ) -> Tuple[float, Optional[str], float]:
         """Como `buscar_mitad`, pero SOLO prueba las 4 plantillas del rango
         dado (ej. rank_prefix="Q" → QT,QD,QC,QP). Ideal para DESAMBIGUAR
         el palo cuando ya sabemos el rango: comparacion RELATIVA entre los

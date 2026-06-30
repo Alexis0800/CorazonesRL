@@ -91,6 +91,20 @@ def leer_estado(img: np.ndarray, regiones: Regiones,
 _ANCHO_CARTA_FRAC = 0.774   # ancho / alto de un naipe (sprite APK 168x217)
 
 
+def _escalas_cerca(esc: Optional[float]):
+    """Vecindario de escalas alrededor de `esc` (la mejor escala del bloque).
+
+    Todas las cartas del abanico estan al MISMO tamano fisico, asi que una vez
+    medida la escala del bloque solo hay que probar esa ±1 paso en vez de las 10
+    de `_ESCALAS`. None → todas (no se pudo medir)."""
+    from src.captura.vision_cartas import _ESCALAS
+    if esc is None or esc not in _ESCALAS:
+        return None
+    i = _ESCALAS.index(esc)
+    lo, hi = max(0, i - 1), min(len(_ESCALAS), i + 2)
+    return _ESCALAS[lo:hi]
+
+
 @dataclass
 class CartaMano:
     """Una carta localizada en la mano: su id (o None) y el punto donde tocarla."""
@@ -98,6 +112,8 @@ class CartaMano:
     centro: Tuple[int, int]   # (x, y) en PIXELES del screenshot completo
     # 'mitad' | 'carta' | 'rango' | '' (no reconocida)
     metodo: str = ""
+    card_h: int = 0           # alto de la carta en px (alto del bloque)
+    visible_w: int = 0        # ancho VISIBLE de ESTA carta en px (gap hasta la sig)
 
 
 def leer_mano_posiciones(img: np.ndarray, regiones: Regiones, reconocedor,
@@ -131,6 +147,9 @@ def leer_mano_posiciones(img: np.ndarray, regiones: Regiones, reconocedor,
     filas = sorted(_filas_de_cartas(mano_roi, 0.01),
                    key=lambda b: (b[1] // 50, b[0]))
     out: List[CartaMano] = []
+    # Toda la mano se renderiza a UNA sola escala fisica: el primer bloque que la
+    # mide siembra la escala de los siguientes (evita rebarrer las 10 escalas).
+    esc_hint = None
     for (fx, fy, fw, fh) in filas:
         blob = mano_roi[fy:fy + fh, fx:fx + fw]
         cajas = localizar_cartas(blob, 0.01)
@@ -151,30 +170,43 @@ def leer_mano_posiciones(img: np.ndarray, regiones: Regiones, reconocedor,
         bx = pos[-1]
         b_visible = min(cardw, fw - bx)
         palo_blk = None
+        esc_blk = None  # mejor escala del bloque (la fijamos para las 13 cartas)
         blk_x1 = min(bx + int(1.20 * cardw), blob.shape[1])
 
+        escalas_hint = _escalas_cerca(esc_hint)
+
         # 1) carta completa
-        s_c, name_c = reconocedor.buscar_carta(
-            blob[0:fh, bx:blk_x1], fh)
+        s_c, name_c, e_c = reconocedor.buscar_carta(
+            blob[0:fh, bx:blk_x1], fh, escalas=escalas_hint)
         if name_c and s_c >= umbral_palo:
             palo_blk = name_c[-1]
+            esc_blk = e_c
 
         # 2) mitad (si sigue sin palo)
         if palo_blk is None and b_visible < 0.85 * cardw:
             b_x1_m = min(bx + int(0.48 * cardw), blob.shape[1])
             b_win_m = blob[0:int(0.95 * fh), bx:b_x1_m]
-            s_bm, name_bm = reconocedor.buscar_mitad(b_win_m, fh)
+            s_bm, name_bm, e_bm = reconocedor.buscar_mitad(
+                b_win_m, fh, escalas=escalas_hint)
             if name_bm and s_bm >= umbral_mitad:
                 palo_blk = name_bm[-1]
+                esc_blk = e_bm
 
         # 3) rango (ultimo recurso; palo de esquina es ruidoso pero
         #    score alto da confianza)
         if palo_blk is None:
             b_x1_r = min(bx + int(0.40 * cardw), blob.shape[1])
             b_win_r = blob[0:int(0.52 * fh), bx:b_x1_r]
-            s_br, name_br = reconocedor.buscar_rango(b_win_r, fh)
+            s_br, name_br, _ = reconocedor.buscar_rango(
+                b_win_r, fh, escalas=escalas_hint)
             if name_br and s_br >= umbral_rango + 0.15:
                 palo_blk = name_br[-1]
+
+        # Escalas a probar por carta: si conocemos la escala del bloque, solo su
+        # vecindario (todas las cartas estan al mismo tamano); si no, todas.
+        if esc_blk is not None:
+            esc_hint = esc_blk
+        escalas_blk = _escalas_cerca(esc_blk)
         for i, cx in enumerate(pos):
             # ── porción visible de ESTA carta ──
             visible = (pos[i + 1] - cx) if i + 1 < n else min(cardw, fw - cx)
@@ -194,7 +226,8 @@ def leer_mano_posiciones(img: np.ndarray, regiones: Regiones, reconocedor,
                 x1_m = min(cx + cap_w, blob.shape[1])
                 if x1_m > x0_m:
                     win_m = blob[0:int(0.95 * fh), x0_m:x1_m]
-                    s_m, name_m = reconocedor.buscar_mitad(win_m, fh)
+                    s_m, name_m, _ = reconocedor.buscar_mitad(
+                        win_m, fh, palo=(palo_blk or ""), escalas=escalas_blk)
                     # Aceptar si: (a) el palo coincide con el del bloque, o
                     # (b) no se conoce el palo del bloque (mitad da palo propio).
                     if name_m is not None and s_m >= umbral_mitad:
@@ -206,7 +239,8 @@ def leer_mano_posiciones(img: np.ndarray, regiones: Regiones, reconocedor,
                     x0_r = max(0, cx - int(0.12 * cardw))
                     x1_r = min(cx + int(0.40 * cardw), blob.shape[1])
                     win_r = blob[0:int(0.52 * fh), x0_r:x1_r]
-                    s_r, name_r = reconocedor.buscar_rango(win_r, fh)
+                    s_r, name_r, _ = reconocedor.buscar_rango(
+                        win_r, fh, escalas=escalas_blk)
                     if palo_blk is not None:
                         # Modo normal: rango de la esquina + palo del bloque
                         if (name_r is not None and s_r >= umbral_rango):
@@ -228,7 +262,8 @@ def leer_mano_posiciones(img: np.ndarray, regiones: Regiones, reconocedor,
                            blob.shape[1])
                 if x1_c > x0_c:
                     win_c = blob[0:int(0.95 * fh), x0_c:x1_c]
-                    s_c, name_c = reconocedor.buscar_carta(win_c, fh)
+                    s_c, name_c, _ = reconocedor.buscar_carta(
+                        win_c, fh, palo=(palo_blk or ""), escalas=escalas_blk)
                     if name_c is not None and s_c >= umbral_carta:
                         cid = str_a_carta_id(name_c)
                         metodo = "carta"
@@ -237,12 +272,14 @@ def leer_mano_posiciones(img: np.ndarray, regiones: Regiones, reconocedor,
                     x0_r = max(0, cx - int(0.12 * cardw))
                     x1_r = min(cx + int(0.40 * cardw), blob.shape[1])
                     win_r = blob[0:int(0.52 * fh), x0_r:x1_r]
-                    s_r, name_r = reconocedor.buscar_rango(win_r, fh)
+                    s_r, name_r, _ = reconocedor.buscar_rango(
+                        win_r, fh, escalas=escalas_blk)
                     if (name_r is not None and s_r >= umbral_rango
                             and palo_blk is not None):
                         cid = str_a_carta_id(name_r[:-1] + palo_blk)
                         metodo = "rango"
-            out.append(CartaMano(cid, (tx, ty), metodo))
+            out.append(CartaMano(cid, (tx, ty), metodo,
+                                  card_h=fh, visible_w=visible))
     return out
 
 
@@ -288,7 +325,7 @@ def leer_mesa(img: np.ndarray, regiones: Regiones, reconocedor
             continue
         cx, cy, cw, ch = max(cartas, key=lambda b: b[2] * b[3])
         card = roi[cy:cy + ch, cx:cx + cw]
-        score, name = reconocedor.buscar_carta(card, ch)
+        score, name, _ = reconocedor.buscar_carta(card, ch)
         if name is not None and score >= reconocedor.umbral:
             out[pos] = str_a_carta_id(name)
         else:
@@ -316,7 +353,7 @@ def leer_pases(img: np.ndarray, regiones: Regiones, reconocedor
     out: List[Optional[int]] = []
     for cx, cy, cw, ch in sorted(cartas, key=lambda b: b[0]):
         card = roi[cy:cy + ch, cx:cx + cw]
-        score, name = reconocedor.buscar_carta(card, ch)
+        score, name, _ = reconocedor.buscar_carta(card, ch)
         if name is not None and score >= reconocedor.umbral:
             out.append(str_a_carta_id(name))
         else:
