@@ -118,29 +118,31 @@ class CartaMano:
     visible_w: int = 0
 
 
-def leer_mano_posiciones(img: np.ndarray, regiones: Regiones, reconocedor,
-                         umbral_rango: float = 0.45, umbral_palo: float = 0.45,
-                         umbral_mitad: float = 0.55, umbral_carta: float = 0.50
-                         ) -> List[CartaMano]:
-    """Como `leer_mano`, pero ademas devuelve el PUNTO de toque de cada carta en
-    coordenadas del screenshot completo (para auto-juego por ADB).
+def _leer_mano_filtrada(img: np.ndarray, regiones: Regiones, reconocedor,
+                        umbral_rango: float, umbral_palo: float,
+                        umbral_mitad: float, umbral_carta: float,
+                        solo_palo: Optional[str] = None,
+                        buscar_id: Optional[int] = None) -> List[CartaMano]:
+    """Núcleo de lectura de la mano. `leer_mano_posiciones` y `localizar_carta`
+    son envoltorios sobre esta.
 
-    El punto de toque es el centro de la franja VISIBLE de la carta (entre su
-    borde izquierdo y la siguiente carta solapada; la ultima del bloque usa su
-    ancho completo): asi un tap cae siempre dentro de la carta correcta, no en la
-    de encima. Recalcula posiciones cada vez que se llama, asi que tolera el
-    reordenamiento de bloques tras seleccionar una carta en el pase.
+    - `solo_palo`: si se da, SOLO reconoce las cartas de los bloques cuyo palo
+      coincide (los demás se saltan tras detectar su palo). Ahorra el match de
+      todas las cartas de los otros bloques cuando solo interesa uno.
+    - `buscar_id`: si se da, devuelve [esa carta] en cuanto la reconoce (salida
+      temprana); si no aparece, devuelve lista vacía.
 
-    Estrategia de reconocimiento por carta:
-    - Si la porcion visible es <85% del ancho → carta APILADA: usa
-      `buscar_mitad()` (mitad izquierda, rango + cuerpo con pips). Si la
-      confianza es baja, cae a `buscar_rango()` + palo del bloque.
-    - Si la porcion visible es ≥85% → carta COMPLETA o casi: usa
-      `buscar_carta()` (carta entera). Si falla, cae a rango + palo del bloque.
-    El palo del bloque se determina con la ultima carta (siempre visible entera).
-    """
-    from src.captura.modelos import str_a_carta_id
+    El palo de un bloque se determina con su carta más a la derecha (visible
+    entera) y se reusa para todas las suyas. El punto de toque es el centro de la
+    franja VISIBLE de cada carta (un tap cae siempre dentro de la carta correcta,
+    no en la de encima). Recalcula posiciones en cada llamada → tolera el
+    reordenamiento de bloques tras cada selección del pase."""
+    from src.captura.modelos import str_a_carta_id, carta_a_str
     from src.captura.vision_cartas import _filas_de_cartas, localizar_cartas
+
+    # Si buscamos una carta concreta, basta con reconocer su propio palo.
+    if solo_palo is None and buscar_id is not None:
+        solo_palo = carta_a_str(buscar_id)[-1]
 
     H, W = img.shape[:2]
     mx, my = regiones.mano[0], regiones.mano[1]
@@ -209,6 +211,13 @@ def leer_mano_posiciones(img: np.ndarray, regiones: Regiones, reconocedor,
         # vecindario (todas las cartas estan al mismo tamano); si no, todas.
         if esc_blk is not None:
             esc_hint = esc_blk
+        # ── filtro de bloque: si solo interesa un palo, saltar los bloques con
+        #    palo CONOCIDO y distinto (ya sembramos esc_hint; nos ahorramos
+        #    reconocer sus cartas). Un bloque con palo desconocido (None) NO se
+        #    salta: no se puede descartar que contenga la carta buscada. ──
+        if (solo_palo is not None and palo_blk is not None
+                and palo_blk != solo_palo):
+            continue
         escalas_blk = _escalas_cerca(esc_blk)
         for i, cx in enumerate(pos):
             # ── porción visible de ESTA carta ──
@@ -283,7 +292,40 @@ def leer_mano_posiciones(img: np.ndarray, regiones: Regiones, reconocedor,
                         metodo = "rango"
             out.append(CartaMano(cid, (tx, ty), metodo,
                                  card_h=fh, visible_w=visible))
-    return out
+            # ── salida temprana: ya localizamos la carta buscada ──
+            if buscar_id is not None and cid == buscar_id:
+                return [out[-1]]
+    return [] if buscar_id is not None else out
+
+
+def leer_mano_posiciones(img: np.ndarray, regiones: Regiones, reconocedor,
+                         umbral_rango: float = 0.45, umbral_palo: float = 0.45,
+                         umbral_mitad: float = 0.55, umbral_carta: float = 0.50
+                         ) -> List[CartaMano]:
+    """Lee TODA la mano y devuelve el PUNTO de toque de cada carta en
+    coordenadas del screenshot completo (para auto-juego por ADB). Ver
+    `_leer_mano_filtrada` para la estrategia de reconocimiento."""
+    return _leer_mano_filtrada(img, regiones, reconocedor,
+                               umbral_rango, umbral_palo,
+                               umbral_mitad, umbral_carta)
+
+
+def localizar_carta(img: np.ndarray, regiones: Regiones, reconocedor,
+                    carta_id: int,
+                    umbral_rango: float = 0.45, umbral_palo: float = 0.45,
+                    umbral_mitad: float = 0.55, umbral_carta: float = 0.50
+                    ) -> Optional[CartaMano]:
+    """Localiza UNA carta concreta en la mano leyendo SOLO el bloque de su palo
+    (el resto de bloques se detectan pero no se reconocen carta a carta). Mucho
+    más rápido que `leer_mano_posiciones` cuando solo se necesita una carta
+    (p.ej. la siguiente a tocar en el pase), sin perder precisión: la carta se
+    sigue verificando por plantilla. Devuelve la `CartaMano` o None si no la
+    encuentra con confianza."""
+    res = _leer_mano_filtrada(img, regiones, reconocedor,
+                              umbral_rango, umbral_palo,
+                              umbral_mitad, umbral_carta,
+                              solo_palo=None, buscar_id=carta_id)
+    return res[0] if res else None
 
 
 def leer_mano(img: np.ndarray, regiones: Regiones, reconocedor,
@@ -372,5 +414,5 @@ __all__ = [
     "capturar_banner",
     # Propios
     "EstadoVisual", "leer_estado", "leer_mesa", "leer_mano",
-    "CartaMano", "leer_mano_posiciones", "leer_pases",
+    "CartaMano", "leer_mano_posiciones", "localizar_carta", "leer_pases",
 ]
