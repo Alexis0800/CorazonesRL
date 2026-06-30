@@ -37,7 +37,6 @@ from src.captura.adb import ClienteADB
 from src.captura.vision_hearts import (BannerClasificador, CartaMano, Regiones,
                                        leer_mano_posiciones,
                                        leer_pases)
-from src.captura.vision_cartas import localizar_cartas
 
 # Callback de decisión: (mano_ids, direccion) -> 3 ids a pasar.
 Recomendar = Callable[[List[int], str], List[int]]
@@ -47,6 +46,7 @@ Recomendar = Callable[[List[int], str], List[int]]
 class ConfigAutoPase:
     poll_s: float = 0.04           # espera entre capturas en bucles de sondeo
     settle_s: float = 0.05         # fallback si _esperar_estabilidad no converge
+    reflujo_s: float = 0.22        # espera tras un tap a que los bloques se reordenen
     intentos_lectura: int = 3      # reintentos para leer la mano completa (13)
     intentos_carta: int = 5        # reintentos para localizar+tocar una carta
     intentos_recibidas: int = 15   # sondeos esperando a que el pase se resuelva
@@ -220,283 +220,238 @@ class ControladorPase:
         cv2.imwrite(name, out)
         self._debug_n += 1
 
-    # ---- selección de una carta (siempre con captura fresca) -------------
+    # ---- helpers de mano (sin captura: operan sobre una lectura ya hecha) ----
 
-    def _seleccionar(self, carta_id: int) -> bool:
-        """Localiza la carta por id en una captura FRESCA y la toca.
+    @staticmethod
+    def _coord_de(cartas: List[CartaMano],
+                  carta_id: int) -> Optional[tuple[int, int]]:
+        """Punto de toque de `carta_id` en una lectura de mano, o None."""
+        for c in cartas:
+            if c.carta_id == carta_id:
+                return (int(c.centro[0]), int(c.centro[1]))
+        return None
 
-        NUNCA cachea posiciones: los bloques de la mano se reordenan al tocar
-        una carta. Cada llamada captura pantalla y busca la carta de nuevo."""
-        # ── búsqueda rápida (rango, la más veloz) ──
-        img = self.cli.captura()
-        punto = self._localizar_carta_rapida(img, carta_id)
-        if punto is not None:
-            self._debug_shot(f"tap_{carta_id}", punto=punto, img=img)
-            self.cli.tap(*punto)
-            return True
+    def _log_mano(self, cartas: List[CartaMano], etapa: str,
+                  img: Optional[np.ndarray] = None) -> None:
+        """Loguea una lectura de mano YA hecha (no captura ni relee). Si se pasa
+        `img` y hay debug_dir, guarda el overlay."""
+        from src.captura.modelos import carta_a_str
+        mano_ids = [c.carta_id for c in cartas]
+        n_ok = sum(1 for c in mano_ids if c is not None)
+        self.log(f"  📋 MANO [{etapa}]: {len(cartas)} posiciones  |  "
+                 f"{n_ok} reconocidas")
+        self.log("    " + " ".join(
+            carta_a_str(c) if c is not None else "??" for c in mano_ids))
+        self.log("    métodos: " + " | ".join(c.metodo or "--" for c in cartas))
+        if img is not None:
+            self._debug_mano_overlay(img, cartas, f"dump_{etapa}")
 
-        # ── fallback: lectura completa ──
-        cartas = leer_mano_posiciones(img, self.reg, self.rec)
-        objetivo = next((c for c in cartas if c.carta_id == carta_id), None)
-        if objetivo is not None:
-            x, y = objetivo.centro
-            self._debug_shot(f"tap_fb_{carta_id}",
-                             punto=(int(x), int(y)), img=img)
-            self.cli.tap(x, y)
-            return True
-        return False
+    def _verificar_seleccion_por_mano(self, esperadas: List[int]) -> bool:
+        """Verifica la selección RE-LEYENDO LA MANO: si las 3 cartas esperadas
+        YA NO están en la mano, es que fueron correctamente seleccionadas.
 
-    # ---- búsqueda rápida de UNA carta (usa bloques de palo, sin buscar_mitad) -
+        Mucho más fiable que leer la zona de pases (cuyas cartas se renderizan
+        a escala distinta y confunden J↔5, Q↔9 incluso con la esquina).
 
-    # Umbral mínimo de correlación para aceptar un match de rango.
-    _UMBRAL_RANGO = 0.50
-    # Umbral para aceptar un match de rango filtrado (solo 4 tpl, score más bajo).
-    _UMBRAL_RANGO_FILTRADO = 0.42
-    # Factor ancho/alto de carta (sprite APK ≈ 168/217).
-    _ANCHO_CARTA_FRAC = 0.774
-    # Umbral mínimo para determinar el palo de un bloque desde su última carta.
-    _UMBRAL_PALO_BLOQUE = 0.45
-
-    def _localizar_carta_rapida(self, img: np.ndarray, carta_id: int
-                                ) -> Optional[tuple[int, int]]:
-        """Busca UNA carta en la mano usando BLOQUES DE PALO (sin template matching
-        de mitad, que falla en cartas solapadas).
-
-        Estrategia (igual que `leer_mano_posiciones` pero sin leer TODAS las cartas):
-        1. Agrupar cartas en BLOQUES (filas) con `_filas_de_cartas`.
-        2. Para cada bloque, determinar el PALO desde la carta MÁS A LA DERECHA
-           (la única visible entera; probamos carta completa > mitad > rango).
-        3. Buscar el RANGO de la carta objetivo dentro de cada bloque con
-           `buscar_rango_por_rank` (solo 4 tpl × 10 esc = 40 matchTemplate
-           por posición). Si el rango coincide Y el palo del bloque es el
-           esperado → encontrada.
-
-        Si el palo del bloque no coincide con el esperado, devolvemos None para
-        que `_seleccionar` use el fallback `leer_mano_posiciones` (más lento
-        pero 100% fiable)."""
+        Usa el MISMO `leer_mano_posiciones` que lee 13/13 correctamente."""
         from src.captura.modelos import carta_a_str
 
-        target_full = carta_a_str(carta_id)   # "QP"
-        rank = target_full[:-1]               # "Q"
-        expected_suit = target_full[-1]       # "P"
+        time.sleep(0.2)
+        for intento in range(3):
+            _, cartas = self._leer_mano_completa()
+            mano_ids = {c.carta_id for c in cartas if c.carta_id is not None}
+            faltan_en_mano = [cid for cid in esperadas if cid in mano_ids]
 
-        H, W = img.shape[:2]
-        mx, my = self.reg.mano[0], self.reg.mano[1]
-        mw, mh = self.reg.mano[2], self.reg.mano[3]
-        x0, y0 = int(mx * W), int(my * H)
-        mano_roi = img[int(my * H):int((my + mh) * H),
-                       int(mx * W):int((mx + mw) * W)]
+            self.log(f"  🔍 verificación mano (intento {intento+1}): "
+                     + f"{len(mano_ids)}/13 cartas en mano")
 
-        from src.captura.vision_cartas import _filas_de_cartas
+            if not faltan_en_mano:
+                self.log("  ✅ las 3 cartas YA NO están en la mano → selección OK")
+                return True
 
-        filas = sorted(_filas_de_cartas(mano_roi, 0.01),
-                       key=lambda b: (b[1] // 50, b[0]))
-        if not filas:
-            return None
+            self.log(f"  ⚠ aún en mano: {' '.join(carta_a_str(c) for c in faltan_en_mano)}")
+            if intento < 2:
+                time.sleep(0.25)
 
-        for (fx, fy, fw, fh) in filas:
-            blob = mano_roi[fy:fy + fh, fx:fx + fw]
-            cajas = localizar_cartas(blob, 0.01)
-            if not cajas:
-                continue
-            cardw = int(self._ANCHO_CARTA_FRAC * fh)
-            xs = [c[0] for c in cajas]
-            n = len(xs)
-            pos = ([int(xs[0] + (xs[-1] - xs[0]) * i / (n - 1))
-                    for i in range(n)] if n > 1 else xs)
+        return False
 
-            # ── determinar PALO del bloque (carta más a la derecha) ──
-            bx = pos[-1]
-            palo_blk: Optional[str] = None
-            blk_x1 = min(bx + int(1.20 * cardw), blob.shape[1])
+    def _verificar_pase_zona(self, esperadas: List[int],
+                             img: Optional[np.ndarray] = None) -> bool:
+        """Verificación FINAL leyendo la ZONA DE PASES: las 3 cartas
+        seleccionadas deben aparecer ahí. En esa zona las cartas están
+        completas y sin solapar, así que `buscar_carta` (carta entera, vía
+        `leer_pases`) es muy fiable.
 
-            # 1) carta completa
-            s_c, name_c, _ = self.rec.buscar_carta(
-                blob[0:fh, bx:blk_x1], fh)
-            if name_c and s_c >= self._UMBRAL_PALO_BLOQUE:
-                palo_blk = name_c[-1]
+        Reusa `img` (el frame que dejó el último `_tap_y_releer`) → sin captura
+        extra en el caso común; si aún no se ven las 3 (carta en vuelo),
+        recaptura unas pocas veces."""
+        from src.captura.modelos import carta_a_str
+        objetivo = sorted(esperadas)
+        leidas: List[int] = []
+        for intento in range(3):
+            if img is None:
+                img = self.cli.captura()
+            leidas = [p for p in leer_pases(img, self.reg, self.rec)
+                      if p is not None]
+            if sorted(leidas) == objetivo:
+                self.log("  ✅ zona de pases: "
+                         + "  ".join(carta_a_str(c) for c in objetivo)
+                         + " → selección OK")
+                return True
+            img = None  # forzar recaptura en el siguiente intento
+            time.sleep(self.cfg.poll_s)
+        self.log("  ⚠ zona de pases: leídas="
+                 + "  ".join(carta_a_str(c) for c in sorted(leidas))
+                 + "  |  esperadas="
+                 + "  ".join(carta_a_str(c) for c in objetivo))
+        return False
 
-            # 2) mitad (si sigue sin palo)
-            if palo_blk is None:
-                b_visible = min(cardw, fw - bx)
-                if b_visible < 0.85 * cardw:
-                    b_x1_m = min(bx + int(0.48 * cardw), blob.shape[1])
-                    b_win_m = blob[0:int(0.95 * fh), bx:b_x1_m]
-                    s_bm, name_bm, _ = self.rec.buscar_mitad(b_win_m, fh)
-                    if name_bm and s_bm >= self._UMBRAL_PALO_BLOQUE:
-                        palo_blk = name_bm[-1]
+    # ---- selección de una carta (SIEMPRE con leer_mano_posiciones) -----
 
-            # 3) rango (último recurso)
-            if palo_blk is None:
-                b_x1_r = min(bx + int(0.40 * cardw), blob.shape[1])
-                b_win_r = blob[0:int(0.52 * fh), bx:b_x1_r]
-                s_br, name_br, _ = self.rec.buscar_rango(b_win_r, fh)
-                if name_br and s_br >= self._UMBRAL_PALO_BLOQUE + 0.15:
-                    palo_blk = name_br[-1]
+    def _tap_y_releer(self, carta_id: int, coord: tuple[int, int],
+                      img_prev: np.ndarray
+                      ) -> tuple[np.ndarray, List[CartaMano]]:
+        """Toca `carta_id` en `coord` y relee la mano hasta que la carta SALE de
+        ella (señal de que la animación de reordenamiento de bloques terminó).
 
-            if palo_blk is None:
-                continue  # no pudimos determinar el palo → siguiente bloque
+        Esto fusiona en UNA sola captura lo que antes hacían tres pasos con
+        captura propia (debug-shot + esperar-estabilidad + dump): el debug-shot
+        reusa `img_prev` y el frame final releído sirve a la vez para localizar
+        la siguiente carta y para verificar. Devuelve (img, cartas) del último
+        frame leído."""
+        from src.captura.modelos import carta_a_str
+        self._debug_shot(f"tap_{carta_a_str(carta_id)}", punto=coord,
+                         img=img_prev)
+        self.cli.tap(*coord)
+        img, cartas = img_prev, []
+        for i in range(self.cfg.intentos_carta):
+            time.sleep(self.cfg.reflujo_s if i == 0 else self.cfg.poll_s)
+            img = self.cli.captura()
+            cartas = leer_mano_posiciones(img, self.reg, self.rec)
+            ids = {c.carta_id for c in cartas if c.carta_id is not None}
+            if carta_id not in ids:  # ya salió de la mano → reflujo terminado
+                break
+        return img, cartas
 
-            # ── buscar el RANGO dentro de este bloque ──
-            for i, cx in enumerate(pos):
-                visible = (pos[i + 1] - cx) if i + 1 < n else min(cardw,
-                                                                  fw - cx)
-                wx0 = max(0, cx - int(0.12 * cardw))
-                wx1 = min(cx + min(int(0.40 * cardw),
-                                   visible + int(0.10 * cardw)),
-                          blob.shape[1])
-                wy0 = max(0, -int(0.05 * fh))
-                wy1 = min(int(0.52 * fh), blob.shape[0])
-                if wy1 <= 0 or wx0 >= wx1:
-                    continue
-                win = blob[wy0:wy1, wx0:wx1]
-                if win.size == 0:
-                    continue
+    def _seleccionar(self, carta_id: int,
+                     coord: Optional[tuple[int, int]] = None) -> bool:
+        """Toca la carta en `coord`. Si no se pasa coordenada, la busca
+        re-leyendo la mano con `leer_mano_posiciones`.
 
-                score, encontrada, _ = self.rec.buscar_rango_por_rank(
-                    win, fh, rank)
-                if encontrada is None or score < self._UMBRAL_RANGO_FILTRADO:
-                    continue
+        Sin verificación de salida (la usa la ruta de corrección, donde el
+        llamante verifica aparte). En la ruta normal se usa `_tap_y_releer`."""
+        from src.captura.modelos import carta_a_str
 
-                # ── ¿el palo del bloque es el esperado? ──
-                if palo_blk == expected_suit:
-                    # Punto de toque: centro de la franja VISIBLE
-                    tx = (x0 + fx + cx + max(1, visible) // 2)
-                    ty = y0 + fy + fh // 2
-                    return (tx, ty)
-                else:
-                    # El palo del bloque NO es el esperado → usar fallback
-                    self.log(
-                        f"  ⚠ bloque {palo_blk} ≠ {expected_suit} "
-                        f"(buscaba {target_full}) → usando fallback")
-                    return None
+        if coord is not None:
+            self.log(f"  📍 {carta_a_str(carta_id)} en ({coord[0]},{coord[1]}) → tap")
+            self._debug_shot(f"tap_{carta_a_str(carta_id)}", punto=coord)
+            self.cli.tap(*coord)
+            return True
 
-        return None
+        # ── fallback: lectura completa (mismo método fiable) ──
+        self.log(f"  📸 leyendo mano para localizar {carta_a_str(carta_id)}...")
+        img = self.cli.captura()
+        cartas = leer_mano_posiciones(img, self.reg, self.rec)
+        for c in cartas:
+            if c.carta_id == carta_id:
+                x, y = int(c.centro[0]), int(c.centro[1])
+                self.log(f"  ✓ encontrada → tap ({x},{y})")
+                self._debug_shot(f"tap_{carta_a_str(carta_id)}",
+                                 punto=(x, y))
+                self.cli.tap(x, y)
+                return True
+        self.log(f"  ✗ NO encontrada {carta_a_str(carta_id)} en la mano")
+        return False
 
     # ---- verificación en zona de pases -----------------------------------
 
-    def _verificar_pases(self, esperadas: List[int]) -> bool:
-        """Lee la zona de pases y verifica que coincidan con esperadas.
-        Devuelve True solo si las 3 coinciden exactamente."""
-        from src.captura.modelos import carta_a_str
-        time.sleep(0.2)
-        pases: List[int] = []
-        for intento in range(4):
-            img = self.cli.captura()
-            pases = [p for p in leer_pases(
-                img, self.reg, self.rec) if p is not None]
-            self._debug_shot(f"zona_pases_{intento}", img=img)
-            if len(pases) >= 3:
-                break
-            time.sleep(0.25)
-
-        ok = sorted(pases) == sorted(esperadas)
-        emoji = "✅" if ok else "❌"
-        self.log(f"  {emoji} pases: leídos="
-                 + "  ".join(carta_a_str(c) for c in sorted(pases))
-                 + "  |  esperados="
-                 + "  ".join(carta_a_str(c) for c in sorted(esperadas)))
-        return ok
-
     # ---- corrección automática del pase ----------------------------------
 
-    def _leer_pases_posiciones(self, img: np.ndarray
-                               ) -> List[tuple[int, tuple[int, int]]]:
-        """Lee la zona de pases y devuelve [(carta_id, (x_centro, y_centro)), ...]
-        en coordenadas del screenshot completo. Las cartas en el pase están
-        completas y visibles → matchTemplate del sprite de la APK es muy fiable."""
-        if self.reg.pases is None:
-            return []
-        from src.captura.modelos import str_a_carta_id
-        from src.captura.vision_cartas import detectar_cartas
+    def _limpiar_pases(self) -> None:
+        """Toca repetidamente la zona de pases para de-seleccionar TODAS
+        las cartas. Más fiable que intentar de-seleccionar cartas
+        individuales (que depende del lector de zona de pases, el cual
+        confunde J↔5 y Q↔9 a escala pequeña).
 
-        roi = Regiones.recortar(img, self.reg.pases)
+        Estrategia: 3 toques espaciados en el centro de la zona de pases
+        + 1 toque en cada extremo. La app de Hearts suele responder a
+        taps en la carta seleccionada para de-seleccionarla."""
+        if self.reg.pases is None:
+            return
+        img = self.cli.captura()
+        self._debug_shot("limpiar_pases_antes", img=img)
         H, W = img.shape[:2]
-        px0 = int(self.reg.pases[0] * W)
-        py0 = int(self.reg.pases[1] * H)
-        cartas = detectar_cartas(roi, min_area_frac=0.02)
-        out: List[tuple[int, tuple[int, int]]] = []
-        for cx, cy, cw, ch in sorted(cartas, key=lambda b: b[0]):
-            card = roi[cy:cy + ch, cx:cx + cw]
-            score, name, _ = self.rec.buscar_carta(card, ch)
-            if name is not None and score >= self.rec.umbral:
-                cid = str_a_carta_id(name)
-                centro = (px0 + cx + cw // 2, py0 + cy + ch // 2)
-                out.append((cid, centro))
-        return out
+        x, y, w, h = self.reg.pases
+        cx = int((x + w / 2) * W)
+        cy = int((y + h / 2) * H)
+        px0, px1 = int(x * W), int((x + w) * W)
+
+        self.log("  🧹 limpiando zona de pases (3 taps en centro + extremos)...")
+        for px in [px0 + int(0.15 * w * W), cx, px1 - int(0.15 * w * W)]:
+            self.cli.tap(px, cy)
+            time.sleep(0.12)
+        time.sleep(0.3)
+        self._esperar_estabilidad()
+        img2 = self.cli.captura()
+        self._debug_shot("limpiar_pases_despues", img=img2)
 
     def _corregir_pase(self, esperadas: List[int],
-                       max_intentos: int = 3) -> bool:
-        """Corrige la selección si la zona de pases no coincide con lo esperado.
+                       max_intentos: int = 2) -> bool:
+        """Corrige la selección: limpia TODO y re-selecciona desde cero.
 
-        1. Lee la zona de pases.
-        2. Las cartas que están en pases pero NO en esperadas → las toca DOS VECES
-           en la zona de pases para DE-SELECCIONARLAS (a veces un solo tap no basta
-           en ciertas apps/versiones; el doble tap es más fiable).
-        3. Espera estabilidad visual (bloques se reordenan).
-        4. Las cartas que están en esperadas pero NO en pases → las localiza
-           en la mano y las toca para SELECCIONARLAS.
-        5. Repite hasta que coincidan o se agoten los intentos.
+        Verifica LEYENDO LA MANO (no la zona de pases, que confunde J↔5, Q↔9).
+        Si las 3 cartas ya no están en la mano → selección correcta.
 
-        Devuelve True si al final la zona de pases coincide con esperadas.
+        Usa las coordenadas de `_leer_mano_completa`. NO re-busca con otro método.
+
+        Máximo 2 intentos (no infinito).
         """
         from src.captura.modelos import carta_a_str
 
         for intento in range(max_intentos):
-            time.sleep(0.25)  # margen para animaciones
-            # ── leer qué hay AHORA en la zona de pases ──
-            img = self.cli.captura()
-            pases_actuales = self._leer_pases_posiciones(img)
-            ids_en_pases = {cid for cid, _ in pases_actuales}
-            esperadas_set = set(esperadas)
+            self.log(f"  🔄 corrección intento {intento+1}/{max_intentos}")
 
-            if ids_en_pases == esperadas_set:
-                self.log(f"  ✅ pase corregido (intento {intento+1}): "
-                         + " ".join(carta_a_str(c)
-                                    for c in sorted(ids_en_pases)))
-                return True
+            # ── 1) Limpiar TODO ──
+            self._limpiar_pases()
 
-            # ── de-seleccionar cartas que NO deberían estar ──
-            # Doble tap: un solo tap a veces no basta para deseleccionar
-            sobrantes = ids_en_pases - esperadas_set
-            for cid, (cx, cy) in pases_actuales:
-                if cid in sobrantes:
-                    self.log(
-                        f"  ↩ de-seleccionando {carta_a_str(cid)} (no debe pasar)")
-                    self._debug_shot(f"corregir_desel_{carta_a_str(cid)}",
-                                     punto=(cx, cy), img=img)
-                    # Doble tap con pausa entre taps
-                    self.cli.tap(cx, cy)
+            # ── 2) Re-leer mano → coordenadas fiables ──
+            _, cartas = self._leer_mano_completa()
+            mano_ids = [c.carta_id for c in cartas if c.carta_id is not None]
+            self.log(f"  📖 mano post-limpiar: {len(mano_ids)}/13 cartas")
+
+            # ── 3) Re-seleccionar con coordenadas de la mano leída ──
+            ok_count = 0
+            for cid in esperadas:
+                # ── buscar coordenada en la mano recién leída ──
+                coord: Optional[tuple[int, int]] = None
+                for c in cartas:
+                    if c.carta_id == cid:
+                        coord = (int(c.centro[0]), int(c.centro[1]))
+                        break
+                if coord is None:
+                    # ── si no está, _seleccionar hará fallback con leer_mano_posiciones ──
+                    self.log(f"  ⚠ {carta_a_str(cid)} no en mano post-limpiar → buscando...")
+
+                if self._seleccionar(cid, coord):
+                    ok_count += 1
+                    self.log(f"  ✓ re-seleccionada {carta_a_str(cid)}")
                     time.sleep(0.10)
-                    self.cli.tap(cx, cy)
-                    time.sleep(0.15)
-
-            if sobrantes:
-                time.sleep(0.2)
-                self._esperar_estabilidad()
-
-            # ── seleccionar cartas que FALTAN ──
-            faltantes = esperadas_set - ids_en_pases
-            if faltantes:
-                time.sleep(0.3)  # bloques asentándose
-            for cid in sorted(faltantes):
-                self.log(
-                    f"  ↪ re-seleccionando {carta_a_str(cid)} (faltaba)")
-                ok = self._seleccionar(cid)
-                if ok:
-                    time.sleep(0.25)
                     self._esperar_estabilidad()
                 else:
-                    self.log(
-                        f"  ✗ no encontré {carta_a_str(cid)} para re-seleccionar")
+                    self.log(f"  ✗ no pude re-seleccionar {carta_a_str(cid)}")
 
-        # ── verificación final ──
-        time.sleep(0.25)
-        img = self.cli.captura()
-        self._debug_shot("corregir_final", img=img)
-        pases_final = self._leer_pases_posiciones(img)
-        ids_final = {cid for cid, _ in pases_final}
-        return ids_final == esperadas_set
+            if ok_count < 3:
+                self.log(f"  ⚠ solo {ok_count}/3 re-seleccionadas")
+                continue
+
+            # ── 4) Verificar LEYENDO LA MANO (no la zona de pases) ──
+            time.sleep(0.3)
+            if self._verificar_seleccion_por_mano(esperadas):
+                self.log(f"  ✅ pase corregido en intento {intento+1}")
+                return True
+
+        self.log("  ❌ corrección agotada (2 intentos)")
+        return False
 
     # ---- cartas recibidas (post-confirmacion, zona de pases) -------------
 
@@ -708,7 +663,12 @@ class ControladorPase:
 
     # ---- orquestación -----------------------------------------------------
 
-    def ejecutar(self) -> ResultadoPase:
+    def ejecutar(self, confirmar: bool = True) -> ResultadoPase:
+        """Ejecuta el pase completo.
+
+        Si `confirmar=False`, selecciona las 3 cartas y verifica leyendo la
+        mano (que las 3 ya no estén), pero NO toca el botón de confirmar y NO
+        espera las recibidas. Útil para probar la selección sin comprometerse."""
         t0 = time.perf_counter()
         img = self.cli.captura()
         self._debug_shot("inicio", img=img)
@@ -719,7 +679,7 @@ class ControladorPase:
             f"Fase de pase detectada → dirección: {direccion}  [{time.perf_counter()-t0:.2f}s]")
 
         t_lec = time.perf_counter()
-        _, cartas = self._leer_mano_completa()
+        img, cartas = self._leer_mano_completa()
         mano_ids = [c.carta_id for c in cartas if c.carta_id is not None]
         # ── Protección: si hay más de 13 posiciones, tomar solo las 13
         #    con ID reconocido más cercanas a la izquierda (orden natural). ──
@@ -742,23 +702,30 @@ class ControladorPase:
         self.log("Modelo recomienda PASAR: "
                  + "  ".join(carta_a_str(c) for c in a_pasar))
 
-        # ── Selección: SIN cache de posiciones. Los bloques de la mano se
-        #    reordenan al tocar una carta. Cada tap se hace sobre una captura
-        #    fresca, con espera de estabilidad entre carta y carta. ──
+        # ── Selección: localiza cada carta en la lectura ACTUAL de la mano y la
+        #    toca. `_tap_y_releer` toca, espera a que la carta salga de la mano
+        #    (fin del reordenamiento) y devuelve el nuevo frame+lectura en UNA
+        #    sola captura, que alimenta la búsqueda de la siguiente carta. ──
         t_sel = time.perf_counter()
         seleccionadas: List[int] = []
         for cid in a_pasar:
-            if self._seleccionar(cid):
-                seleccionadas.append(cid)
-                self.log(
-                    f"  ✓ seleccionada {carta_a_str(cid)}  [{time.perf_counter()-t_sel:.2f}s]")
-                # Breve pausa para que la animación + reordenamiento de
-                # bloques terminen antes de buscar la siguiente carta.
-                time.sleep(0.08)
-                self._esperar_estabilidad()
-            else:
-                self.log(
-                    f"  ✗ no pude localizar {carta_a_str(cid)} para tocarla")
+            coord = self._coord_de(cartas, cid)
+            if coord is None:
+                # ── no está en la lectura actual → re-leer una vez ──
+                self.log(f"  ⚠ {carta_a_str(cid)} no en mano actual → re-leyendo...")
+                img, cartas = self._leer_mano_completa()
+                coord = self._coord_de(cartas, cid)
+            if coord is None:
+                self.log(f"  ✗ no pude localizar {carta_a_str(cid)} para tocarla")
+                continue
+
+            self.log(f"  📍 {carta_a_str(cid)} en ({coord[0]},{coord[1]}) → tap")
+            img, cartas = self._tap_y_releer(cid, coord, img)
+            seleccionadas.append(cid)
+            self.log(
+                f"  ✓ seleccionada {carta_a_str(cid)}  [{time.perf_counter()-t_sel:.2f}s]")
+            if self.cfg.debug_dir:
+                self._log_mano(cartas, f"post_{carta_a_str(cid)}", img)
         self.log(
             f"Selección completada ({len(seleccionadas)}/3 cartas)  [{time.perf_counter()-t_sel:.2f}s]")
 
@@ -767,18 +734,37 @@ class ControladorPase:
             res.nota = "No seleccioné las 3 cartas; no confirmo."
             return res
 
-        # ── 1) verificar zona de pases (ANTES de confirmar) ──
-        if not self._verificar_pases(seleccionadas):
-            # ── intentar corrección automática ──
+        # ── Verificación FINAL: leer la ZONA DE PASES (carta completa, fiable
+        #    ahí) reusando el frame del último tap → sin captura extra. Si la
+        #    zona no está calibrada, cae a comprobar que ya no estén en la mano.
+        if self.reg.pases is not None:
+            seleccion_ok = self._verificar_pase_zona(seleccionadas, img=img)
+        else:
+            en_mano = {c.carta_id for c in cartas if c.carta_id is not None}
+            seleccion_ok = not any(c in en_mano for c in seleccionadas)
+            self.log("  ✅ las 3 cartas YA NO están en la mano → selección OK"
+                     if seleccion_ok else "  ⚠ alguna sigue en la mano")
+
+        if not seleccion_ok:
+            # ── SIEMPRE intentar corrección (incluso en modo sin-confirmar) ──
             self.log("  🔄 intentando corrección automática del pase...")
             corregido = self._corregir_pase(
                 seleccionadas, self.cfg.intentos_correccion)
             if not corregido:
-                res.nota = ("Las cartas en la zona de pases no coinciden "
-                            "tras corrección. No confirmo.")
-                return res
+                if confirmar:
+                    res.nota = ("Las cartas no desaparecieron de la mano "
+                                "tras corrección. No confirmo.")
+                    return res
+                else:
+                    self.log("  ⚠ corrección no pudo verificar (modo sin-confirmar: continúo igual)")
 
-        # ── 2) confirmar ──
+        # ── 2) confirmar (solo si se pidió) ──
+        if not confirmar:
+            res.nota = ("3 cartas seleccionadas y verificadas. "
+                        "No confirmo (modo sin-confirmar).")
+            self.log(f"⏱ TOTAL (sin confirmar): {time.perf_counter()-t0:.2f}s")
+            return res
+
         t_conf = time.perf_counter()
         res.confirmado = self._confirmar()
         if not res.confirmado:

@@ -6,8 +6,11 @@ Cierra el lazo visión→decisión→acción para la fase de pase. Para el resto
 baza a baza) ver el copiloto `scripts/recomendador.py` (por ahora manual).
 
 Uso:
-  # en vivo por ADB (requiere `adb` en PATH y depuración USB):
+  # en vivo por ADB — flujo COMPLETO (selecciona + confirma):
   python scripts/auto_pase.py --modelo models/produccion --serial <SERIAL>
+
+  # en vivo por ADB — SIN confirmar (selecciona las 3 cartas y para):
+  python scripts/auto_pase.py --modelo models/produccion --serial <SERIAL> --sin-confirmar
 
   # prueba en seco sobre un frame fijo, SIN tocar nada (imprime qué tocaría):
   python scripts/auto_pase.py --modelo models/produccion --frame calibracion/hearts_app/captura_real.png --seco
@@ -78,6 +81,11 @@ def main() -> None:
                    help="Frame fijo para prueba en seco (sin ADB).")
     p.add_argument("--seco", action="store_true",
                    help="No toca nada: solo imprime qué tocaría (requiere --frame).")
+    p.add_argument("--sin-confirmar", action="store_true",
+                   help="Selecciona las 3 cartas y verifica la zona de pases, "
+                        "pero NO toca el botón de confirmar. "
+                        "Útil para probar la selección sin comprometerse. "
+                        "(Requiere --serial, usa ADB real.)")
     p.add_argument(
         "--regiones", default="calibracion/hearts_app/regiones.json")
     p.add_argument("--banners", default="calibracion/hearts_app/banners")
@@ -119,7 +127,16 @@ def main() -> None:
     if args.seco or args.frame:
         if not args.frame:
             raise SystemExit("--seco requiere --frame.")
+        if args.sin_confirmar:
+            raise SystemExit(
+                "--sin-confirmar requiere ADB real (--serial). "
+                "Usa --seco para prueba offline en seco.")
         cliente = _ClienteSeco(args.frame)
+    elif args.sin_confirmar:
+        # Modo ADB real, pero sin confirmar
+        cliente = ClienteADB(serial=args.serial, adb=args.adb)
+        if not cliente.dispositivos():
+            raise SystemExit("No hay dispositivos ADB (revisa `adb devices`).")
     else:
         cliente = ClienteADB(serial=args.serial, adb=args.adb)
         if not cliente.dispositivos():
@@ -133,7 +150,7 @@ def main() -> None:
         recomendar=recomendar, config=cfg,
         plantilla_confirmar=_confirmar_tpl,
     )
-    res = ctrl.ejecutar()
+    res = ctrl.ejecutar(confirmar=not args.sin_confirmar)
     print("\n== RESULTADO ==")
     print(f"  dirección : {res.direccion}")
     print(f"  confirmado: {res.confirmado}")

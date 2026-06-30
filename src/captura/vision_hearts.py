@@ -25,6 +25,7 @@ import numpy as np
 # ── Re-exportar desde banner.py (compatibilidad hacia atras) ──
 from src.captura.banner import (
     BannerClasificador,
+    BannerClasificadorTexto,
     IBannerClasificador,
     ResultadoBanner,
     capturar_banner,
@@ -366,7 +367,8 @@ def leer_pases(img: np.ndarray, regiones: Regiones, reconocedor
 __all__ = [
     "POSICIONES", "Regiones",
     # Re-exportados desde banner.py (compatibilidad hacia atras)
-    "BannerClasificador", "IBannerClasificador", "ResultadoBanner",
+    "BannerClasificador", "BannerClasificadorTexto",
+    "IBannerClasificador", "ResultadoBanner",
     "capturar_banner",
     # Propios
     "EstadoVisual", "leer_estado", "leer_mesa", "leer_mano",

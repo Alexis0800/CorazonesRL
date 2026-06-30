@@ -293,15 +293,6 @@ class ReconocedorPlantilla:
         return self._buscar_filtrado(win_bgr, alto_carta,
                                      _TPL_RANK_WF, _TPL_RANK_HF, escalas=escalas)
 
-    def buscar_rango_por_rank(self, win_bgr: np.ndarray, alto_carta: int,
-                              rank_prefix: str
-                              ) -> Tuple[float, Optional[str], float]:
-        """Como `buscar_rango`, pero SOLO prueba las 4 plantillas del rango
-        dado (ej. rank_prefix="3" → solo 3T,3D,3C,3P). ~13× mas rapido que
-        `buscar_rango` en la busqueda rapida de auto_pase."""
-        return self._buscar_filtrado(win_bgr, alto_carta,
-                                     _TPL_RANK_WF, _TPL_RANK_HF, rank_prefix)
-
     def buscar_mitad(self, win_bgr: np.ndarray, alto_carta: int,
                      palo: str = "", escalas: Optional[Tuple] = None
                      ) -> Tuple[float, Optional[str], float]:
@@ -313,17 +304,6 @@ class ReconocedorPlantilla:
         return self._buscar_filtrado(win_bgr, alto_carta,
                                      _TPL_MITAD_WF, _TPL_MITAD_HF,
                                      palo_suffix=palo, escalas=escalas)
-
-    def buscar_mitad_por_rank(self, win_bgr: np.ndarray, alto_carta: int,
-                              rank_prefix: str
-                              ) -> Tuple[float, Optional[str], float]:
-        """Como `buscar_mitad`, pero SOLO prueba las 4 plantillas del rango
-        dado (ej. rank_prefix="Q" → QT,QD,QC,QP). Ideal para DESAMBIGUAR
-        el palo cuando ya sabemos el rango: comparacion RELATIVA entre los
-        4 palos, mucho mas fiable que umbral absoluto contra una sola plantilla.
-        Solo 4 tpl × 10 esc = 40 matchTemplate."""
-        return self._buscar_filtrado(win_bgr, alto_carta,
-                                     _TPL_MITAD_WF, _TPL_MITAD_HF, rank_prefix)
 
 
 __all__ = [

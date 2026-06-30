@@ -21,7 +21,7 @@ fracciones, así que toleran otra resolución.
 | Recurso | Ubicación | Cómo se obtuvo |
 |---|---|---|
 | **`regiones.json`** | `./regiones.json` | Calibrado a mano con `scripts/calibrar_todo.py` sobre `../captura.png` (screenshot 1600×2560 del teléfono). 12 regiones: banner, mano, mesa×4, marcador×4, pases, confirmar. |
-| **Plantillas de banner** | `banners/` | Recortes etiquetados a mano desde frames de video/ADB. Se descubren nuevos con `scripts/agrupar_banners.py` → `banners_descubiertos/`, luego se etiquetan y copian aquí. |
+| **Plantillas de banner** | `banners/` | 9 plantillas definitivas obtenidas por deduplicación robusta (`scripts/dedup_banners.py`) + etiquetado manual. Cubren todos los estados: pase (4), turno (2), baza (2), vacío (1). Los tags `turno_rival`/`baza_rival` usan `BannerClasificadorTexto` para matchear cualquier nombre de jugador. |
 | **Plantillas de carta (esquina)** | `cartas/` | Recortes de la esquina de cada carta en la mesa, etiquetados a mano. Se usa en el reconocedor híbrido de mesa. Se descubren con `scripts/agrupar_cartas.py` → `cartas_descubiertas/`. |
 | **Naipes completos** | `cartas_completas/` | Generados **automáticamente** desde el sprite del APK con `scripts/cartas_desde_sprite.py`. **Versionados** — no requieren recalibración. |
 | **Screenshot de referencia** | `../captura.png` | Captura 1600×2560 del teléfono real con la app en mano inicial. Se usa como fondo del calibrador. |
@@ -35,8 +35,13 @@ calibracion/
 ├── captura.png                  ← Screenshot de referencia para el calibrador
 ├── hearts_app/
 │   ├── regiones.json            ← 12 regiones calibradas (fracciones 0..1)
-│   ├── banners/                 ← Plantillas de banner etiquetadas (runtime)
-│   ├── banners_descubiertos/    ← Salida cruda de agrupar_banners.py (regenerable)
+│   ├── banners/                 ← 9 plantillas de banner etiquetadas (runtime)
+│   │   ├── pase_*.png           ← 4 fases del pase
+│   │   ├── turno_agente.png     ← "Tu turno"
+│   │   ├── turno_rival.png      ← "Turno de <nombre>" (cualquier jugador)
+│   │   ├── baza_agente.png      ← "Has recogido la baza"
+│   │   ├── baza_rival.png       ← "<nombre> recoge la baza" (cualquier jugador)
+│   │   └── vacio.png            ← Banner en blanco / popup
 │   ├── cartas/                  ← Plantillas de esquina de carta (runtime, mesa)
 │   ├── cartas_completas/        ← 52 naipes del sprite APK (runtime, mano)
 │   ├── cartas_descubiertas/     ← Salida cruda de agrupar_cartas.py (regenerable)
@@ -64,6 +69,38 @@ calibracion/
 | c | `confirmar` | Botón círculo-check de confirmar pase | Auto-pase: tap para confirmar |
 
 Para recalibrar: `python scripts/calibrar_todo.py`
+
+---
+
+## Clasificadores de banner
+
+Hay dos implementaciones de `IBannerClasificador` en `src/captura/banner.py`:
+
+### `BannerClasificador` (original)
+
+Firma grayscale 64×16 normalizada, distancia euclídea. Rápido y preciso para
+banners con texto fijo (pases, "Tu turno", "Has recogido la baza", vacío).
+
+### `BannerClasificadorTexto` (nuevo)
+
+Extrae la **máscara de texto** (fondo sólido → umbralizado → recorte horizontal)
+y compara con **cosine similarity** de las máscaras vectorizadas. Diseñado para
+banners con **nombre de jugador variable**: "Turno de Alex" y "Turno de Pedro"
+producen máscaras de texto casi idénticas en su parte fija ("Turno de"), así que
+una sola plantilla `turno_rival__0.png` matchea cualquier nombre.
+
+Las plantillas `baza_rival` y `turno_rival` se usan **exclusivamente** con este
+clasificador. Las demás (pase, agente, vacío) funcionan con ambos.
+
+### Probar el reconocimiento
+
+```bash
+# Un frame → clasificación por ambos métodos + distancias
+python scripts/probar_banners.py --frame ruta/al/frame.png
+
+# Carpeta completa de frames → resumen de aciertos
+python scripts/probar_banners.py --carpeta videos/fotogramas
+```
 
 ---
 
@@ -129,16 +166,22 @@ python scripts/capturar_visual.py --fuente adb --serial <SERIAL> \
 Requiere `adb` en el PATH y depuración USB. Poll por defecto 0.4 s (varios polls
 por turno → la confirmación temporal funciona).
 
-### 4. Extender / corregir plantillas (recomendado en el dispositivo real)
+### 4. Extender / corregir plantillas de carta
 
 ```bash
-# banners nuevos (p.ej. "Pasar 3 cartas a la derecha", mano sin pase):
-python scripts/agrupar_banners.py --frames <carpeta_frames>
-#   → revisar banners_descubiertos/, copiar el bueno a banners/<tag>__<i>.png
-
 # cartas nuevas / dudosas:
 python scripts/agrupar_cartas.py --frames <carpeta_frames>
 #   → etiquetar y copiar a cartas/<carta>__<i>.png
+```
+
+Las plantillas de banner rara vez necesitan extenderse: los 9 tipos actuales
+cubren todos los estados del juego. Si apareciera un banner nuevo (popup,
+concesión), extraerlo y deduplicar:
+
+```bash
+python scripts/extraer_banners.py --frames <carpeta> --salida banners_nuevos/
+python scripts/dedup_banners.py --entrada banners_nuevos/ --salida banners_unicos/
+#   → revisar, etiquetar (<tag>__0.png) y copiar a calibracion/hearts_app/banners/
 ```
 
 ---
