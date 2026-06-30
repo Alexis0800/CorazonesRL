@@ -10,7 +10,9 @@ Uso:
   python scripts/diagnostico_mano.py --frame calibracion/hearts_app/captura_real.png
 """
 from __future__ import annotations
-import argparse, cv2, numpy as np
+import argparse
+import cv2
+import numpy as np
 
 # --- bootstrap ---
 import sys as _sys
@@ -78,10 +80,12 @@ def _dibujar_bloques(img_bgr, reg, out_path: str) -> None:
 def main() -> None:
     p = argparse.ArgumentParser(
         description="Diagnóstico de SOLO la mano — ADB o frame fijo.")
-    p.add_argument("--serial", default=None, help="Serial ADB del dispositivo.")
+    p.add_argument("--serial", default=None,
+                   help="Serial ADB del dispositivo.")
     p.add_argument("--adb", default="adb")
     p.add_argument("--frame", default=None, help="Frame fijo (sin ADB).")
-    p.add_argument("--regiones", default="calibracion/hearts_app/regiones.json")
+    p.add_argument(
+        "--regiones", default="calibracion/hearts_app/regiones.json")
     p.add_argument("--completas", default="calibracion/hearts_app/cartas_completas",
                    help="Naipes completos del sprite (para la mano).")
     p.add_argument("--debug", default=None,
@@ -148,13 +152,15 @@ def main() -> None:
         crops_dir.mkdir(exist_ok=True)
         H, W = img.shape[:2]
         for i, c in enumerate(cartas):
-            cid_str = carta_a_str(c.carta_id) if c.carta_id is not None else "??"
+            cid_str = carta_a_str(
+                c.carta_id) if c.carta_id is not None else "??"
             cx, cy = int(c.centro[0]), int(c.centro[1])
             # Ancho: porcion visible + 30% margen (sin invadir la carta de al lado)
             vis = max(c.visible_w, 10)
             half_w = int(vis * 0.65)
             # Alto: la carta entera + 10% margen vertical
-            half_h = int(c.card_h * 0.60) if c.card_h else int(vis / 0.774 * 0.60)
+            half_h = int(
+                c.card_h * 0.60) if c.card_h else int(vis / 0.774 * 0.60)
             x1 = max(0, cx - half_w)
             x2 = min(W, cx + half_w)
             y1 = max(0, cy - half_h)

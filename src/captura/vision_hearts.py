@@ -113,7 +113,8 @@ class CartaMano:
     # 'mitad' | 'carta' | 'rango' | '' (no reconocida)
     metodo: str = ""
     card_h: int = 0           # alto de la carta en px (alto del bloque)
-    visible_w: int = 0        # ancho VISIBLE de ESTA carta en px (gap hasta la sig)
+    # ancho VISIBLE de ESTA carta en px (gap hasta la sig)
+    visible_w: int = 0
 
 
 def leer_mano_posiciones(img: np.ndarray, regiones: Regiones, reconocedor,
@@ -170,7 +171,8 @@ def leer_mano_posiciones(img: np.ndarray, regiones: Regiones, reconocedor,
         bx = pos[-1]
         b_visible = min(cardw, fw - bx)
         palo_blk = None
-        esc_blk = None  # mejor escala del bloque (la fijamos para las 13 cartas)
+        # mejor escala del bloque (la fijamos para las 13 cartas)
+        esc_blk = None
         blk_x1 = min(bx + int(1.20 * cardw), blob.shape[1])
 
         escalas_hint = _escalas_cerca(esc_hint)
@@ -279,7 +281,7 @@ def leer_mano_posiciones(img: np.ndarray, regiones: Regiones, reconocedor,
                         cid = str_a_carta_id(name_r[:-1] + palo_blk)
                         metodo = "rango"
             out.append(CartaMano(cid, (tx, ty), metodo,
-                                  card_h=fh, visible_w=visible))
+                                 card_h=fh, visible_w=visible))
     return out
 
 
