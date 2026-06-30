@@ -11,7 +11,10 @@ Uso:
   python scripts/dedup_banners.py --dry-run        # solo mostrar grupos
 """
 from __future__ import annotations
-import argparse, sys
+import numpy as np
+import cv2
+import argparse
+import sys
 from pathlib import Path
 
 _sys = sys
@@ -21,8 +24,6 @@ try:
 except Exception:
     pass
 
-import cv2
-import numpy as np
 
 _ENTRADA = "calibracion/hearts_app/banners_crudos"
 _SALIDA = "calibracion/hearts_app/banners_unicos"
@@ -139,11 +140,12 @@ def _agrupar_por_representante(
     A con C aunque A≉C."""
     n = len(dist)
     # Ordenar por nitidez descendente
-    orden = sorted(range(n), key=lambda i: _sharpness(banners[i][1]), reverse=True)
-    
+    orden = sorted(range(n), key=lambda i: _sharpness(
+        banners[i][1]), reverse=True)
+
     grupos: list[list[int]] = []
     representantes: list[int] = []  # índice del representante de cada grupo
-    
+
     for idx in orden:
         asignado = False
         for gi, rep in enumerate(representantes):
@@ -154,7 +156,7 @@ def _agrupar_por_representante(
         if not asignado:
             grupos.append([idx])
             representantes.append(idx)
-    
+
     return [sorted(g) for g in grupos]
 
 
@@ -202,7 +204,8 @@ def main() -> None:
     dist = _matriz_distancias(banners)
 
     umbral_dist = 1.0 - args.umbral
-    print(f"Agrupando (umbral IoU={args.umbral:.2f} → dist≤{umbral_dist:.4f}) ...")
+    print(
+        f"Agrupando (umbral IoU={args.umbral:.2f} → dist≤{umbral_dist:.4f}) ...")
     grupos = _agrupar_por_representante(dist, umbral_dist, banners)
 
     singletons = sum(1 for g in grupos if len(g) == 1)

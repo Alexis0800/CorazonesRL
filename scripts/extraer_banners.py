@@ -13,7 +13,11 @@ Uso:
   python scripts/extraer_banners.py --umbral-dedup 12  # mas laxo
 """
 from __future__ import annotations
-import argparse, json, sys
+import numpy as np
+import cv2
+import argparse
+import json
+import sys
 from pathlib import Path
 
 # --- bootstrap path ---
@@ -24,9 +28,6 @@ try:
     _sys.stdout.reconfigure(encoding="utf-8")
 except Exception:
     pass
-
-import cv2
-import numpy as np
 
 
 _DEFAULT_REGIONES = "calibracion/hearts_app/regiones.json"

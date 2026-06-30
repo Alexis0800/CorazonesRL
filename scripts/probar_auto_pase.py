@@ -26,6 +26,13 @@ Uso:
         --banners calibracion/hearts_app/banners
 """
 from __future__ import annotations
+from src.captura.modelos import carta_a_str
+from src.captura.vision_cartas import ReconocedorPlantilla
+from src.captura.vision_hearts import (
+    BannerClasificador, CartaMano, Regiones, leer_mano_posiciones,
+)
+import numpy as np
+import cv2
 import argparse
 import sys
 from pathlib import Path
@@ -35,15 +42,6 @@ from typing import List, Optional, Tuple
 _RAIZ = Path(__file__).resolve().parent.parent
 if str(_RAIZ) not in sys.path:
     sys.path.insert(0, str(_RAIZ))
-
-import cv2
-import numpy as np
-
-from src.captura.vision_hearts import (
-    BannerClasificador, CartaMano, Regiones, leer_mano_posiciones,
-)
-from src.captura.vision_cartas import ReconocedorPlantilla
-from src.captura.modelos import carta_a_str
 
 
 # ── helpers ────────────────────────────────────────────────────────────────

@@ -1,16 +1,15 @@
 """Quick self-test del BannerClasificadorTexto con los banners unicos."""
-import sys
-import os
-sys.path.insert(0, os.getcwd())
-
-import cv2
-import numpy as np
-from pathlib import Path
-
 from src.captura.banner import (
     BannerClasificadorTexto, _extraer_mascara_texto, _mascara_a_firma,
     BannerClasificador,
 )
+from pathlib import Path
+import numpy as np
+import cv2
+import sys
+import os
+sys.path.insert(0, os.getcwd())
+
 
 DIR_UNICOS = Path("calibracion/hearts_app/banners_unicos")
 DIR_PLANTILLAS = Path("calibracion/hearts_app/banners")  # plantillas clasicas
@@ -99,7 +98,8 @@ def test_clasificador_texto():
             res, sims = clasificador.clasificar_verbose(
                 cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR))
             if res.tag != "desconocido":
-                print(f"  {name[:50]:<50} → {res.tag} (dist={res.distancia:.3f})")
+                print(
+                    f"  {name[:50]:<50} → {res.tag} (dist={res.distancia:.3f})")
     finally:
         # Limpiar
         import shutil
@@ -169,7 +169,8 @@ def test_clasificador_original():
         res = clasificador.clasificar(cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR))
         if res.tag != "desconocido":
             clasificados += 1
-    print(f"  Clasificados: {clasificados}/{min(20, len(unicos))} (umbral fijo)")
+    print(
+        f"  Clasificados: {clasificados}/{min(20, len(unicos))} (umbral fijo)")
 
 
 if __name__ == "__main__":

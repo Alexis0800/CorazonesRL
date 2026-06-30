@@ -269,7 +269,8 @@ class ControladorPase:
                 self.log("  ✅ las 3 cartas YA NO están en la mano → selección OK")
                 return True
 
-            self.log(f"  ⚠ aún en mano: {' '.join(carta_a_str(c) for c in faltan_en_mano)}")
+            self.log(
+                f"  ⚠ aún en mano: {' '.join(carta_a_str(c) for c in faltan_en_mano)}")
             if intento < 2:
                 time.sleep(0.25)
 
@@ -343,7 +344,8 @@ class ControladorPase:
         from src.captura.modelos import carta_a_str
 
         if coord is not None:
-            self.log(f"  📍 {carta_a_str(carta_id)} en ({coord[0]},{coord[1]}) → tap")
+            self.log(
+                f"  📍 {carta_a_str(carta_id)} en ({coord[0]},{coord[1]}) → tap")
             self._debug_shot(f"tap_{carta_a_str(carta_id)}", punto=coord)
             self.cli.tap(*coord)
             return True
@@ -430,7 +432,8 @@ class ControladorPase:
                         break
                 if coord is None:
                     # ── si no está, _seleccionar hará fallback con leer_mano_posiciones ──
-                    self.log(f"  ⚠ {carta_a_str(cid)} no en mano post-limpiar → buscando...")
+                    self.log(
+                        f"  ⚠ {carta_a_str(cid)} no en mano post-limpiar → buscando...")
 
                 if self._seleccionar(cid, coord):
                     ok_count += 1
@@ -712,14 +715,17 @@ class ControladorPase:
             coord = self._coord_de(cartas, cid)
             if coord is None:
                 # ── no está en la lectura actual → re-leer una vez ──
-                self.log(f"  ⚠ {carta_a_str(cid)} no en mano actual → re-leyendo...")
+                self.log(
+                    f"  ⚠ {carta_a_str(cid)} no en mano actual → re-leyendo...")
                 img, cartas = self._leer_mano_completa()
                 coord = self._coord_de(cartas, cid)
             if coord is None:
-                self.log(f"  ✗ no pude localizar {carta_a_str(cid)} para tocarla")
+                self.log(
+                    f"  ✗ no pude localizar {carta_a_str(cid)} para tocarla")
                 continue
 
-            self.log(f"  📍 {carta_a_str(cid)} en ({coord[0]},{coord[1]}) → tap")
+            self.log(
+                f"  📍 {carta_a_str(cid)} en ({coord[0]},{coord[1]}) → tap")
             img, cartas = self._tap_y_releer(cid, coord, img)
             seleccionadas.append(cid)
             self.log(
@@ -756,7 +762,8 @@ class ControladorPase:
                                 "tras corrección. No confirmo.")
                     return res
                 else:
-                    self.log("  ⚠ corrección no pudo verificar (modo sin-confirmar: continúo igual)")
+                    self.log(
+                        "  ⚠ corrección no pudo verificar (modo sin-confirmar: continúo igual)")
 
         # ── 2) confirmar (solo si se pidió) ──
         if not confirmar:

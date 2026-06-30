@@ -14,6 +14,12 @@ Uso:
 
 Las regiones estan en fracciones [0..1] → funciona a cualquier resolucion.
 """
+from src.captura.banner import (
+    BannerClasificador, BannerClasificadorTexto, _extraer_mascara_texto,
+)
+from src.captura.vision_hearts import Regiones, EstadoVisual
+import numpy as np
+import cv2
 import argparse
 import sys
 from pathlib import Path
@@ -24,14 +30,6 @@ from typing import Optional
 _RAIZ = Path(__file__).resolve().parent.parent
 if str(_RAIZ) not in sys.path:
     sys.path.insert(0, str(_RAIZ))
-
-import cv2
-import numpy as np
-
-from src.captura.vision_hearts import Regiones, EstadoVisual
-from src.captura.banner import (
-    BannerClasificador, BannerClasificadorTexto, _extraer_mascara_texto,
-)
 
 
 # ── helpers ────────────────────────────────────────────────────────────────
@@ -83,7 +81,8 @@ def clasificar_banner(img_bgr: np.ndarray, regiones: Regiones,
 
     # ── BannerClasificador (grayscale) ──
     if clf_gray is not None:
-        print(f"\n  ── BannerClasificador grayscale (umbral={clf_gray.umbral}) ──")
+        print(
+            f"\n  ── BannerClasificador grayscale (umbral={clf_gray.umbral}) ──")
         res_g, sims_g = clf_gray.clasificar_verbose(roi)
         print(f"  Clasificado: {res_g.tag}  |  categoria={res_g.categoria}"
               f"  dato={res_g.dato}  |  distancia={res_g.distancia:.3f}")
@@ -132,13 +131,15 @@ def main() -> None:
         print(f"ERROR: No existe {dir_plantillas}")
         sys.exit(1)
 
-    clf_texto = BannerClasificadorTexto(dir_plantillas, umbral=args.umbral_texto)
+    clf_texto = BannerClasificadorTexto(
+        dir_plantillas, umbral=args.umbral_texto)
     print(f"BannerClasificadorTexto: {clf_texto.num_plantillas} plantillas")
 
     clf_gray: Optional[BannerClasificador] = None
     if not args.solo_texto:
         clf_gray = BannerClasificador(dir_plantillas, umbral=args.umbral_gray)
-        print(f"BannerClasificador (gray): {clf_gray.num_plantillas} plantillas")
+        print(
+            f"BannerClasificador (gray): {clf_gray.num_plantillas} plantillas")
 
     # ── Procesar ──
     if args.frame:
