@@ -58,6 +58,7 @@ def _carta(id_: int) -> Carta:
 class Handler(BaseHTTPRequestHandler):
     recomendador: Recomendador  # inyectado por main()
     log_path: _Path  # inyectado por main()
+    _pendiente_nuevo_log: bool = False  # classvar: rotar log en el próximo endpoint
 
     def log_message(self, fmt, *args):
         print("[servidor_inferencia]", fmt % args)
@@ -75,7 +76,18 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(cuerpo)
 
+    def _rotar_log(self):
+        """Crea un nuevo archivo de log con timestamp fresco."""
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        Handler.log_path = Handler.log_path.parent / f"servidor_inferencia_{ts}.jsonl"
+        Handler._pendiente_nuevo_log = False
+        print(f"[servidor_inferencia] Nuevo log de partida: {Handler.log_path}")
+
     def _log_evento(self, evento: str, entrada: dict, salida: dict):
+        # Si se pidió rotar después de /terminar_partida, estrenar archivo
+        if Handler._pendiente_nuevo_log:
+            self._rotar_log()
+
         linea = {
             "ts": datetime.now().isoformat(timespec="seconds"),
             "evento": evento,
@@ -83,7 +95,7 @@ class Handler(BaseHTTPRequestHandler):
             "salida": salida,
             "estado": self.recomendador.estado_actual(),
         }
-        with open(self.log_path, "a", encoding="utf-8") as f:
+        with open(Handler.log_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(linea, ensure_ascii=False) + "\n")
 
     def do_POST(self):
@@ -123,9 +135,20 @@ class Handler(BaseHTTPRequestHandler):
                 salida = {"ok": True}
                 self._log_evento("terminar_partida", datos, salida)
                 self._responder(200, salida)
+                Handler._pendiente_nuevo_log = True  # próximo endpoint → archivo nuevo
             else:
                 self._responder(404, {"error": f"ruta desconocida: {self.path}"})
         except Exception as e:
+            # Sin esto, una excepción (p.ej. "Cannot choose from an empty sequence" cuando el
+            # bridge pide una jugada con la mano ya vacía) no deja NINGÚN rastro en el JSONL --
+            # _log_evento solo se llama del lado del éxito arriba. El bridge sí registra el fallo
+            # en su propio log ("modelo no disponible"), pero desde este lado parecía que la
+            # petición nunca había llegado. Envuelto en su propio try: si el estado también está
+            # roto, preferimos perder la línea de log a perder la respuesta HTTP.
+            try:
+                self._log_evento(f"error:{self.path}", locals().get("datos", {}), {"error": str(e)})
+            except Exception:
+                pass
             self._responder(400, {"error": str(e)})
 
     def do_GET(self):
@@ -140,9 +163,14 @@ def main() -> None:
     p.add_argument("--modelo", required=True, help="Ruta al checkpoint (igual que recomendador.py --modelo)")
     p.add_argument("--asiento", type=int, default=0, help="Asiento (0-3) del agente en la mesa")
     p.add_argument("--puerto", type=int, default=8765)
-    p.add_argument("--log", default="logs/servidor_inferencia.jsonl",
-                    help="Ruta al JSONL donde se registra cada llamada (entrada + estado del modelo)")
+    p.add_argument("--log", default="",
+                    help="Ruta al JSONL de log. Si se omite, se genera "
+                         "logs/servidor_inferencia_YYYYMMDD_HHMMSS.jsonl automáticamente")
     args = p.parse_args()
+
+    if not args.log:
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        args.log = f"logs/servidor_inferencia_{ts}.jsonl"
 
     print(f"Cargando modelo desde {args.modelo} (asiento {args.asiento})...")
     Handler.recomendador = Recomendador(args.modelo, mi_idx=args.asiento)
