@@ -16,13 +16,21 @@ Endpoints (todos POST, cuerpo y respuesta JSON):
     /recomendar_pase  {"direccion": "izquierda|derecha|frente|sin"} -> {"cartas": [id, id, id]}
     /recomendar_jugada {"mesa_antes": [[asiento, cartaId], ...]}    -> {"carta": id}
     /registrar_baza   {"jugadas": [[asiento, cartaId], ...], "ganador": asiento} -> {"ok": true}
+    /registrar_puntos_mano {"puntos": [p0, p1, p2, p3]}             -> {"ok": true, "scores": [...]}
     /terminar_partida (sin cuerpo)                                  -> {"ok": true}
     /salud            (cualquier método)                           -> {"ok": true, "obs_dim": N}
 
 Cada llamada se registra en `--log` (JSONL) con la entrada recibida del bridge
 y el estado que el modelo cree tener (mano/cementerio/marcador), para poder
-comparar ambos lados si se desincronizan. `/terminar_partida` reinicia el
-marcador y el estado de mano sin tener que reiniciar el proceso.
+comparar ambos lados si se desincronizan. `/registrar_puntos_mano` acumula el
+puntaje de la mano que acaba de terminar (incluida la de alguien "llevándose
+el resto") al marcador persistente — sin esto el modelo nunca se entera del
+marcador real y juega cada mano como si la partida siguiera 0-0-0-0. Llamar
+justo cuando la mano termina (13 bazas o remate del resto), antes o después
+de mandar las cartas de la mano siguiente a `/reset_mano` — el orden entre
+ambos no importa, son estados independientes.
+`/terminar_partida` reinicia el marcador y el estado de mano sin tener que
+reiniciar el proceso.
 """
 from __future__ import annotations
 
@@ -103,6 +111,11 @@ class Handler(BaseHTTPRequestHandler):
                 r.registrar_baza(jugadas, datos["ganador"])
                 salida = {"ok": True}
                 self._log_evento("registrar_baza", datos, salida)
+                self._responder(200, salida)
+            elif self.path == "/registrar_puntos_mano":
+                r.scores = [r.scores[i] + datos["puntos"][i] for i in range(4)]
+                salida = {"ok": True, "scores": list(r.scores)}
+                self._log_evento("registrar_puntos_mano", datos, salida)
                 self._responder(200, salida)
             elif self.path == "/terminar_partida":
                 r.scores = [0, 0, 0, 0]

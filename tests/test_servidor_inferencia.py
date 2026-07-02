@@ -52,6 +52,20 @@ def test_reset_mano_registra_evento_con_estado(tmp_path):
         server.shutdown()
 
 
+def test_registrar_puntos_mano_acumula_al_marcador(tmp_path):
+    server, r = _servidor_sin_modelo(tmp_path)
+    try:
+        puerto = server.server_address[1]
+        salida = _post(puerto, "/registrar_puntos_mano", {"puntos": [4, 0, 13, 9]})
+        assert salida == {"ok": True, "scores": [4, 0, 13, 9]}
+
+        salida2 = _post(puerto, "/registrar_puntos_mano", {"puntos": [0, 26, 0, 0]})
+        assert salida2 == {"ok": True, "scores": [4, 26, 13, 9]}
+        assert r.scores == [4, 26, 13, 9]
+    finally:
+        server.shutdown()
+
+
 def test_terminar_partida_reinicia_marcador_y_mano(tmp_path):
     server, r = _servidor_sin_modelo(tmp_path)
     try:
