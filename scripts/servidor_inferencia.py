@@ -33,6 +33,12 @@ ambos no importa, son estados independientes.
 reiniciar el proceso.
 """
 from __future__ import annotations
+from scripts.recomendador import Recomendador
+from src.dominio.carta import Carta
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from datetime import datetime
+import json
+import argparse
 
 # --- bootstrap path: permite `python scripts/<x>.py` desde la raiz del repo ---
 import sys as _sys
@@ -40,13 +46,6 @@ from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parents[1]))
 # --- fin bootstrap ---
 
-import argparse
-import json
-from datetime import datetime
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-
-from src.dominio.carta import Carta
-from scripts.recomendador import Recomendador
 
 _LOOKUP_POR_ID = {c.id: c for c in Carta._TODAS}
 
@@ -79,9 +78,11 @@ class Handler(BaseHTTPRequestHandler):
     def _rotar_log(self):
         """Crea un nuevo archivo de log con timestamp fresco."""
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        Handler.log_path = Handler.log_path.parent / f"servidor_inferencia_{ts}.jsonl"
+        Handler.log_path = Handler.log_path.parent / \
+            f"servidor_inferencia_{ts}.jsonl"
         Handler._pendiente_nuevo_log = False
-        print(f"[servidor_inferencia] Nuevo log de partida: {Handler.log_path}")
+        print(
+            f"[servidor_inferencia] Nuevo log de partida: {Handler.log_path}")
 
     def _log_evento(self, evento: str, entrada: dict, salida: dict):
         # Si se pidió rotar después de /terminar_partida, estrenar archivo
@@ -113,7 +114,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._log_evento("recomendar_pase", datos, salida)
                 self._responder(200, salida)
             elif self.path == "/recomendar_jugada":
-                mesa_antes = [(idx, _carta(cid)) for idx, cid in datos.get("mesa_antes", [])]
+                mesa_antes = [(idx, _carta(cid))
+                              for idx, cid in datos.get("mesa_antes", [])]
                 carta = r.recomendar_jugada(mesa_antes)
                 salida = {"carta": carta.id}
                 self._log_evento("recomendar_jugada", datos, salida)
@@ -137,7 +139,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._responder(200, salida)
                 Handler._pendiente_nuevo_log = True  # próximo endpoint → archivo nuevo
             else:
-                self._responder(404, {"error": f"ruta desconocida: {self.path}"})
+                self._responder(
+                    404, {"error": f"ruta desconocida: {self.path}"})
         except Exception as e:
             # Sin esto, una excepción (p.ej. "Cannot choose from an empty sequence" cuando el
             # bridge pide una jugada con la mano ya vacía) no deja NINGÚN rastro en el JSONL --
@@ -146,26 +149,32 @@ class Handler(BaseHTTPRequestHandler):
             # petición nunca había llegado. Envuelto en su propio try: si el estado también está
             # roto, preferimos perder la línea de log a perder la respuesta HTTP.
             try:
-                self._log_evento(f"error:{self.path}", locals().get("datos", {}), {"error": str(e)})
+                self._log_evento(f"error:{self.path}", locals().get(
+                    "datos", {}), {"error": str(e)})
             except Exception:
                 pass
             self._responder(400, {"error": str(e)})
 
     def do_GET(self):
         if self.path == "/salud":
-            self._responder(200, {"ok": True, "obs_dim": self.recomendador.obs_dim})
+            self._responder(
+                200, {"ok": True, "obs_dim": self.recomendador.obs_dim})
         else:
-            self._responder(404, {"error": "usa POST para los endpoints de juego"})
+            self._responder(
+                404, {"error": "usa POST para los endpoints de juego"})
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description="Servidor de inferencia para el puente SFS2X")
-    p.add_argument("--modelo", required=True, help="Ruta al checkpoint (igual que recomendador.py --modelo)")
-    p.add_argument("--asiento", type=int, default=0, help="Asiento (0-3) del agente en la mesa")
+    p = argparse.ArgumentParser(
+        description="Servidor de inferencia para el puente SFS2X")
+    p.add_argument("--modelo", required=True,
+                   help="Ruta al checkpoint (igual que recomendador.py --modelo)")
+    p.add_argument("--asiento", type=int, default=0,
+                   help="Asiento (0-3) del agente en la mesa")
     p.add_argument("--puerto", type=int, default=8765)
     p.add_argument("--log", default="",
-                    help="Ruta al JSONL de log. Si se omite, se genera "
-                         "logs/servidor_inferencia_YYYYMMDD_HHMMSS.jsonl automáticamente")
+                   help="Ruta al JSONL de log. Si se omite, se genera "
+                   "logs/servidor_inferencia_YYYYMMDD_HHMMSS.jsonl automáticamente")
     args = p.parse_args()
 
     if not args.log:
