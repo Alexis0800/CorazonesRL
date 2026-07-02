@@ -33,8 +33,6 @@ ambos no importa, son estados independientes.
 reiniciar el proceso.
 """
 from __future__ import annotations
-from scripts.recomendador import Recomendador
-from src.dominio.carta import Carta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from datetime import datetime
 import json
@@ -45,6 +43,9 @@ import sys as _sys
 from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parents[1]))
 # --- fin bootstrap ---
+
+from scripts.recomendador import Recomendador
+from src.dominio.carta import Carta
 
 
 _LOOKUP_POR_ID = {c.id: c for c in Carta._TODAS}
