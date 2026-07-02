@@ -148,11 +148,14 @@ class Recomendador:
         for c in self.mano:
             jugadas.add(c.id)
         m.jugadores[self.me].mano = list(self.mano)
-        # Repartir las cartas desconocidas entre los rivales (estimación).
+        # Repartir las cartas desconocidas entre los rivales (estimación),
+        # respetando los vacíos ya conocidos (mismo patrón que
+        # ObservacionBuilder._calcular_prob_q_picas).
         desconocidas = [c for c in Carta._TODAS if c.id not in jugadas]
         otros = [i for i in range(4) if i != self.me]
         for k, c in enumerate(desconocidas):
-            m.jugadores[otros[k % 3]].mano.append(c)
+            validos = [o for o in otros if c.palo not in self.vacios[o]] or otros
+            m.jugadores[validos[k % len(validos)]].mano.append(c)
         m.mesa = list(mesa)
         m.palo_de_salida = mesa[0][1].palo if mesa else None
         m.corazones_rotos = self.corazones_rotos
@@ -224,6 +227,19 @@ class Recomendador:
                 self.mano.remove(c)
         self.cementerio[ganador].extend([c for _, c in jugadas])
         self.numero_baza += 1
+
+    # ---- snapshot para logging/depuración (comparar vs estado del bridge) ----
+    def estado_actual(self) -> dict:
+        return {
+            "me": self.me,
+            "scores": list(self.scores),
+            "mano": sorted(c.id for c in self.mano),
+            "cementerio": {i: sorted(c.id for c in cs) for i, cs in self.cementerio.items()},
+            "vacios": {i: sorted(v) for i, v in enumerate(self.vacios)},
+            "corazones_rotos": self.corazones_rotos,
+            "numero_baza": self.numero_baza,
+            "dama_picas_en": self.dama_picas_en,
+        }
 
 
 # ───────────────────────── interfaz interactiva ─────────────────────────

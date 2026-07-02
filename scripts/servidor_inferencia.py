@@ -16,7 +16,13 @@ Endpoints (todos POST, cuerpo y respuesta JSON):
     /recomendar_pase  {"direccion": "izquierda|derecha|frente|sin"} -> {"cartas": [id, id, id]}
     /recomendar_jugada {"mesa_antes": [[asiento, cartaId], ...]}    -> {"carta": id}
     /registrar_baza   {"jugadas": [[asiento, cartaId], ...], "ganador": asiento} -> {"ok": true}
+    /terminar_partida (sin cuerpo)                                  -> {"ok": true}
     /salud            (cualquier método)                           -> {"ok": true, "obs_dim": N}
+
+Cada llamada se registra en `--log` (JSONL) con la entrada recibida del bridge
+y el estado que el modelo cree tener (mano/cementerio/marcador), para poder
+comparar ambos lados si se desincronizan. `/terminar_partida` reinicia el
+marcador y el estado de mano sin tener que reiniciar el proceso.
 """
 from __future__ import annotations
 
@@ -28,6 +34,7 @@ _sys.path.insert(0, str(_Path(__file__).resolve().parents[1]))
 
 import argparse
 import json
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from src.dominio.carta import Carta
@@ -42,6 +49,7 @@ def _carta(id_: int) -> Carta:
 
 class Handler(BaseHTTPRequestHandler):
     recomendador: Recomendador  # inyectado por main()
+    log_path: _Path  # inyectado por main()
 
     def log_message(self, fmt, *args):
         print("[servidor_inferencia]", fmt % args)
@@ -59,24 +67,49 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(cuerpo)
 
+    def _log_evento(self, evento: str, entrada: dict, salida: dict):
+        linea = {
+            "ts": datetime.now().isoformat(timespec="seconds"),
+            "evento": evento,
+            "entrada": entrada,
+            "salida": salida,
+            "estado": self.recomendador.estado_actual(),
+        }
+        with open(self.log_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(linea, ensure_ascii=False) + "\n")
+
     def do_POST(self):
         try:
             datos = self._leer_json()
             r = self.recomendador
             if self.path == "/reset_mano":
                 r.reset_mano([_carta(i) for i in datos["cartas"]])
-                self._responder(200, {"ok": True})
+                salida = {"ok": True}
+                self._log_evento("reset_mano", datos, salida)
+                self._responder(200, salida)
             elif self.path == "/recomendar_pase":
                 cartas = r.recomendar_pase(datos["direccion"])
-                self._responder(200, {"cartas": [c.id for c in cartas]})
+                salida = {"cartas": [c.id for c in cartas]}
+                self._log_evento("recomendar_pase", datos, salida)
+                self._responder(200, salida)
             elif self.path == "/recomendar_jugada":
                 mesa_antes = [(idx, _carta(cid)) for idx, cid in datos.get("mesa_antes", [])]
                 carta = r.recomendar_jugada(mesa_antes)
-                self._responder(200, {"carta": carta.id})
+                salida = {"carta": carta.id}
+                self._log_evento("recomendar_jugada", datos, salida)
+                self._responder(200, salida)
             elif self.path == "/registrar_baza":
                 jugadas = [(idx, _carta(cid)) for idx, cid in datos["jugadas"]]
                 r.registrar_baza(jugadas, datos["ganador"])
-                self._responder(200, {"ok": True})
+                salida = {"ok": True}
+                self._log_evento("registrar_baza", datos, salida)
+                self._responder(200, salida)
+            elif self.path == "/terminar_partida":
+                r.scores = [0, 0, 0, 0]
+                r.reset_mano([])
+                salida = {"ok": True}
+                self._log_evento("terminar_partida", datos, salida)
+                self._responder(200, salida)
             else:
                 self._responder(404, {"error": f"ruta desconocida: {self.path}"})
         except Exception as e:
@@ -94,12 +127,16 @@ def main() -> None:
     p.add_argument("--modelo", required=True, help="Ruta al checkpoint (igual que recomendador.py --modelo)")
     p.add_argument("--asiento", type=int, default=0, help="Asiento (0-3) del agente en la mesa")
     p.add_argument("--puerto", type=int, default=8765)
+    p.add_argument("--log", default="logs/servidor_inferencia.jsonl",
+                    help="Ruta al JSONL donde se registra cada llamada (entrada + estado del modelo)")
     args = p.parse_args()
 
     print(f"Cargando modelo desde {args.modelo} (asiento {args.asiento})...")
     Handler.recomendador = Recomendador(args.modelo, mi_idx=args.asiento)
+    Handler.log_path = _Path(args.log)
+    Handler.log_path.parent.mkdir(parents=True, exist_ok=True)
     print(f"Modelo cargado (obs_dim={Handler.recomendador.obs_dim}). "
-          f"Escuchando en http://127.0.0.1:{args.puerto}")
+          f"Escuchando en http://127.0.0.1:{args.puerto} (log: {Handler.log_path})")
 
     server = ThreadingHTTPServer(("127.0.0.1", args.puerto), Handler)
     try:
