@@ -352,12 +352,16 @@ def leer_mano(img: np.ndarray, regiones: Regiones, reconocedor,
                                  umbral_mitad, umbral_carta)]
 
 
-def leer_mesa(img: np.ndarray, regiones: Regiones, reconocedor
-              ) -> Dict[str, Optional[int]]:
+def leer_mesa(img: np.ndarray, regiones: Regiones, reconocedor,
+              escalas: Optional[Tuple] = None) -> Dict[str, Optional[int]]:
     """Lee la carta de cada posicion de la mesa (en cruz). Devuelve
     {posicion_pantalla: carta_id o None}. `reconocedor` es un
     `vision_cartas.ReconocedorPlantilla` (matchTemplate contra los naipes
-    completos del sprite de la APK)."""
+    completos del sprite de la APK).
+
+    `escalas` restringe las escalas de `matchTemplate` (las cartas de la mesa se
+    ven enteras y a tamano casi fijo, asi que un juego estrecho ~1.0 acelera la
+    lectura sin perder acierto; None = todas)."""
     from src.captura.modelos import str_a_carta_id
     from src.captura.vision_cartas import detectar_cartas
 
@@ -370,8 +374,14 @@ def leer_mesa(img: np.ndarray, regiones: Regiones, reconocedor
             continue
         cx, cy, cw, ch = max(cartas, key=lambda b: b[2] * b[3])
         card = roi[cy:cy + ch, cx:cx + cw]
-        score, name, _ = reconocedor.buscar_carta(card, ch)
+        score, name, _ = reconocedor.buscar_carta(card, ch, escalas=escalas)
         if name is not None and score >= reconocedor.umbral:
+            # Refinar el PALO por el glifo de la esquina: la carta entera no
+            # distingue ♣↔♠ ni ♥↔♦ (pip diminuto), pero el glifo sí.
+            refinar = getattr(reconocedor, "refinar_palo", None)
+            if refinar is not None:
+                _, palo = refinar(card, ch, name)
+                name = name[:-1] + palo
             out[pos] = str_a_carta_id(name)
         else:
             out[pos] = None

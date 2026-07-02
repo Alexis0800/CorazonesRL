@@ -76,6 +76,36 @@ _FRANJA_FRAC = 0.08
 _GAP_FUSION_FRAC = 0.10
 _MARGEN_FRAC = 0.04      # margen a la izquierda del glifo hasta el borde de la carta
 _ANCHO_CARTA_FRAC = 0.774  # ancho de carta / alto (sprite APK 168x217)
+# Paso minimo del abanico como fraccion del ancho de carta. Las cartas ROJAS
+# muestran tambien el pip SUPERIOR del cuerpo en la franja (a ~0.4*cardw del
+# rango), que el detector de runs confunde con una carta extra. El paso real de
+# cartas es >= esto, asi que la autocorrelacion lo busca por encima de ese pip.
+_PASO_MIN_FRAC = 0.5
+
+
+def _contar_cartas_periodo(col: np.ndarray, x0: int, cardw: int, fw: int
+                           ) -> int:
+    """Numero de cartas de una fila a partir del PASO CONSTANTE del abanico.
+
+    La app reparte las cartas con un paso uniforme y deja la ULTIMA carta entera
+    (pegada al borde derecho). El paso se obtiene por autocorrelacion de la
+    proyeccion de tinta `col` (robusto al pip del cuerpo de las cartas rojas, que
+    crea un falso periodo a ~mitad de carta, descartado por `_PASO_MIN_FRAC`).
+    Con el paso `d`: n = round((fw - cardw - x0) / d) + 1.
+    """
+    c = col.astype(np.float64)
+    c = c - c.mean()
+    if c.shape[0] < 2 or not np.any(c):
+        return 1
+    ac = np.correlate(c, c, mode="full")[c.shape[0] - 1:]
+    lo = max(1, int(_PASO_MIN_FRAC * cardw))
+    hi = min(cardw, ac.shape[0] - 1)
+    if hi <= lo:
+        return 1
+    d = lo + int(np.argmax(ac[lo:hi]))
+    if d <= 0:
+        return 1
+    return max(1, int(round((fw - cardw - x0) / d)) + 1)
 
 
 def localizar_cartas(
@@ -120,14 +150,28 @@ def localizar_cartas(
             else:
                 fusion.append(list(r))
         grupos = [g for g in fusion if g[1] - g[0] >= max(6, int(0.05 * fh))]
+        if not grupos:
+            continue
         margen = int(_MARGEN_FRAC * fh)
         ancho = int(_ANCHO_CARTA_FRAC * fh)
-        for i, (x0, _x1) in enumerate(grupos):
-            cx = max(0, fx + x0 - margen)
+        # El conteo por grupos SOBRE-segmenta las cartas rojas (cada una expone el
+        # pip superior del cuerpo en la franja -> un grupo extra). El paso del
+        # abanico es CONSTANTE, asi que se cuenta por periodo y se reconstruye una
+        # rejilla uniforme: primera carta en el primer grupo, ultima pegada al
+        # borde derecho (entera). Asi 6 corazones dan 6 cajas, no 8.
+        x0 = grupos[0][0]
+        n = _contar_cartas_periodo(col, x0, ancho, fw)
+        x_ult = fw - ancho   # borde izq. de la ultima carta (entera, flush dcha.)
+        if n <= 1 or x_ult <= x0:
+            xs = [x0]
+        else:
+            xs = [int(round(x0 + (x_ult - x0) * i / (n - 1))) for i in range(n)]
+        for i, gx0 in enumerate(xs):
+            cx = max(0, fx + gx0 - margen)
             # ancho: hasta la siguiente carta (solapada) o, si es la ultima, el
             # ancho completo de naipe (acotado al borde del blob).
-            if i + 1 < len(grupos):
-                cw = (fx + grupos[i + 1][0] - margen) - cx
+            if i + 1 < len(xs):
+                cw = (fx + xs[i + 1] - margen) - cx
             else:
                 cw = ancho
             cw = min(cw, fx + fw - cx)
@@ -304,6 +348,61 @@ class ReconocedorPlantilla:
         return self._buscar_filtrado(win_bgr, alto_carta,
                                      _TPL_MITAD_WF, _TPL_MITAD_HF,
                                      palo_suffix=palo, escalas=escalas)
+
+    # Caja (fracciones x0,x1,y0,y1) del glifo de palo en la esquina sup-izq.
+    # Ahí ♣ vs ♠ (y ♥ vs ♦) SÍ se distinguen; la carta entera no (el pip es
+    # diminuto frente al rango y la correlacion los empata).
+    _PALO_BOX = (0.02, 0.26, 0.18, 0.44)
+
+    def refinar_palo(self, win_bgr: np.ndarray, alto_carta: int,
+                     name_tentativo: str) -> Tuple[float, str]:
+        """Dado un nombre tentativo (rango+palo) de `buscar_carta`, decide el PALO
+        correcto matcheando SOLO el glifo de la esquina contra las plantillas del
+        MISMO rango y MISMO color. Corrige las confusiones ♣↔♠ y ♥↔♦ que la carta
+        entera no resuelve. Devuelve (score, palo). Usar en cartas COMPLETAS
+        (mesa); en la mano el palo ya viene del bloque."""
+        import cv2
+
+        self._cargar()
+        rango = name_tentativo[:-1]
+        rojo = _PALO_ROJO.get(name_tentativo[-1], False)
+        por_nombre = {n: t for n, t in self._tpl}
+        # solo palos del MISMO color con plantilla para este rango
+        candidatos = [p for p in "TDPC"
+                      if (rango + p) in por_nombre
+                      and _PALO_ROJO.get(p, False) == rojo]
+        win = cv2.cvtColor(win_bgr, cv2.COLOR_BGR2GRAY)
+        sub = self._sub_frac(win, self._PALO_BOX)
+        mejor: Tuple[float, str] = (-2.0, name_tentativo[-1])
+        for palo in candidatos:
+            tsub = self._sub_frac(por_nombre[rango + palo], self._PALO_BOX)
+            score = self._match_multiescala(sub, tsub)
+            if score > mejor[0]:
+                mejor = (score, palo)
+        return mejor
+
+    @staticmethod
+    def _sub_frac(im: np.ndarray, box: Tuple[float, float, float, float]
+                  ) -> np.ndarray:
+        x0, x1, y0, y1 = box
+        H, W = im.shape[:2]
+        return im[int(y0 * H):int(y1 * H), int(x0 * W):int(x1 * W)]
+
+    @staticmethod
+    def _match_multiescala(win: np.ndarray, tpl: np.ndarray,
+                           escalas: Optional[Tuple] = None) -> float:
+        import cv2
+
+        best = -2.0
+        for esc in (escalas or _ESCALAS):
+            th = max(4, int(win.shape[0] * esc))
+            tw = max(4, int(tpl.shape[1] * th / max(1, tpl.shape[0])))
+            tr = cv2.resize(tpl, (tw, th))
+            if tr.shape[0] > win.shape[0] or tr.shape[1] > win.shape[1]:
+                continue
+            best = max(best, float(
+                cv2.matchTemplate(win, tr, cv2.TM_CCOEFF_NORMED).max()))
+        return best
 
 
 __all__ = [

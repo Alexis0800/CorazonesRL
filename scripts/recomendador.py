@@ -189,6 +189,26 @@ class Recomendador:
         carta = self.snap(m, self.me, legales, obs_vec=obs)
         return carta if carta in legales else legales[0]
 
+    def recomendar_jugada_entre(self, mesa_antes: List,
+                                candidatas: List[Carta]) -> Carta:
+        """Como `recomendar_jugada`, pero RESTRINGE la elección a `candidatas`
+        (las cartas que la app deja jugar — detectadas por brillo en pantalla).
+
+        La legalidad real la dicta la app, no la mesa reconstruida (que puede
+        leerse mal): intersecta con las legales del motor solo si la intersección
+        no queda vacía; si no, confía en `candidatas`. Así nunca propone una carta
+        que la app no permite."""
+        if not candidatas:
+            return self.recomendar_jugada(mesa_antes)
+        m = self._motor(mesa=mesa_antes)
+        legales = m.obtener_jugadas_legales(self.me)
+        permitidas = [c for c in candidatas if c in legales] or list(candidatas)
+        if len(permitidas) == 1:
+            return permitidas[0]
+        obs = self._obs(m)
+        carta = self.snap(m, self.me, permitidas, obs_vec=obs)
+        return carta if carta in permitidas else permitidas[0]
+
     # ---- actualización de estado tras una baza completa ----
     def registrar_baza(self, jugadas: List, ganador: int):
         """jugadas = [(idx, carta), ...] en orden; ganador = idx que ganó."""

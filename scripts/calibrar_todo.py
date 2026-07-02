@@ -250,7 +250,7 @@ def main():
     p = argparse.ArgumentParser(
         description="Calibrador visual de TODAS las regiones")
     p.add_argument(
-        "--frame", default="calibracion/captura1.png")
+        "--frame", default="calibracion/captura.png")
     p.add_argument("--max-height", type=int, default=900)
     args = p.parse_args()
 

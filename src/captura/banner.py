@@ -44,6 +44,12 @@ _BANNER_SEMANTICA: Dict[str, Tuple[str, Optional[str]]] = {
     # el texto del banner.  Se usan con `BannerClasificadorTexto`.
     "turno_rival": ("turno", None),
     "baza_rival": ("baza", None),
+    # ── «se llevará todo el resto» (remate): un jugador se lleva TODAS las
+    # bazas que quedan; la mano termina sin más jugadas. `remate_agente` = lo
+    # gano yo ("Tú …"), `remate_rival` = lo gana otro ("<nombre> …"). En ambos
+    # casos la categoría es "remate" → el auto-juego cierra la mano con gracia. ──
+    "remate_agente": ("remate", "abajo"),
+    "remate_rival": ("remate", None),
 }
 
 
@@ -114,6 +120,7 @@ class BannerClasificador(IBannerClasificador):
         self.dir = Path(dir_plantillas)
         self.umbral = umbral
         self._tpl: List[Tuple[str, np.ndarray]] = []  # (tag, firma)
+        self._aspect: Optional[float] = None  # ancho/alto de las plantillas
 
     # ── carga ──
 
@@ -133,6 +140,8 @@ class BannerClasificador(IBannerClasificador):
             img = cv2.imread(str(f), cv2.IMREAD_COLOR)
             if img is not None:
                 self._tpl.append((tag, firma(img)))
+                if self._aspect is None and img.shape[0] > 0:
+                    self._aspect = img.shape[1] / img.shape[0]
         if not self._tpl:
             raise FileNotFoundError(f"Biblioteca de banners vacia: {self.dir}")
 
@@ -156,16 +165,45 @@ class BannerClasificador(IBannerClasificador):
 
     def clasificar_con_regiones(self, img: np.ndarray, regiones
                                 ) -> ResultadoBanner:
-        """Recorta el banner del screenshot usando `regiones.banner` y clasifica."""
+        """Recorta el banner del screenshot usando `regiones.banner` y clasifica.
+
+        Si la región es MÁS ALTA que un banner (porque el banner se mueve en
+        vertical según cuántas filas tenga la mano), busca el banner DESLIZANDO
+        una ventana del alto esperado por la banda y se queda con el mejor match."""
         roi = regiones.recortar(img, regiones.banner)
-        return self.clasificar(roi)
+        res, _ = self._clasificar_banda(roi)
+        return res
 
     def clasificar_verbose_con_regiones(self, img: np.ndarray, regiones
                                         ) -> Tuple[ResultadoBanner,
                                                    List[Tuple[str, float]]]:
         """Como `clasificar_con_regiones`, pero devuelve top-5."""
         roi = regiones.recortar(img, regiones.banner)
-        return self.clasificar_verbose(roi)
+        return self._clasificar_banda(roi)
+
+    def _clasificar_banda(self, roi: np.ndarray
+                          ) -> Tuple[ResultadoBanner, List[Tuple[str, float]]]:
+        """Clasifica una banda que puede ser más alta que el banner: desliza una
+        ventana del alto esperado (ancho de la banda / aspect de las plantillas)
+        y devuelve el resultado del mejor offset vertical. Si la banda no es más
+        alta que un banner, clasifica directo (1 ventana)."""
+        self._cargar()
+        H, W = roi.shape[:2]
+        aspect = self._aspect or 7.9
+        win_h = int(round(W / aspect))
+        if win_h <= 0 or H <= int(win_h * 1.15):
+            return self._clasificar_impl(roi)   # banda ≈ banner: ventana única
+        paso = max(4, win_h // 4)
+        offsets = list(range(0, H - win_h + 1, paso))
+        if offsets[-1] != H - win_h:
+            offsets.append(H - win_h)
+        mejor_res: Optional[ResultadoBanner] = None
+        mejor_dist: List[Tuple[str, float]] = []
+        for y in offsets:
+            res, dist = self._clasificar_impl(roi[y:y + win_h])
+            if mejor_res is None or res.distancia < mejor_res.distancia:
+                mejor_res, mejor_dist = res, dist
+        return mejor_res, mejor_dist
 
     def _clasificar_impl(self, roi: np.ndarray
                          ) -> Tuple[ResultadoBanner, List[Tuple[str, float]]]:

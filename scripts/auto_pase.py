@@ -39,7 +39,12 @@ _DIR_BANNER = {"izquierda": "izquierda",
 
 
 def _construir_recomendar(modelo: str):
-    """Devuelve un callback (mano_ids, direccion) -> [3 ids] usando el modelo."""
+    """Construye el `Recomendador` y devuelve `(recomendar, rec, estado)`.
+
+    - `recomendar(mano_ids, direccion) -> [3 ids]`: callback para el pase.
+    - `rec`: la instancia del `Recomendador` (para reusar su estado al jugar).
+    - `estado`: dict que guarda la mano inicial / dirección leídas en el pase
+      (las necesita el auto-juego para aplicar el pase y arrancar las bazas)."""
     from src.dominio.carta import Carta
     from scripts.recomendador import Recomendador
 
@@ -48,12 +53,16 @@ def _construir_recomendar(modelo: str):
         raise SystemExit(
             "El modelo no tiene fase de pase (obs<228). Usa un v12+/v13.")
 
+    estado: dict = {"mano_inicial": None, "direccion": None}
+
     def recomendar(mano_ids: List[int], direccion: str) -> List[int]:
+        estado["mano_inicial"] = list(mano_ids)
+        estado["direccion"] = direccion
         rec.reset_mano([Carta._TODAS[i] for i in mano_ids])
         cartas = rec.recomendar_pase(direccion)
         return [c.id for c in cartas]
 
-    return recomendar
+    return recomendar, rec, estado
 
 
 class _ClienteSeco:
@@ -86,6 +95,15 @@ def main() -> None:
                         "pero NO toca el botón de confirmar. "
                         "Útil para probar la selección sin comprometerse. "
                         "(Requiere --serial, usa ADB real.)")
+    p.add_argument("--jugar", action="store_true",
+                   help="Tras confirmar el pase y leer las recibidas, descarta el "
+                        "overlay (tap al centro) y AUTO-JUEGA las 13 bazas de la "
+                        "mano tocando las cartas que recomienda el modelo. "
+                        "(Requiere ADB real e incompatible con --sin-confirmar.)")
+    p.add_argument("--confirmar-jugada", action="store_true",
+                   help="Si la app exige confirmar también al jugar cada carta "
+                        "de la baza (no solo en el pase), toca el botón de "
+                        "confirmar tras tocar la carta. Por defecto NO.")
     p.add_argument(
         "--regiones", default="calibracion/hearts_app/regiones.json")
     p.add_argument("--banners", default="calibracion/hearts_app/banners")
@@ -122,7 +140,12 @@ def main() -> None:
     umbral_banner = args.umbral_banner or 1.5
     clf = BannerClasificador(args.banners, umbral=umbral_banner)
     rec_mano = ReconocedorPlantilla(args.completas)
-    recomendar = _construir_recomendar(args.modelo)
+    recomendar, recomendador, estado_pase = _construir_recomendar(args.modelo)
+
+    if args.jugar and args.sin_confirmar:
+        raise SystemExit("--jugar requiere confirmar el pase (quita --sin-confirmar).")
+    if args.jugar and (args.seco or args.frame):
+        raise SystemExit("--jugar requiere ADB real (--serial), no --seco/--frame.")
 
     if args.seco or args.frame:
         if not args.frame:
@@ -151,11 +174,47 @@ def main() -> None:
         plantilla_confirmar=_confirmar_tpl,
     )
     res = ctrl.ejecutar(confirmar=not args.sin_confirmar)
-    print("\n== RESULTADO ==")
+    print("\n== RESULTADO PASE ==")
     print(f"  dirección : {res.direccion}")
     print(f"  confirmado: {res.confirmado}")
     if res.nota:
         print(f"  nota      : {res.nota}")
+
+    # ── auto-juego de las bazas (opcional) ──
+    if args.jugar:
+        from src.dominio.carta import Carta
+        from src.captura.auto_juego import (ConfigAutoJuego, ControladorBazas,
+                                            continuar_tras_recibir)
+
+        if not res.confirmado or len(res.recibidas) < 3:
+            raise SystemExit(
+                "No puedo auto-jugar: el pase no se confirmó o no leí 3 recibidas. "
+                f"(confirmado={res.confirmado}, recibidas={len(res.recibidas)})")
+
+        # ── aplicar el pase al estado del Recomendador: (mano − pasadas) + recibidas ──
+        #    Dedup defensivo: el read del pase a veces deja un id repetido (lectura
+        #    de 14 posiciones acotada a 13); un duplicado corromperia la obs.
+        mano_inicial = estado_pase["mano_inicial"] or []
+        post_ids: List[int] = []
+        for i in [c for c in mano_inicial if c not in res.pasadas] + res.recibidas:
+            if i not in post_ids:
+                post_ids.append(i)
+        recomendador.reset_mano([Carta._TODAS[i] for i in post_ids])
+        from src.captura.modelos import carta_a_str as _cstr
+        print(f"\nMano tras el pase ({len(post_ids)} cartas): "
+              + " ".join(_cstr(i) for i in post_ids) + "  → auto-jugando bazas...")
+
+        # ── descartar el overlay de recibidas para arrancar la baza 1 ──
+        continuar_tras_recibir(cliente, log=print, debug_dir=args.debug)
+
+        cfg_juego = ConfigAutoJuego(debug_dir=args.debug,
+                                    confirmar_jugada=args.confirmar_jugada)
+        ctrl_bazas = ControladorBazas(
+            cliente=cliente, regiones=reg, banner_clf=clf,
+            reconocedor_mano=rec_mano, recomendador=recomendador,
+            config=cfg_juego, confirmar_jugada_fn=ctrl._confirmar,
+        )
+        ctrl_bazas.jugar_mano()
 
 
 if __name__ == "__main__":

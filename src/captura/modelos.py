@@ -88,10 +88,15 @@ class RegistroPartida:
     partida_id: str
     timestamp: str
     asiento_agente: int                    # 0-3
-    fuente: str                            # "manual" | "adb:<app>" | "test"
+    fuente: str                            # "manual" | "adb:<app>" | "test" | "sfs:<app>"
     manos: List[RegistroMano] = field(default_factory=list)
     marcador_final: List[int] = field(default_factory=list)   # 4
     ranking_final: List[int] = field(default_factory=list)     # asientos peor->mejor
+    # --- Contexto de habilidad/rating (solo disponible vía el puente SFS2X;
+    # None en capturas antiguas o de fuentes que no lo exponen) ---
+    rating_agente_inicio: Optional[float] = None                       # rating propio ANTES de esta partida
+    rating_oponentes_inicio: List[Optional[float]] = field(default_factory=list)  # alineado por asiento
+    rating_agente_fin: Optional[float] = None                          # rating propio DESPUÉS (si se observó)
 
     # --- (de)serialización ---
     def to_dict(self) -> dict:
@@ -121,6 +126,9 @@ class RegistroPartida:
             manos=manos,
             marcador_final=list(d.get("marcador_final", [])),
             ranking_final=list(d.get("ranking_final", [])),
+            rating_agente_inicio=d.get("rating_agente_inicio"),
+            rating_oponentes_inicio=list(d.get("rating_oponentes_inicio", [])),
+            rating_agente_fin=d.get("rating_agente_fin"),
         )
 
 
