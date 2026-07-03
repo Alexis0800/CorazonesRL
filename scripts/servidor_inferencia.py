@@ -11,32 +11,42 @@ Habla en `carta.id` (0-51) en toda la API, igual que el resto del proyecto
 Uso:
     python scripts/servidor_inferencia.py --modelo models/produccion --asiento 0 --puerto 8765
 
-Endpoints (todos POST, cuerpo y respuesta JSON):
+Endpoints (todos POST salvo aclaración, cuerpo y respuesta JSON):
     /reset_mano       {"cartas": [id, ...]}                        -> {"ok": true}
     /recomendar_pase  {"direccion": "izquierda|derecha|frente|sin"} -> {"cartas": [id, id, id]}
     /recomendar_jugada {"mesa_antes": [[asiento, cartaId], ...]}    -> {"carta": id}
-    /registrar_baza   {"jugadas": [[asiento, cartaId], ...], "ganador": asiento} -> {"ok": true}
-    /registrar_puntos_mano {"puntos": [p0, p1, p2, p3]}             -> {"ok": true, "scores": [...]}
-    /terminar_partida (sin cuerpo)                                  -> {"ok": true}
-    /salud            (cualquier método)                           -> {"ok": true, "obs_dim": N}
+    /registrar_baza   {"jugadas": [[asiento, cartaId], ...], "ganador": asiento}
+        -> {"ok": true} normalmente; si esa era la 13ª baza de la mano, además
+           {"puntos_mano": [p0,p1,p2,p3], "scores": [s0,s1,s2,s3]} (calculados
+           aquí desde las bazas ya registradas — el bridge NO calcula puntos).
+    /registrar_resto  {"ganador": asiento, "cartas_restantes": [id, ...]}
+        -> igual que /registrar_baza al cerrar mano: {"ok": true, "puntos_mano": [...], "scores": [...]}.
+           Usar cuando alguien "se lleva el resto": mandar TODAS las cartas
+           que quedaban sin jugar en cualquier mano (reveladas por la app),
+           no solo las del ganador.
+    /terminar_partida (sin cuerpo) -> {"ok": true, "scores_finales": [...]} (marcador previo al reset)
+    /puntos           (GET)        -> {"scores": [...], "ultima_mano_puntos": [...] o null}
+    /salud            (GET)        -> {"ok": true, "obs_dim": N}
 
 Cada llamada se registra en `--log` (JSONL) con la entrada recibida del bridge
-y el estado que el modelo cree tener (mano/cementerio/marcador), para poder
-comparar ambos lados si se desincronizan. `/registrar_puntos_mano` acumula el
-puntaje de la mano que acaba de terminar (incluida la de alguien "llevándose
-el resto") al marcador persistente — sin esto el modelo nunca se entera del
-marcador real y juega cada mano como si la partida siguiera 0-0-0-0. Llamar
-justo cuando la mano termina (13 bazas o remate del resto), antes o después
-de mandar las cartas de la mano siguiente a `/reset_mano` — el orden entre
-ambos no importa, son estados independientes.
-`/terminar_partida` reinicia el marcador y el estado de mano sin tener que
-reiniciar el proceso.
+y el estado que el modelo cree tener (mano/cementerio/marcador/última mano),
+para poder comparar ambos lados si se desincronizan.
+
+Los puntos de cada mano se calculan SIEMPRE del lado de Python, reusando
+`MotorCorazones.calcular_puntuacion_mano()` sobre las bazas que el bridge ya
+fue mandando trick a trick — el bridge solo reporta jugadas y quién ganó cada
+baza (o las cartas restantes en una concesión), nunca hace aritmética de
+puntaje. Esto evita que un bug de lectura de pantalla del lado del bridge
+(p.ej. un corazón mal contado en un remate del resto) corrompa el marcador
+silenciosamente, que es justo lo que se vio en logs reales (manos que sumaban
+25 en vez de 26).
 """
 from __future__ import annotations
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from datetime import datetime
 import json
 import argparse
+import threading
 
 # --- bootstrap path: permite `python scripts/<x>.py` desde la raiz del repo ---
 import sys as _sys
@@ -59,6 +69,10 @@ class Handler(BaseHTTPRequestHandler):
     recomendador: Recomendador  # inyectado por main()
     log_path: _Path  # inyectado por main()
     _pendiente_nuevo_log: bool = False  # classvar: rotar log en el próximo endpoint
+    # ThreadingHTTPServer atiende cada request en su propio hilo; Recomendador
+    # (mano/marcador/cementerio) y el archivo de log son estado compartido mutable,
+    # así que hay que serializar el manejo de requests para evitar carreras.
+    _lock = threading.Lock()
 
     def log_message(self, fmt, *args):
         print("[servidor_inferencia]", fmt % args)
@@ -101,6 +115,10 @@ class Handler(BaseHTTPRequestHandler):
             f.write(json.dumps(linea, ensure_ascii=False) + "\n")
 
     def do_POST(self):
+        with Handler._lock:
+            self._manejar_post()
+
+    def _manejar_post(self):
         try:
             datos = self._leer_json()
             r = self.recomendador
@@ -123,19 +141,21 @@ class Handler(BaseHTTPRequestHandler):
                 self._responder(200, salida)
             elif self.path == "/registrar_baza":
                 jugadas = [(idx, _carta(cid)) for idx, cid in datos["jugadas"]]
-                r.registrar_baza(jugadas, datos["ganador"])
-                salida = {"ok": True}
+                resultado = r.registrar_baza(jugadas, datos["ganador"])
+                salida = {"ok": True, **(resultado or {})}
                 self._log_evento("registrar_baza", datos, salida)
                 self._responder(200, salida)
-            elif self.path == "/registrar_puntos_mano":
-                r.scores = [r.scores[i] + datos["puntos"][i] for i in range(4)]
-                salida = {"ok": True, "scores": list(r.scores)}
-                self._log_evento("registrar_puntos_mano", datos, salida)
+            elif self.path == "/registrar_resto":
+                cartas_restantes = [_carta(i) for i in datos["cartas_restantes"]]
+                resultado = r.registrar_resto(datos["ganador"], cartas_restantes)
+                salida = {"ok": True, **resultado}
+                self._log_evento("registrar_resto", datos, salida)
                 self._responder(200, salida)
             elif self.path == "/terminar_partida":
+                scores_finales = list(r.scores)
                 r.scores = [0, 0, 0, 0]
                 r.reset_mano([])
-                salida = {"ok": True}
+                salida = {"ok": True, "scores_finales": scores_finales}
                 self._log_evento("terminar_partida", datos, salida)
                 self._responder(200, salida)
                 Handler._pendiente_nuevo_log = True  # próximo endpoint → archivo nuevo
@@ -160,6 +180,12 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/salud":
             self._responder(
                 200, {"ok": True, "obs_dim": self.recomendador.obs_dim})
+        elif self.path == "/puntos":
+            r = self.recomendador
+            self._responder(200, {
+                "scores": list(r.scores),
+                "ultima_mano_puntos": r.ultima_mano_puntos,
+            })
         else:
             self._responder(
                 404, {"error": "usa POST para los endpoints de juego"})

@@ -29,6 +29,23 @@ def test_detecta_error_y_suma_de_puntos_invalida(tmp_path, capsys):
     assert "puntos de mano suman 20" in salida
 
 
+def test_linea_corrupta_no_interrumpe_la_auditoria(tmp_path, capsys):
+    p = tmp_path / "servidor_inferencia_test.jsonl"
+    lineas = [
+        json.dumps({"evento": "reset_mano", "entrada": {"cartas": list(range(13))},
+                    "salida": {"ok": True}, "estado": {"scores": [0, 0, 0, 0]}}),
+        '{"a": 1}{"b": 2}',  # línea corrupta simulada (entrelazado de 2 hilos)
+        json.dumps({"evento": "registrar_puntos_mano", "entrada": {"puntos": [26, 0, 0, 0]},
+                    "salida": {"ok": True}, "estado": {"scores": [26, 0, 0, 0]}}),
+    ]
+    p.write_text("\n".join(lineas), encoding="utf-8")
+
+    _auditar_partida(p)
+    salida = capsys.readouterr().out
+    assert "línea 2 corrupta" in salida
+    assert "2 eventos, 1 corruptas" in salida
+
+
 def test_partida_limpia_no_reporta_advertencias(tmp_path, capsys):
     eventos = [
         {"evento": "reset_mano", "entrada": {"cartas": list(range(13))},

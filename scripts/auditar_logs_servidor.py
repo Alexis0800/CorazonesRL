@@ -21,8 +21,19 @@ except Exception:
 
 
 def _auditar_partida(path: Path) -> None:
-    lineas = [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
-    print(f"\n=== {path.name} ({len(lineas)} eventos) ===")
+    lineas = []
+    corruptas = []
+    for n, l in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        if not l.strip():
+            continue
+        try:
+            lineas.append(json.loads(l))
+        except json.JSONDecodeError:
+            corruptas.append(n)
+
+    print(f"\n=== {path.name} ({len(lineas)} eventos, {len(corruptas)} corruptas) ===")
+    for n in corruptas:
+        print(f"  ⚠ línea {n} corrupta (2 requests concurrentes escribiendo al log a la vez), se ignora")
 
     errores = [l for l in lineas if l["evento"].startswith("error:")]
     for e in errores:
@@ -47,7 +58,7 @@ def _auditar_partida(path: Path) -> None:
         orden = sorted(range(4), key=lambda i: scores[i])
         puesto_me = orden.index(0) + 1  # ajustar si tu asiento no es 0
         print(f"  manos jugadas: {n_manos}  |  marcador final: {scores}  |  puesto agente (asiento 0): {puesto_me}")
-    if not errores and n_manos:
+    if not errores and not corruptas and n_manos:
         print("  ✓ sin errores ni invariantes rotas")
 
 

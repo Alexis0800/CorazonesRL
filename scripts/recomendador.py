@@ -124,6 +124,7 @@ class Recomendador:
         self.builder = ObservacionBuilder(dim=self.obs_dim)
         self.me = mi_idx
         self.scores = [0, 0, 0, 0]
+        self.ultima_mano_puntos: Optional[List[int]] = None
         self.reset_mano([])
 
     def reset_mano(self, mi_mano: List[Carta]):
@@ -213,8 +214,13 @@ class Recomendador:
         return carta if carta in permitidas else permitidas[0]
 
     # ---- actualización de estado tras una baza completa ----
-    def registrar_baza(self, jugadas: List, ganador: int):
-        """jugadas = [(idx, carta), ...] en orden; ganador = idx que ganó."""
+    def registrar_baza(self, jugadas: List, ganador: int) -> Optional[dict]:
+        """jugadas = [(idx, carta), ...] en orden; ganador = idx que ganó.
+
+        Devuelve None salvo que esa baza haya cerrado la mano (la 13ª), en
+        cuyo caso devuelve {"puntos_mano": [...], "scores": [...]} — el
+        servidor calcula los puntos desde las bazas ya registradas (motor.py),
+        el bridge ya no necesita calcularlos ni mandarlos por separado."""
         palo_salida = jugadas[0][1].palo
         for idx, c in jugadas:
             if c.es_corazon:
@@ -227,12 +233,38 @@ class Recomendador:
                 self.mano.remove(c)
         self.cementerio[ganador].extend([c for _, c in jugadas])
         self.numero_baza += 1
+        if self.numero_baza > 13:
+            return self._finalizar_mano()
+        return None
+
+    def registrar_resto(self, ganador: int, cartas_restantes: List[Carta]) -> dict:
+        """Alguien "se lleva el resto": el bridge manda TODAS las cartas que
+        quedaban sin jugar en cualquier mano (las suyas y las de los rivales,
+        reveladas por la app), en vez de reproducir baza por baza. Cierra la
+        mano igual que registrar_baza, calculando los puntos desde el motor."""
+        for c in cartas_restantes:
+            if c.es_corazon:
+                self.corazones_rotos = True
+            if c.es_dama_de_picas:
+                self.dama_picas_en = ganador
+            if c in self.mano:
+                self.mano.remove(c)
+        self.cementerio[ganador].extend(cartas_restantes)
+        self.numero_baza = 14
+        return self._finalizar_mano()
+
+    def _finalizar_mano(self) -> dict:
+        puntos = self._motor(mesa=[]).calcular_puntuacion_mano()
+        self.scores = [self.scores[i] + puntos[i] for i in range(4)]
+        self.ultima_mano_puntos = puntos
+        return {"puntos_mano": puntos, "scores": list(self.scores)}
 
     # ---- snapshot para logging/depuración (comparar vs estado del bridge) ----
     def estado_actual(self) -> dict:
         return {
             "me": self.me,
             "scores": list(self.scores),
+            "ultima_mano_puntos": self.ultima_mano_puntos,
             "mano": sorted(c.id for c in self.mano),
             "cementerio": {i: sorted(c.id for c in cs) for i, cs in self.cementerio.items()},
             "vacios": {i: sorted(v) for i, v in enumerate(self.vacios)},
