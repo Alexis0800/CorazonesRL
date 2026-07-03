@@ -3,6 +3,7 @@
 import json
 import sys
 import threading
+import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -78,6 +79,29 @@ def test_registrar_resto_calcula_puntos_y_acumula_marcador(tmp_path):
         salida2 = _post(puerto, "/registrar_resto",
                          {"ganador": 1, "cartas_restantes": [c.id for c in cartas_restantes2]})
         assert salida2 == {"ok": True, "puntos_mano": [0, 1, 0, 0], "scores": [0, 1, 15, 0]}
+    finally:
+        server.shutdown()
+
+
+def test_registrar_resto_duplicado_no_duplica_puntos(tmp_path):
+    """Un reintento del bridge sobre una mano ya cerrada debe fallar (400),
+    no sumar los puntos otra vez al marcador."""
+    server, r = _servidor_sin_modelo(tmp_path)
+    try:
+        puerto = server.server_address[1]
+        cartas_restantes = parse_cartas("QP")  # 13 puntos
+        _post(puerto, "/registrar_resto",
+              {"ganador": 2, "cartas_restantes": [c.id for c in cartas_restantes]})
+        assert r.scores == [0, 0, 13, 0]
+
+        try:
+            _post(puerto, "/registrar_resto",
+                  {"ganador": 2, "cartas_restantes": [c.id for c in cartas_restantes]})
+            assert False, "se esperaba HTTPError 400 por mano ya cerrada"
+        except urllib.error.HTTPError as e:
+            assert e.code == 400
+
+        assert r.scores == [0, 0, 13, 0]  # no se duplicó
     finally:
         server.shutdown()
 

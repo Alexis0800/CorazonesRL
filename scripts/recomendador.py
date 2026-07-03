@@ -221,6 +221,10 @@ class Recomendador:
         cuyo caso devuelve {"puntos_mano": [...], "scores": [...]} — el
         servidor calcula los puntos desde las bazas ya registradas (motor.py),
         el bridge ya no necesita calcularlos ni mandarlos por separado."""
+        if self.numero_baza > 13:
+            raise ValueError(
+                "mano ya cerrada (13 bazas registradas) — ¿llamada duplicada/reintento? "
+                "llama a reset_mano antes de registrar más bazas")
         palo_salida = jugadas[0][1].palo
         for idx, c in jugadas:
             if c.es_corazon:
@@ -242,6 +246,10 @@ class Recomendador:
         quedaban sin jugar en cualquier mano (las suyas y las de los rivales,
         reveladas por la app), en vez de reproducir baza por baza. Cierra la
         mano igual que registrar_baza, calculando los puntos desde el motor."""
+        if self.numero_baza > 13:
+            raise ValueError(
+                "mano ya cerrada — ¿llamada duplicada/reintento? "
+                "llama a reset_mano antes de registrar el resto")
         for c in cartas_restantes:
             if c.es_corazon:
                 self.corazones_rotos = True
