@@ -93,6 +93,25 @@ def test_replay_con_remate_resto():
     assert len(ejemplos) == k_bazas  # una decisión del agente por baza jugada
 
 
+def test_ejemplos_de_partida_salta_manos_no_reconstruibles():
+    """Una mano de concesión sin manos_restantes (p.ej. importada del puente SFS2X,
+    donde no se sabe qué asiento tenía cada carta del remate) no debe tirar el
+    resto de la partida -- solo se salta esa mano."""
+    buena = _simular_mano(1).manos[0]
+    mala = RegistroMano(
+        numero_mano=2, direccion_pase="derecha",
+        mano_inicial_agente=list(range(13)),
+        jugadas=[Jugada(asiento=0, carta_id=0, baza=1)],  # solo 1 jugada, ninguna mano llega a 13
+        puntuacion_mano=[5, 5, 5, 5],
+    )
+    p = RegistroPartida(
+        partida_id="mixta", timestamp="t", asiento_agente=0, fuente="test",
+        manos=[buena, mala], marcador_final=[13, 13, 13, 13], ranking_final=[0, 1, 2, 3],
+    )
+    ejemplos = ejemplos_de_partida(p)
+    assert len(ejemplos) == 13  # solo los de la mano buena
+
+
 def test_partidas_a_arrays_shapes():
     partidas = [_simular_mano(s) for s in range(3)]
     X, y = partidas_a_arrays(partidas)

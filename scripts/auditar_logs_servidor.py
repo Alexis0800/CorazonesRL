@@ -46,13 +46,17 @@ def _auditar_partida(path: Path) -> None:
             n_cartas = len(l["entrada"].get("cartas", []))
             if n_cartas not in (0, 13):
                 print(f"  ⚠ reset_mano con {n_cartas} cartas (se esperaban 13)")
-        elif l["evento"] == "registrar_puntos_mano":
-            pts = l["entrada"]["puntos"]
+        elif l["evento"] in ("registrar_baza", "registrar_resto") and "puntos_mano" in l["salida"]:
+            # Estos dos endpoints cierran la mano (13ª baza o remate del resto) y devuelven
+            # puntos_mano en la SALIDA -- no hay un evento "registrar_puntos_mano" separado
+            # desde que el cálculo se movió a Python (commit 0e4b9f7).
+            pts = l["salida"]["puntos_mano"]
             suma = sum(pts)
             if suma not in (26, 78):
                 print(f"  ⚠ puntos de mano suman {suma} (válido: 26 o 78) → {pts}")
 
-    finales = [l["estado"]["scores"] for l in lineas if l["evento"] == "registrar_puntos_mano"]
+    finales = [l["salida"]["scores"] for l in lineas
+               if l["evento"] in ("registrar_baza", "registrar_resto") and "scores" in l["salida"]]
     if finales:
         scores = finales[-1]
         orden = sorted(range(4), key=lambda i: scores[i])

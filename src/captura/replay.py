@@ -100,10 +100,19 @@ def ejemplos_de_partida(
     partida: RegistroPartida, obs_builder: ObservacionBuilder | None = None,
     dim: int = DIM_ENTORNO,
 ) -> List[Ejemplo]:
-    """Concatena los ejemplos de todas las manos de una partida."""
+    """Concatena los ejemplos de todas las manos reconstruibles de una partida.
+
+    Manos no reconstruibles (p.ej. una concesión sin `manos_restantes`, como las
+    que produce el puente SFS2X para un "remate" que la app resuelve sola — ver
+    `scripts/importar_sesiones_bridge.py`) se saltan en vez de abortar TODA la
+    partida: dentro de una partida real es normal mezclar manos completas con
+    manos truncadas, y una sola mano mala no debe tirar las demás.
+    """
     builder = obs_builder or ObservacionBuilder(dim=dim)
     out: List[Ejemplo] = []
     for mano in partida.manos:
+        if not mano_reconstruible(mano):
+            continue
         out.extend(ejemplos_de_mano(mano, partida.asiento_agente, builder))
     return out
 

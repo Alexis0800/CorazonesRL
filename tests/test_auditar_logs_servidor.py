@@ -17,8 +17,9 @@ def test_detecta_error_y_suma_de_puntos_invalida(tmp_path, capsys):
     eventos = [
         {"evento": "reset_mano", "entrada": {"cartas": list(range(13))},
          "salida": {"ok": True}, "estado": {"scores": [0, 0, 0, 0]}},
-        {"evento": "registrar_puntos_mano", "entrada": {"puntos": [5, 5, 5, 5]},
-         "salida": {"ok": True}, "estado": {"scores": [5, 5, 5, 5]}},
+        {"evento": "registrar_baza", "entrada": {"jugadas": [], "ganador": 0},
+         "salida": {"ok": True, "puntos_mano": [5, 5, 5, 5], "scores": [5, 5, 5, 5]},
+         "estado": {"scores": [5, 5, 5, 5]}},
         {"evento": "error:/recomendar_jugada", "entrada": {}, "salida": {"error": "boom"},
          "estado": {"scores": [5, 5, 5, 5]}},
     ]
@@ -35,8 +36,9 @@ def test_linea_corrupta_no_interrumpe_la_auditoria(tmp_path, capsys):
         json.dumps({"evento": "reset_mano", "entrada": {"cartas": list(range(13))},
                     "salida": {"ok": True}, "estado": {"scores": [0, 0, 0, 0]}}),
         '{"a": 1}{"b": 2}',  # línea corrupta simulada (entrelazado de 2 hilos)
-        json.dumps({"evento": "registrar_puntos_mano", "entrada": {"puntos": [26, 0, 0, 0]},
-                    "salida": {"ok": True}, "estado": {"scores": [26, 0, 0, 0]}}),
+        json.dumps({"evento": "registrar_resto", "entrada": {"ganador": 0, "cartas_restantes": []},
+                    "salida": {"ok": True, "puntos_mano": [26, 0, 0, 0], "scores": [26, 0, 0, 0]},
+                    "estado": {"scores": [26, 0, 0, 0]}}),
     ]
     p.write_text("\n".join(lineas), encoding="utf-8")
 
@@ -50,8 +52,9 @@ def test_partida_limpia_no_reporta_advertencias(tmp_path, capsys):
     eventos = [
         {"evento": "reset_mano", "entrada": {"cartas": list(range(13))},
          "salida": {"ok": True}, "estado": {"scores": [0, 0, 0, 0]}},
-        {"evento": "registrar_puntos_mano", "entrada": {"puntos": [26, 0, 0, 0]},
-         "salida": {"ok": True}, "estado": {"scores": [26, 0, 0, 0]}},
+        {"evento": "registrar_resto", "entrada": {"ganador": 0, "cartas_restantes": []},
+         "salida": {"ok": True, "puntos_mano": [26, 0, 0, 0], "scores": [26, 0, 0, 0]},
+         "estado": {"scores": [26, 0, 0, 0]}},
     ]
     ruta = _escribir(tmp_path, eventos)
     _auditar_partida(ruta)
