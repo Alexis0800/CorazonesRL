@@ -105,14 +105,69 @@ def test_obs_usa_el_estimador_moon_y_cae_a_cero_sin_pesos():
     assert obs[188] == 0.0  # moon_prob_rival: idem
 
 
+class _EstimadorEspia:
+    """Reemplaza EstimadorMoonProb para capturar los kwargs reales que _obs() le pasa."""
+
+    def __init__(self):
+        self.llamadas_propio = []
+        self.llamadas_rival = []
+
+    def propio(self, **kwargs):
+        self.llamadas_propio.append(kwargs)
+        return 0.0
+
+    def rival(self, **kwargs):
+        self.llamadas_rival.append(kwargs)
+        return 0.0
+
+
+def test_obs_pasa_los_argumentos_correctos_al_estimador():
+    """Guarda DIRECTAMENTE contra una transposición de argumentos same-typed
+    (cartas_dadas<->cartas_recibidas, receptor<->dador): compara cada kwarg
+    capturado contra el atributo fuente correcto de Recomendador, así que si
+    _obs() alguna vez pasa el valor equivocado a la clave equivocada, la
+    aserción específica de ese campo falla (a diferencia de comparar outputs
+    del modelo real, que puede ser insensible a la transposición si los dos
+    valores en juego resultan iguales/vacíos en el estado de prueba)."""
+    r = _recomendador_sin_modelo()
+    r.mano = parse_cartas("AP KP QP JP 10P 9P 8P 7P 6P 5P 4P 3P 2P")
+    espia = _EstimadorEspia()
+    r._estimador_moon = espia
+    r.registrar_pase("izquierda", parse_cartas("2T 3T 4T"), parse_cartas("5T 6T 7T"))
+
+    m = r._motor(mesa=[])
+    r._obs(m)
+
+    assert len(espia.llamadas_propio) == 1
+    llamada = espia.llamadas_propio[0]
+    assert llamada["agente_idx"] == r.me
+    assert llamada["cartas_dadas"] == r.cartas_dadas  # == [2T,3T,4T].id, no [5T,6T,7T].id
+    assert llamada["cartas_recibidas"] == r.cartas_recibidas
+    assert llamada["historial"] is r.historial_bazas
+    assert llamada["vacios"] is r.vacios
+    assert llamada["puntuacion_historica"] is not None
+    assert llamada["dama_picas_en"] == r.dama_picas_en
+
+    assert len(espia.llamadas_rival) == 3  # una por cada rival (i != self.me)
+    for llamada_r in espia.llamadas_rival:
+        assert llamada_r["agente_idx"] == r.me
+        assert llamada_r["receptor"] == r.receptor
+        assert llamada_r["dador"] == r.dador
+        assert llamada_r["cartas_dadas"] == r.cartas_dadas
+        assert llamada_r["cartas_recibidas"] == r.cartas_recibidas
+        assert llamada_r["corazones_rotos"] == r.corazones_rotos
+    rival_idxs = {llamada_r["rival_idx"] for llamada_r in espia.llamadas_rival}
+    assert rival_idxs == {1, 2, 3}  # todos menos self.me == 0
+
+
 @pytest.mark.skipif(not _PESOS_REALES, reason="requiere models/moon/{propio,rival}.pt entrenados (Task 6)")
-def test_obs_con_pesos_reales_es_sensible_a_los_argumentos():
-    """Guarda contra una regresión de orden de argumentos (p.ej. cartas_dadas
-    <-> cartas_recibidas, o receptor <-> dador): con pesos reales, cambiar el
-    input real debe cambiar el output. Con argumentos transpuestos pero
-    type-compatibles, Python no lanzaría error -- solo un output distinto (o
-    casualmente igual) al esperado; comparar dos estados que difieren SOLO en
-    historial_bazas/cartas_dadas/cartas_recibidas detecta el problema."""
+def test_obs_con_pesos_reales_corre_el_pipeline_completo():
+    """Smoke end-to-end con pesos reales: el modelo carga, corre, y produce
+    números distintos ante estados distintos (no es un no-op degenerado). No
+    reemplaza test_obs_pasa_los_argumentos_correctos_al_estimador -- este test
+    NO detectaría una transposición cuando ambos lados resultan en el mismo
+    valor efectivo (p.ej. receptor/dador ambos None); ese caso lo cubre el
+    espía de arriba comparando kwarg por kwarg."""
     def _r_con_pesos():
         r = _recomendador_sin_modelo()
         r._estimador_moon = EstimadorMoonProb(dir_modelos="models/moon")
