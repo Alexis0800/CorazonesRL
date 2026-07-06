@@ -143,6 +143,10 @@ class Recomendador:
         self.numero_baza = 1
         self.dama_picas_en: Optional[int] = None
         self.historial_bazas: List[EntradaBaza] = []
+        self.receptor: Optional[int] = None
+        self.dador: Optional[int] = None
+        self.cartas_dadas: List[int] = []
+        self.cartas_recibidas: List[int] = []
 
     # ---- reconstrucción del motor desde el estado público ----
     def _motor(self, mesa: List, numero_mano: int = 1) -> MotorCorazones:
@@ -222,6 +226,22 @@ class Recomendador:
             return self.snap.pasar(m, self.me)
         from src.agentes.pase import pase_heuristico
         return pase_heuristico(m, self.me)
+
+    def registrar_pase(self, direccion: str, cartas_dadas: List[Carta],
+                        cartas_recibidas: List[Carta]) -> None:
+        """Registra la ejecución REAL del pase (qué se dio y qué se recibió),
+        para alimentar la memoria de pase de moon_model. Llamar después de
+        recomendar_pase y antes de la primera jugada de la mano."""
+        if direccion == "sin":
+            self.receptor = None
+            self.dador = None
+        else:
+            m = MotorCorazones()
+            m.numero_mano = _DIRECCION_A_MANO[direccion]
+            self.receptor = m.receptor_pase(self.me)
+            self.dador = next(d for d in range(4) if m.receptor_pase(d) == self.me)
+        self.cartas_dadas = [c.id for c in cartas_dadas]
+        self.cartas_recibidas = [c.id for c in cartas_recibidas]
 
     def recomendar_jugada(self, mesa_antes: List) -> Carta:
         """mesa_antes = lista de (jugador_idx, Carta) jugadas antes de mí en esta baza."""

@@ -96,3 +96,33 @@ def test_reset_mano_limpia_el_historial():
     r.historial_bazas = [EntradaBaza(0, 0, True, False)]
     r.reset_mano([])
     assert r.historial_bazas == []
+
+
+def test_registrar_pase_izquierda_calcula_receptor_y_dador():
+    r = _recomendador_sin_modelo()
+    dadas = parse_cartas("2T 3T 4T")
+    recibidas = parse_cartas("5T 6T 7T")
+    r.registrar_pase("izquierda", dadas, recibidas)
+    assert r.receptor == 1  # asiento 0 + 1 = izquierda
+    assert r.dador == 3     # asiento 3 me pasó a mí (0 - 1 mod 4)
+    assert r.cartas_dadas == [c.id for c in dadas]
+    assert r.cartas_recibidas == [c.id for c in recibidas]
+
+
+def test_registrar_pase_sin_pase_deja_todo_en_none():
+    r = _recomendador_sin_modelo()
+    r.registrar_pase("sin", [], [])
+    assert r.receptor is None
+    assert r.dador is None
+    assert r.cartas_dadas == []
+    assert r.cartas_recibidas == []
+
+
+def test_reset_mano_limpia_el_estado_del_pase():
+    r = _recomendador_sin_modelo()
+    r.registrar_pase("izquierda", parse_cartas("2T"), parse_cartas("3T"))
+    r.reset_mano([])
+    assert r.receptor is None
+    assert r.dador is None
+    assert r.cartas_dadas == []
+    assert r.cartas_recibidas == []
