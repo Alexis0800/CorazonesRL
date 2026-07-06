@@ -20,7 +20,7 @@ except Exception:
     pass
 
 
-def _auditar_partida(path: Path) -> None:
+def _auditar_partida(path: Path) -> dict:
     lineas = []
     corruptas = []
     for n, l in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
@@ -57,13 +57,45 @@ def _auditar_partida(path: Path) -> None:
 
     finales = [l["salida"]["scores"] for l in lineas
                if l["evento"] in ("registrar_baza", "registrar_resto") and "scores" in l["salida"]]
-    if finales:
-        scores = finales[-1]
+    scores = finales[-1] if finales else None
+    puesto_me = None
+    if scores:
         orden = sorted(range(4), key=lambda i: scores[i])
         puesto_me = orden.index(0) + 1  # ajustar si tu asiento no es 0
         print(f"  manos jugadas: {n_manos}  |  marcador final: {scores}  |  puesto agente (asiento 0): {puesto_me}")
     if not errores and not corruptas and n_manos:
         print("  ✓ sin errores ni invariantes rotas")
+
+    return {
+        "archivo": path.name,
+        "n_manos": n_manos,
+        "n_errores": len(errores),
+        "n_corruptas": len(corruptas),
+        "scores": scores,
+        "puesto": puesto_me,
+    }
+
+
+def _imprimir_resumen(resultados: list) -> None:
+    con_marcador = [r for r in resultados if r["puesto"] is not None]
+    print(f"\n=== Resumen ({len(resultados)} partidas, {len(con_marcador)} con marcador final) ===")
+    if not con_marcador:
+        return
+
+    conteo_puesto = {p: 0 for p in (1, 2, 3, 4)}
+    for r in con_marcador:
+        conteo_puesto[r["puesto"]] += 1
+    n = len(con_marcador)
+    for p in (1, 2, 3, 4):
+        pct = 100 * conteo_puesto[p] / n
+        print(f"  puesto {p}: {conteo_puesto[p]:3d}/{n} ({pct:5.1f}%)")
+    promedio = sum(r["puesto"] for r in con_marcador) / n
+    print(f"  puesto promedio: {promedio:.2f}  (1.0=siempre 1º, 4.0=siempre último; azar ≈ 2.50)")
+
+    n_errores = sum(r["n_errores"] for r in resultados)
+    n_corruptas = sum(r["n_corruptas"] for r in resultados)
+    if n_errores or n_corruptas:
+        print(f"  ⚠ {n_errores} errores y {n_corruptas} líneas corruptas en total (ver detalle arriba)")
 
 
 def main() -> None:
@@ -80,8 +112,8 @@ def main() -> None:
     if not rutas:
         p.error("pasa al menos un archivo/glob o --dir")
 
-    for r in sorted(set(rutas)):
-        _auditar_partida(Path(r))
+    resultados = [_auditar_partida(Path(r)) for r in sorted(set(rutas))]
+    _imprimir_resumen(resultados)
 
 
 if __name__ == "__main__":

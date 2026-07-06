@@ -41,7 +41,13 @@ except Exception:
 from src.dominio.carta import Carta
 from src.dominio.motor import MotorCorazones
 from src.entorno.observacion import ObservacionBuilder
+from src.mcts.pimc import determinizar
 from src.rllib.utils import cargar_policy_desde_checkpoint
+
+# Nº de mundos PIMC para promediar moon_prob (features [187:189]) sobre manos
+# rivales desconocidas. Barato (determinizar() no simula, solo reparte cartas),
+# así que puede correr en cada request sin afectar la latencia de la API.
+_N_MUNDOS_MOON = 30
 
 _PALO_SIMBOLO = {0: "♣", 1: "♦", 2: "♠", 3: "♥"}
 _VALOR_STR = {11: "J", 12: "Q", 13: "K", 14: "A"}
@@ -123,6 +129,7 @@ class Recomendador:
         self.con_pase = self.obs_dim >= 228
         self.builder = ObservacionBuilder(dim=self.obs_dim)
         self.me = mi_idx
+        self._rng = np.random.default_rng()
         self.scores = [0, 0, 0, 0]
         self.ultima_mano_puntos: Optional[List[int]] = None
         self.reset_mano([])
@@ -149,14 +156,33 @@ class Recomendador:
         for c in self.mano:
             jugadas.add(c.id)
         m.jugadores[self.me].mano = list(self.mano)
-        # Repartir las cartas desconocidas entre los rivales (estimación),
-        # respetando los vacíos ya conocidos (mismo patrón que
-        # ObservacionBuilder._calcular_prob_q_picas).
+        # Las manos rivales son desconocidas: se llenan con un reparto CUALQUIERA
+        # (el contenido no importa, solo el TAMAÑO correcto por asiento) para que
+        # `determinizar()` -- ya usado por el PIMC del proyecto -- pueda
+        # redistribuirlas de verdad al vuelo cuando haga falta (ver `_mundos_moon`).
+        # Nada más en este motor lee el contenido de la mano de un rival: las
+        # jugadas legales solo miran la mano de `self.me`, y ObservacionBuilder
+        # nunca toca `jugadores[i].mano` para i != agente.
         desconocidas = [c for c in Carta._TODAS if c.id not in jugadas]
         otros = [i for i in range(4) if i != self.me]
-        for k, c in enumerate(desconocidas):
-            validos = [o for o in otros if c.palo not in self.vacios[o]] or otros
-            m.jugadores[validos[k % len(validos)]].mano.append(c)
+        jugaron_ya = {idx for idx, _ in mesa}
+        tam = {o: max(0, 13 - self.numero_baza if o in jugaron_ya else 14 - self.numero_baza)
+               for o in otros}
+        if sum(tam.values()) != len(desconocidas):
+            # Estado degenerado (p.ej. mano cerrada por remate sin haber jugado
+            # 13 bazas reales, o una llamada fuera del flujo normal de juego):
+            # el contenido de la mano rival aquí no importa -- _finalizar_mano()
+            # solo usa `bazas_ganadas`, y determinizar() solo se apoya en este
+            # tamaño durante recomendar_jugada/pase, donde numero_baza/mesa SÍ
+            # son consistentes. Repartir parejo evita reventar por una cuenta
+            # que no aplica en este contexto.
+            base, resto = divmod(len(desconocidas), len(otros))
+            tam = {o: base + (1 if i < resto else 0) for i, o in enumerate(otros)}
+        cursor = 0
+        for o in otros:
+            n = tam[o]
+            m.jugadores[o].mano = desconocidas[cursor:cursor + n]
+            cursor += n
         m.mesa = list(mesa)
         m.palo_de_salida = mesa[0][1].palo if mesa else None
         m.corazones_rotos = self.corazones_rotos
@@ -165,10 +191,20 @@ class Recomendador:
         m.indice_jugador_inicial = (self.me - len(mesa)) % 4
         return m
 
+    def _mundos_moon(self, m: MotorCorazones, n: int = _N_MUNDOS_MOON) -> List[MotorCorazones]:
+        """`n` redeterminizaciones de las manos rivales (respetando vacíos),
+        para promediar moon_prob en vez de fiarse de un único reparto ficticio."""
+        vacios_dict = {i: v for i, v in enumerate(self.vacios) if v}
+        return [determinizar(m, self.me, vacios=vacios_dict, rng=self._rng) for _ in range(n)]
+
     def _obs(self, m: MotorCorazones):
         scores = m.puntuaciones_historicas()
-        mp_ag = _moon_prob(m, self.me)
-        mp_riv = max(_moon_prob(m, i) for i in range(4) if i != self.me)
+        mundos = self._mundos_moon(m)
+        mp_ag = float(np.mean([_moon_prob(mundo, self.me) for mundo in mundos]))
+        mp_riv = float(np.mean([
+            max(_moon_prob(mundo, i) for i in range(4) if i != self.me)
+            for mundo in mundos
+        ]))
         puedo_alim = any(scores[j] >= 85 for j in range(4) if j != self.me)
         return self.builder.construir(
             motor=m, agente_idx=self.me, vacios=self.vacios,
