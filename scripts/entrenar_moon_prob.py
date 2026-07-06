@@ -181,3 +181,142 @@ def construir_dataset(ruta_partidas: str):
             print(f"  - {a}")
 
     return propio_por_partida, rival_por_partida, timestamp_por_partida
+
+
+def _auc(y_true: np.ndarray, y_score: np.ndarray) -> float:
+    """AUC-ROC manual (evita sumar scikit-learn por una sola métrica):
+    probabilidad de que un positivo al azar tenga score mayor que un
+    negativo al azar."""
+    pos = y_score[y_true == 1]
+    neg = y_score[y_true == 0]
+    if len(pos) == 0 or len(neg) == 0:
+        return float("nan")
+    return float(np.mean(pos[:, None] > neg[None, :]))
+
+
+def _brier(y_true: np.ndarray, y_score: np.ndarray) -> float:
+    return float(np.mean((y_score - y_true) ** 2))
+
+
+def _entrenar(red, X_train, y_train, X_val, y_val, epocas: int, lr: float = 1e-3,
+              paciencia: int = 15):
+    opt = torch.optim.Adam(red.parameters(), lr=lr)
+    perdida = nn.BCELoss()
+    Xt = torch.from_numpy(X_train)
+    yt = torch.from_numpy(y_train)
+    Xv = torch.from_numpy(X_val)
+
+    mejor_auc = -1.0
+    mejor_brier = float("inf")
+    mejor_estado = {k: v.clone() for k, v in red.state_dict().items()}
+    sin_mejora = 0
+
+    for _ in range(epocas):
+        red.train()
+        opt.zero_grad()
+        loss = perdida(red(Xt), yt)
+        loss.backward()
+        opt.step()
+
+        red.eval()
+        with torch.no_grad():
+            pred_val = red(Xv).numpy()
+        auc = _auc(y_val, pred_val)
+        brier = _brier(y_val, pred_val)
+        # ponytail: el AUC solo mide ranking, no calibración -- con datos bien
+        # separados llega a 1.0 en la primera época y se queda ahí, así que
+        # usamos el brier como desempate para seguir mejorando la calibración
+        # mientras el AUC no empeore (si no, el early stopping se "congela"
+        # en la primera época que toca el AUC máximo).
+        mejora = not np.isnan(auc) and (
+            auc > mejor_auc or (auc == mejor_auc and brier < mejor_brier)
+        )
+        if mejora:
+            mejor_auc = auc
+            mejor_brier = brier
+            mejor_estado = {k: v.clone() for k, v in red.state_dict().items()}
+            sin_mejora = 0
+        else:
+            sin_mejora += 1
+            if sin_mejora >= paciencia:
+                break
+
+    red.load_state_dict(mejor_estado)
+    red.eval()
+    with torch.no_grad():
+        pred_final = red(Xv).numpy()
+    return red, _auc(y_val, pred_final), _brier(y_val, pred_final)
+
+
+def main() -> None:
+    p = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--partidas", required=True)
+    p.add_argument("--out-dir", default="models/moon")
+    p.add_argument("--epocas", type=int, default=300)
+    p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--val-frac", type=float, default=0.2)
+    args = p.parse_args()
+
+    print("Generando ejemplos desde manos reales reconstruibles...", flush=True)
+    propio_por_partida, rival_por_partida, timestamp_por_partida = construir_dataset(args.partidas)
+    ids = sorted(propio_por_partida.keys())
+    print(f"{len(ids)} partidas con al menos una mano reconstruible", flush=True)
+
+    rng = np.random.default_rng(args.seed)
+    orden = rng.permutation(len(ids))
+    corte = int(len(ids) * (1 - args.val_frac))
+    train_ids = {ids[i] for i in orden[:corte]}
+    val_ids = {ids[i] for i in orden[corte:]}
+
+    # Corte cronológico ADICIONAL (solo diagnóstico, no se usa para entrenar ni
+    # para early stopping): las sesiones más recientes por timestamp, para
+    # detectar sobreajuste a patrones de oponentes de esos días específicos en
+    # vez de generalización real.
+    ids_por_fecha = sorted(ids, key=lambda pid: timestamp_por_partida[pid])
+    corte_fecha = int(len(ids_por_fecha) * (1 - args.val_frac))
+    val_ids_recientes = set(ids_por_fecha[corte_fecha:])
+
+    out = _Path(args.out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+
+    for nombre, ejemplos_por_partida, dim in (
+        ("propio", propio_por_partida, DIM_PROPIO),
+        ("rival", rival_por_partida, DIM_RIVAL),
+    ):
+        train = [e for pid in train_ids for e in ejemplos_por_partida[pid]]
+        val = [e for pid in val_ids for e in ejemplos_por_partida[pid]]
+        if not train or not val:
+            print(f"\n=== modelo {nombre}: datos insuficientes, se omite ===")
+            continue
+        pct_pos = 100 * sum(l for _, l in train) / len(train)
+        print(f"\n=== modelo {nombre}: {len(train)} train / {len(val)} val "
+              f"({pct_pos:.1f}% positivos train) ===", flush=True)
+
+        X_train = np.stack([f for f, _ in train]).astype(np.float32)
+        y_train = np.array([l for _, l in train], dtype=np.float32)
+        X_val = np.stack([f for f, _ in val]).astype(np.float32)
+        y_val = np.array([l for _, l in val], dtype=np.float32)
+
+        red = _RedMoonMLP(dim)
+        red, auc, brier = _entrenar(red, X_train, y_train, X_val, y_val, args.epocas)
+        print(f"  AUC val: {auc:.3f}  |  Brier val: {brier:.4f}")
+
+        recientes = [e for pid in val_ids_recientes for e in ejemplos_por_partida[pid]]
+        if recientes:
+            X_r = np.stack([f for f, _ in recientes]).astype(np.float32)
+            y_r = np.array([l for _, l in recientes], dtype=np.float32)
+            with torch.no_grad():
+                pred_r = red(torch.from_numpy(X_r)).numpy()
+            print(f"  AUC en sesiones más recientes: {_auc(y_r, pred_r):.3f}  "
+                  f"|  Brier: {_brier(y_r, pred_r):.4f}  ({len(recientes)} ejemplos)"
+                  "  -- si es mucho peor que el AUC de val de arriba, hay sobreajuste "
+                  "a patrones de oponentes específicos de esas sesiones.")
+
+        ruta = out / f"{nombre}.pt"
+        torch.save(red.state_dict(), ruta)
+        print(f"  guardado en {ruta}")
+
+
+if __name__ == "__main__":
+    main()

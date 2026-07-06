@@ -122,3 +122,42 @@ def test_construir_dataset_agrupa_por_partida_y_salta_manos_no_reconstruibles(tm
     assert len(propio["p1"]) > 0  # la mano_ok sí se procesó pese a mano_rota
     assert len(rival["p1"]) > 0
     assert timestamps["p1"] == "2026-01-01T00:00:00"
+
+
+import numpy as np
+from entrenar_moon_prob import _auc, _brier, _entrenar
+from src.entorno.moon_model import _RedMoonMLP
+
+
+def test_auc_perfecto_cuando_scores_separan_las_clases():
+    y_true = np.array([0, 0, 1, 1], dtype=np.float32)
+    y_score = np.array([0.1, 0.2, 0.8, 0.9], dtype=np.float32)
+    assert _auc(y_true, y_score) == 1.0
+
+
+def test_auc_medio_si_no_hay_de_una_clase():
+    y_true = np.array([1, 1], dtype=np.float32)
+    y_score = np.array([0.5, 0.6], dtype=np.float32)
+    assert np.isnan(_auc(y_true, y_score))
+
+
+def test_brier_cero_si_prediccion_perfecta():
+    y_true = np.array([0.0, 1.0], dtype=np.float32)
+    y_score = np.array([0.0, 1.0], dtype=np.float32)
+    assert _brier(y_true, y_score) == 0.0
+
+
+def test_entrenar_reduce_la_perdida_en_datos_separables():
+    rng = np.random.default_rng(0)
+    dim = 5
+    X_pos = rng.normal(3.0, 0.1, size=(50, dim)).astype(np.float32)
+    X_neg = rng.normal(-3.0, 0.1, size=(50, dim)).astype(np.float32)
+    X_train = np.concatenate([X_pos[:40], X_neg[:40]])
+    y_train = np.concatenate([np.ones(40), np.zeros(40)]).astype(np.float32)
+    X_val = np.concatenate([X_pos[40:], X_neg[40:]])
+    y_val = np.concatenate([np.ones(10), np.zeros(10)]).astype(np.float32)
+
+    red = _RedMoonMLP(dim)
+    red, auc, brier = _entrenar(red, X_train, y_train, X_val, y_val, epocas=200)
+    assert auc > 0.9
+    assert brier < 0.1
