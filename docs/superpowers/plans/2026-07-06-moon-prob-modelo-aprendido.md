@@ -1681,6 +1681,21 @@ la pena: (a) conseguir más partidas reales reconstruibles, o (b) cerrar la
 brecha train/producción documentada en `entrenar_moon_prob.py` (marcador
 histórico fijo en `[0,0,0,0]` durante el entrenamiento, nunca el real).
 
+**ACTUALIZACIÓN (2026-07-06, post-fixes):** se cerró la brecha (b) —
+`ejemplos_de_mano`/`construir_dataset` ahora acumulan el marcador real
+entre manos de la misma partida (antes `[0,0,0,0]` fijo), y `dama_picas_en`
+ahora se trackea en vez de quedar en `None` fijo. Reentrenado con estos 2
+fixes: AUC val "propio" 0.459 (antes 0.441-0.447, leve mejora), "rival"
+0.578 (sin cambio). Re-corrido `pimc_regret_real.py` sobre las mismas 4767
+decisiones: **regret medio, mediana, % óptimo y toda la cola salieron
+IDÉNTICOS** al run anterior (1.025 / 0.000 / 56.0% / 11.2% / 5.5% / 1.2%) —
+la política del campeón no cambió su carta elegida en NINGUNA de las 4767
+decisiones pese al leve movimiento en los valores de moon_prob. Conclusión
+reforzada: con este volumen de datos reales, moon_prob (2 de 228 features)
+no tiene suficiente palanca sobre las decisiones del campeón ya entrenado
+para que el backtest lo detecte. La brecha (a) -- volumen de datos reales
+reconstruibles -- sigue siendo el cuello de botella real.
+
 ---
 
 ## Notas para Fase 2 (fuera de este plan)
