@@ -65,6 +65,7 @@ python -m src.torneo.elo --directorio models/v8/elite --partidas 50 --elo-puro -
 - `observacion.py`: `ObservacionBuilder` — SSOT for the observation vector. Supports 224 (v11, no pass) and 228 (v12, with pass) via the `dim` constructor arg. Scoreboard features (`[172:176]`, near-100, leader, terminal-hand) are LIVE because score persists across hands.
 - `recompensas_partida.py`: **SSOT for rewards** — `RewardConfigPartida` + `CalculadoraRecompensasPartida` (R_terminal + PBRS Φ). This is what `CorazonesEnvRLlib` uses.
 - `dimensiones.py`: SSOT for observation dimensions (`DIM_V11=224` default sin pase, `DIM_V12=228` con pase, `DIM_V13=332` con pase + memoria del pase; `DIM_ENTORNO=224`). Always import from here — never hardcode `224`/`228`/`332`.
+- `moon_model.py`: 2 modelos aprendidos (MLP chico en PyTorch) que reemplazan la heurística de coeficientes fijos para `moon_prob_agente`/`moon_prob_rival` (obs `[187:189]`) — `features_propio` (reutiliza `ObservacionBuilder(dim=332)` desde la perspectiva real del agente) + `features_rival` (solo señales públicas de un rival específico, nunca su mano) + `EstimadorMoonProb` (con gate duro y fallback seguro a 0.0 sin pesos entrenados). Usado hoy en `scripts/recomendador.py` (producción); `src/entorno/corazones_rllib.py` sigue usando la heurística vieja durante el entrenamiento de v10c (por diseño, ver spec en `docs/superpowers/specs/2026-07-06-moon-prob-modelo-aprendido-design.md`). Entrenar con `scripts/entrenar_moon_prob.py` (genera dataset re-jugando manos reales de `data/partidas_bridge.jsonl`).
 
 **`src/agentes/`** — Agent strategies (Strategy pattern: `(motor, idx, legales) → Carta`).
 
@@ -136,8 +137,8 @@ Visión por captura (app Hearts, ver `calibracion/hearts_app/README.md`): `scrip
 | `[180]` | Hearts broken (0/1) |
 | `[181]` | Position in trick (0.0, 0.33, 0.66, 1.0) |
 | `[182:187]` | Q♠ tracker (one-hot, 5 states) |
-| `[187]` | `moon_prob_agente`: P(Moon del agente) continuo [0, 1] |
-| `[188]` | `moon_prob_rival`: max P(Moon) entre los 3 rivales [0, 1] |
+| `[187]` | `moon_prob_agente`: P(Moon del agente) continuo [0, 1] — heurística fija en entrenamiento (`corazones_rllib.py`), modelo aprendido en producción (`moon_model.py`, ver arriba) |
+| `[188]` | `moon_prob_rival`: max P(Moon) entre los 3 rivales [0, 1] — misma nota que `[187]` |
 | `[189]` | `puedo_alimentar`: puede dar puntos a un rival (0/1) |
 | `[190:194]` | `all_void_X`: all 3 opponents are void in suit X |
 | `[194]` | Baza number / 13.0 |
