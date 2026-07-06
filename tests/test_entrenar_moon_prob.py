@@ -4,29 +4,54 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
-from entrenar_moon_prob import _receptor_y_dador, ejemplos_de_mano
-from src.captura.modelos import Jugada, RegistroMano
+from entrenar_moon_prob import _receptor_y_dador, construir_dataset, ejemplos_de_mano
+from src.captura.escritor import EscritorJsonl
+from src.captura.modelos import Jugada, RegistroMano, RegistroPartida
 from src.entorno.moon_model import DIM_PROPIO, DIM_RIVAL
 
 
 def _mano_completa_simple() -> RegistroMano:
-    """Una mano de 13 bazas donde el asiento 0 gana TODO (pozo perfecto),
-    construida a mano con jugadas legales reales (2T primero, sigue el palo
-    cuando puede)."""
-    # Reutiliza una partida real jugada por el motor mismo para garantizar
-    # legalidad, en vez de inventar 52 cartas a mano.
+    """Una mano de 13 bazas donde el asiento 0 gana TODO (pozo perfecto).
+
+    Determinista por REPARTO (no por heurística de juego): al asiento 0 se le
+    da el palo de Tréboles COMPLETO (13 cartas) y el resto se reparte entre
+    los otros 3. Como nadie más tiene tréboles, el asiento 0 siempre lidera
+    (nunca lo superan siguiendo el palo) y por lo tanto gana TODAS las bazas
+    -- incluyendo cualquier punto que los demás descarten -- sin importar qué
+    carta legal se juegue en cada turno.
+
+    (La versión anterior hacía que el asiento 0 jugara "la más alta legal" y
+    los demás "la más baja legal" sobre un reparto aleatorio; medido
+    empíricamente eso solo producía un pozo real en ~1% de las manos, porque
+    el reparto aleatorio no garantiza que el asiento 0 tenga la carta más
+    alta de cada palo. Forzar el reparto en vez de la estrategia de juego lo
+    hace 100% determinista.)
+    """
+    from src.dominio.carta import Carta
     from src.dominio.motor import MotorCorazones
 
     m = MotorCorazones()
-    m.repartir()
+    treboles = [c for c in Carta._TODAS if c.palo == 0]  # 0 = Tréboles
+    resto = [c for c in Carta._TODAS if c.palo != 0]
+    m.jugadores[0].recibir_mano(treboles)
+    for i in range(1, 4):
+        m.jugadores[i].recibir_mano(resto[(i - 1) * 13: i * 13])
+    for jug in m.jugadores:
+        jug.bazas_ganadas = []
+    m.corazones_rotos = False
+    m.numero_baza = 1
+    m.numero_mano = 1
+    m.mesa = []
+    m.palo_de_salida = None
+    m._mano_activa = True
+    m._fijar_jugador_inicial()
+
     jugadas = []
     baza = 1
     while not all(len(j.mano) == 0 for j in m.jugadores):
         idx = m.obtener_jugador_actual()
         legales = m.obtener_jugadas_legales(idx)
-        # El asiento 0 siempre intenta ganar (juega la más alta legal);
-        # los demás juegan la más baja legal -- fuerza que 0 gane todo.
-        carta = max(legales, key=lambda c: c.valor) if idx == 0 else min(legales, key=lambda c: c.valor)
+        carta = legales[0]  # cualquier legal sirve: el reparto ya garantiza el pozo
         jugadas.append(Jugada(asiento=idx, carta_id=carta.id, baza=baza))
         m.jugar_carta(idx, carta)
         if len(m.mesa) == 4:
@@ -75,3 +100,25 @@ def test_ejemplos_de_mano_etiqueta_el_pozo_correctamente():
     # al menos un ejemplo de la perspectiva del que hizo el pozo debe tener label 1.0
     # (los del asiento ganador, antes de que el gate lo excluya en las últimas bazas)
     assert any(label == 1.0 for _, label in ejemplos_propio) or luna_seat != 0
+
+
+def test_construir_dataset_agrupa_por_partida_y_salta_manos_no_reconstruibles(tmp_path):
+    mano_ok = _mano_completa_simple()
+    # Sin jugadas ni manos_restantes: reconstruir_manos no puede completar las
+    # 4 manos de 13 cartas -> mano_reconstruible() da False y debe saltarse,
+    # sin tirar el resto de manos reconstruibles de la MISMA partida.
+    mano_rota = RegistroMano(numero_mano=2, direccion_pase=None, mano_inicial_agente=[])
+
+    partida = RegistroPartida(
+        partida_id="p1", timestamp="2026-01-01T00:00:00", asiento_agente=0,
+        fuente="test", manos=[mano_ok, mano_rota],
+    )
+    ruta = tmp_path / "partidas.jsonl"
+    EscritorJsonl(ruta).escribir(partida)
+
+    propio, rival, timestamps = construir_dataset(str(ruta))
+
+    assert "p1" in propio and "p1" in rival and "p1" in timestamps
+    assert len(propio["p1"]) > 0  # la mano_ok sí se procesó pese a mano_rota
+    assert len(rival["p1"]) > 0
+    assert timestamps["p1"] == "2026-01-01T00:00:00"
