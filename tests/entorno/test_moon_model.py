@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import numpy as np
+import torch
 
 from src.dominio.carta import Carta
 from src.dominio.motor import MotorCorazones
@@ -9,8 +10,10 @@ from src.entorno.moon_model import (
     DIM_PROPIO,
     DIM_RIVAL,
     EntradaBaza,
+    EstimadorMoonProb,
     _alguien_mas_tiene_puntos,
     _ganador_parcial,
+    _RedMoonMLP,
     _ratio_bazas_con_puntos,
     _tasa_lidero_corazon_dama,
     features_propio,
@@ -209,3 +212,51 @@ class TestFeaturesRival:
         carta_recibida = _carta(1, 6)
         feats = features_rival(m, 1, 0, vacios, [], [], [carta_recibida.id], False)
         assert feats[220 + carta_recibida.id] == 1.0
+
+
+class TestRedMoonMLP:
+    def test_forward_devuelve_probabilidad_en_0_1(self):
+        red = _RedMoonMLP(DIM_PROPIO)
+        x = torch.zeros((1, DIM_PROPIO))
+        with torch.no_grad():
+            y = red(x)
+        assert y.shape == (1,)
+        assert 0.0 <= float(y.item()) <= 1.0
+
+
+class TestEstimadorMoonProbSinPesos:
+    """Sin pesos entrenados (directorio vacío), debe caer a 0.0 en vez de fallar."""
+
+    def test_propio_devuelve_cero_sin_pesos(self, tmp_path):
+        est = EstimadorMoonProb(dir_modelos=str(tmp_path))
+        m = MotorCorazones()
+        m.repartir()
+        vacios = [set() for _ in range(4)]
+        p = est.propio(m, 0, vacios, [], [], [], [0, 0, 0, 0], [0, 0, 0, 0], None)
+        assert p == 0.0
+
+    def test_rival_devuelve_cero_sin_pesos(self, tmp_path):
+        est = EstimadorMoonProb(dir_modelos=str(tmp_path))
+        m = MotorCorazones()
+        m.repartir()
+        vacios = [set() for _ in range(4)]
+        p = est.rival(m, 1, 0, vacios, [], None, None, [], [], False)
+        assert p == 0.0
+
+    def test_gate_duro_devuelve_cero_aunque_haya_pesos(self, tmp_path):
+        # entrena y guarda una red que SIEMPRE predice 1.0, para probar que
+        # el gate duro gana incluso sobre un modelo "confiado".
+        red = _RedMoonMLP(DIM_PROPIO)
+        with torch.no_grad():
+            for p in red.parameters():
+                p.zero_()
+            red.red[-1].bias.fill_(50.0)  # sigmoid(50) ~= 1.0
+        torch.save(red.state_dict(), tmp_path / "propio.pt")
+
+        est = EstimadorMoonProb(dir_modelos=str(tmp_path))
+        m = MotorCorazones()
+        m.repartir()
+        m.jugadores[1].bazas_ganadas = [_carta(3, 2)]  # otro jugador ya tiene puntos
+        vacios = [set() for _ in range(4)]
+        p = est.propio(m, 0, vacios, [], [], [], [0, 0, 0, 0], [0, 0, 0, 0], None)
+        assert p == 0.0

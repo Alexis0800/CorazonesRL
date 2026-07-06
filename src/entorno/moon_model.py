@@ -189,3 +189,93 @@ def features_rival(
         obs[220 + cid] = 1.0
 
     return obs
+
+
+class _RedMoonMLP(nn.Module):
+    """MLP chico: entrada -> 32 -> 1 con sigmoid. Uno por modelo (propio/rival)."""
+
+    def __init__(self, dim_entrada: int, dim_oculta: int = 32):
+        super().__init__()
+        self.dim_entrada = dim_entrada
+        self.red = nn.Sequential(
+            nn.Linear(dim_entrada, dim_oculta),
+            nn.ReLU(),
+            nn.Linear(dim_oculta, 1),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return torch.sigmoid(self.red(x)).squeeze(-1)
+
+
+def _cargar_red(ruta: Path, dim_entrada: int) -> Optional[_RedMoonMLP]:
+    if not ruta.is_file():
+        return None
+    red = _RedMoonMLP(dim_entrada)
+    red.load_state_dict(torch.load(ruta, map_location="cpu"))
+    red.eval()
+    return red
+
+
+class EstimadorMoonProb:
+    """Reemplaza la heurística de moon_prob con los 2 modelos aprendidos.
+
+    Si no hay pesos entrenados (`<dir_modelos>/propio.pt` o `rival.pt`
+    ausentes), devuelve 0.0 en vez de fallar -- permite que el resto del
+    pipeline funcione mientras se entrena o si el entrenamiento aún no corrió.
+    """
+
+    def __init__(self, dir_modelos: str = "models/moon"):
+        d = Path(dir_modelos)
+        self._propio = _cargar_red(d / "propio.pt", DIM_PROPIO)
+        self._rival = _cargar_red(d / "rival.pt", DIM_RIVAL)
+
+    def propio(
+        self,
+        motor: MotorCorazones,
+        agente_idx: int,
+        vacios: List[set],
+        historial: List[EntradaBaza],
+        cartas_dadas: List[int],
+        cartas_recibidas: List[int],
+        puntuacion_historica: List[int],
+        puntos_mano_actual: List[int],
+        dama_picas_en: Optional[int],
+    ) -> float:
+        if _alguien_mas_tiene_puntos(motor, agente_idx):
+            return 0.0
+        if self._propio is None:
+            return 0.0
+        feats = features_propio(
+            motor, agente_idx, vacios, historial, cartas_dadas, cartas_recibidas,
+            puntuacion_historica, puntos_mano_actual, dama_picas_en,
+        )
+        with torch.no_grad():
+            x = torch.from_numpy(feats).unsqueeze(0)
+            return float(self._propio(x).item())
+
+    def rival(
+        self,
+        motor: MotorCorazones,
+        rival_idx: int,
+        agente_idx: int,
+        vacios: List[set],
+        historial: List[EntradaBaza],
+        receptor: Optional[int],
+        dador: Optional[int],
+        cartas_dadas: List[int],
+        cartas_recibidas: List[int],
+        corazones_rotos: bool,
+    ) -> float:
+        if _alguien_mas_tiene_puntos(motor, rival_idx):
+            return 0.0
+        if self._rival is None:
+            return 0.0
+        cartas_dadas_a_rival = cartas_dadas if rival_idx == receptor else []
+        cartas_recibidas_de_rival = cartas_recibidas if rival_idx == dador else []
+        feats = features_rival(
+            motor, rival_idx, agente_idx, vacios, historial,
+            cartas_dadas_a_rival, cartas_recibidas_de_rival, corazones_rotos,
+        )
+        with torch.no_grad():
+            x = torch.from_numpy(feats).unsqueeze(0)
+            return float(self._rival(x).item())
