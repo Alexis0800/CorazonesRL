@@ -102,6 +102,39 @@ def test_ejemplos_de_mano_etiqueta_el_pozo_correctamente():
     assert any(label == 1.0 for _, label in ejemplos_propio) or luna_seat != 0
 
 
+def test_ejemplos_de_mano_rastrea_dama_picas_en_vez_de_none_fijo():
+    """En `_mano_completa_simple()`, el asiento 0 recibe TODOS los tréboles y
+    por eso gana las 13 bazas (nadie más puede seguirle el palo) -- incluida
+    la que contiene la Dama de Picas, sin importar quién la descarte. Antes
+    del fix, `dama_picas_en` se pasaba hardcodeado a `None` en cada llamada a
+    `features_propio`, así que el one-hot [182:187] SIEMPRE marcaba "nadie la
+    tiene" (obs[182]==1), incluso en bazas posteriores a que ya fue capturada.
+    Con el fix, una vez resuelta la baza que la contenía, las features
+    posteriores deben reflejar obs[182]==0 (alguien la tiene) y
+    obs[183 + rel]==1 para el asiento que la ganó (rel=0 para el propio
+    asiento 0 == perspectiva agente==0)."""
+    mano = _mano_completa_simple()
+    ejemplos_propio, _ = ejemplos_de_mano(mano, asiento_agente_real=0)
+
+    # Los primeros ejemplos (antes de que se juegue ninguna carta) deben ver
+    # "nadie tiene la Dama" -- obs[182] == 1.
+    primeros_feats = [feats for feats, _ in ejemplos_propio[:4]]
+    assert all(feats[182] == 1.0 for feats in primeros_feats)
+
+    # En algún momento de la mano se captura la Dama (el reparto no fija en
+    # qué baza exacta ocurre, así que no asumimos "las últimas 4" -- solo que
+    # una vez que pasa, TODAS las snapshots restantes del asiento 0 (nunca
+    # excluido por el gate, ya que gana todos los puntos) lo reflejan y no
+    # vuelve a "nadie la tiene".
+    valores_182 = [feats[182] for feats, _ in ejemplos_propio]
+    assert 0.0 in valores_182, "la Dama nunca se marca como capturada"
+    primer_indice_capturada = valores_182.index(0.0)
+    restantes = ejemplos_propio[primer_indice_capturada:]
+    assert all(feats[182] == 0.0 for feats, _ in restantes)
+    # el asiento 0 gana todas las bazas (incluida la de la Dama) -> rel=0
+    assert all(feats[183] == 1.0 for feats, _ in restantes)
+
+
 def test_construir_dataset_agrupa_por_partida_y_salta_manos_no_reconstruibles(tmp_path):
     mano_ok = _mano_completa_simple()
     # Sin jugadas ni manos_restantes: reconstruir_manos no puede completar las

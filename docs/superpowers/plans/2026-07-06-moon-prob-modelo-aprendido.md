@@ -1641,19 +1641,19 @@ git commit -m "feat: wire EstimadorMoonProb into recomendador.py, drop dead Mont
 
 **Files:** ninguno (verificación, sin cambios de código)
 
-- [ ] **Step 1: Correr la suite completa**
+- [x] **Step 1: Correr la suite completa**
 
 Run: `python -m pytest tests/ -q`
 Expected: todos los tests pasan (los existentes + los ~40 nuevos de este plan)
 
-- [ ] **Step 2: Smoke test end-to-end con un checkpoint real**
+- [x] **Step 2: Smoke test end-to-end con un checkpoint real**
 
 Run: `python scripts/recomendador.py --modelo models/produccion/v10c_campeon --demo`
 Expected: corre sin errores, imprime recomendaciones de pase y jugada
 (verificar que no tira excepciones por `historial_bazas`/`receptor`/`dador`
 sin inicializar en el flujo real de `__init__` + `reset_mano`).
 
-- [ ] **Step 3: Backtest de regret -- después de conectar los modelos aprendidos**
+- [x] **Step 3: Backtest de regret -- después de conectar los modelos aprendidos**
 
 Run: `python scripts/pimc_regret_real.py --modelo models/produccion/v10c_campeon --partidas data/partidas_bridge.jsonl --max-decisiones 5000 --rollouts 30`
 
@@ -1665,6 +1665,22 @@ estimación de moon_prob en partidas reales -- evidencia para decidir si
 vale la pena la Fase 2 (reentrenar v10c). Si no bajan, iterar sobre
 features/arquitectura antes de tocar el entrenamiento.
 
+**RESULTADO (2026-07-06):** sobre las mismas 4767 decisiones, el backtest
+DESPUÉS de conectar los modelos aprendidos dio regret medio 1.025 (antes:
+1.021), % óptimo 56.0% (antes: 56.1%), ≥3pts 11.2% (antes: 11.4%), ≥5pts
+5.5% (sin cambio), ≥10pts 1.2% (sin cambio). **Sin mejora medible** — los
+deltas son del tamaño del ruido de muestreo del rollout Monte Carlo (30
+rollouts/decisión), no una señal clara de mejora ni de regresión. Esto es
+consistente con el AUC de validación débil de ambos modelos aprendidos
+(0.44-0.58, cerca o por debajo del azar) medido en el Task 6 — la escasez
+de datos reales (solo 483/3028 manos reconstruibles, pozos un evento raro
+dentro de esas) parece ser el techo real, no un bug de esta implementación
+(revisada y verificada en 3 rondas de review). **No hay evidencia para
+iniciar la Fase 2 con este dataset.** Antes de reentrenar v10c, valdría más
+la pena: (a) conseguir más partidas reales reconstruibles, o (b) cerrar la
+brecha train/producción documentada en `entrenar_moon_prob.py` (marcador
+histórico fijo en `[0,0,0,0]` durante el entrenamiento, nunca el real).
+
 ---
 
 ## Notas para Fase 2 (fuera de este plan)
@@ -1674,3 +1690,11 @@ Una vez validado el backtest de regret, la Fase 2 (spec separado) conecta
 de `_calcular_moon_prob`) y hace fine-tune de `models/produccion/v10c_campeon`
 con LR bajo, manteniendo `obs_dim=228`. No iniciar esa fase sin los números
 del Task 11 en mano.
+
+**Actualización: los números del Task 11 ya están en mano (ver arriba) y NO
+muestran mejora.** Iniciar la Fase 2 tal como está escrita gastaría cómputo
+de reentrenamiento real sobre una señal que el propio backtest de este plan
+no pudo validar. Recomendado: no iniciar la Fase 2 todavía; primero atacar
+la escasez de datos o la brecha de marcador histórico documentada arriba, y
+volver a correr `pimc_regret_real.py` para confirmar que el regret realmente
+mejora antes de comprometerse a un fine-tune de v10c.
