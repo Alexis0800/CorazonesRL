@@ -90,3 +90,41 @@ def _tasa_lidero_corazon_dama(historial: List[EntradaBaza], idx: int) -> float:
     if not lideradas:
         return 0.0
     return sum(1 for h in lideradas if h.lidero_corazon_o_dama) / len(lideradas)
+
+
+def features_propio(
+    motor: MotorCorazones,
+    agente_idx: int,
+    vacios: List[set],
+    historial: List[EntradaBaza],
+    cartas_dadas: List[int],
+    cartas_recibidas: List[int],
+    puntuacion_historica: List[int],
+    puntos_mano_actual: List[int],
+    dama_picas_en: Optional[int],
+) -> np.ndarray:
+    """Features para "mi propio pozo": reutiliza el vector COMPLETO de
+    ObservacionBuilder(dim=332) desde mi perspectiva real (mano exacta,
+    cementerio, vacíos, memoria del pase v13 -- todo ya implementado), con
+    los 2 slots de moon_prob en 0 (son el objetivo a predecir, no pueden ser
+    también entrada), más 1 feature bonus: razón bazas-con-puntos que gané.
+    """
+    builder = ObservacionBuilder(dim=DIM_V13)
+    puedo_alimentar = any(
+        puntuacion_historica[j] >= 85 for j in range(4) if j != agente_idx
+    )
+    base = builder.construir(
+        motor=motor,
+        agente_idx=agente_idx,
+        vacios=vacios,
+        puntuacion_historica=puntuacion_historica,
+        puntos_mano_actual=puntos_mano_actual,
+        dama_picas_en=dama_picas_en,
+        moon_prob_agente=0.0,
+        moon_prob_rival=0.0,
+        puedo_alimentar=puedo_alimentar,
+        cartas_pasadas=cartas_dadas,
+        cartas_recibidas=cartas_recibidas,
+    )
+    ratio = _ratio_bazas_con_puntos(historial, agente_idx)
+    return np.concatenate([base, np.array([ratio], dtype=np.float32)])
