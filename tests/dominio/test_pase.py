@@ -6,7 +6,7 @@ Cubre la rotación de dirección, los receptores, el intercambio de 3 cartas
 """
 from __future__ import annotations
 
-from src.dominio.motor import MotorCorazones
+from src.dominio.motor import MotorCorazones, receptor_y_dador_por_numero_mano
 from src.dominio.carta import Carta
 
 
@@ -39,6 +39,34 @@ class TestDireccionPase:
         assert motor.receptor_pase(0) == 2
         motor.numero_mano = 4  # sin pase
         assert motor.receptor_pase(0) is None
+
+
+class TestReceptorYDadorPorNumeroMano:
+    def test_izquierda(self):
+        receptor, dador = receptor_y_dador_por_numero_mano(1, 0)
+        assert receptor == 1  # seat+1 = izquierda
+        assert dador == 3     # seat-1 me pasó a mí
+
+    def test_derecha(self):
+        receptor, dador = receptor_y_dador_por_numero_mano(2, 0)
+        assert receptor == 3
+        assert dador == 1
+
+    def test_enfrente(self):
+        receptor, dador = receptor_y_dador_por_numero_mano(3, 0)
+        assert receptor == 2
+        assert dador == 2
+
+    def test_sin_pase(self):
+        assert receptor_y_dador_por_numero_mano(4, 0) == (None, None)
+
+    def test_coincide_con_receptor_pase_para_los_4_asientos(self):
+        motor = MotorCorazones()
+        motor.numero_mano = 1
+        for seat in range(4):
+            receptor, dador = receptor_y_dador_por_numero_mano(1, seat)
+            assert receptor == motor.receptor_pase(seat)
+            assert motor.receptor_pase(dador) == seat
 
 
 class TestNumeroMano:

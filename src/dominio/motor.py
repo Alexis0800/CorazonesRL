@@ -265,4 +265,24 @@ class MotorCorazones:
         return self.aplicar_puntuacion()
 
 
-__all__ = ["MotorCorazones"]
+def receptor_y_dador_por_numero_mano(
+    numero_mano: int, seat: int,
+) -> Tuple[Optional[int], Optional[int]]:
+    """Asiento receptor y dador del pase de `seat` para una mano con este
+    número (ver `MotorCorazones.direccion_pase` para el ciclo
+    izquierda/derecha/enfrente/sin). `(None, None)` si esa mano no tiene pase.
+
+    Centraliza el patrón "motor descartable + receptor_pase()" que antes se
+    repetía por separado en scripts/recomendador.py y
+    scripts/entrenar_moon_prob.py.
+    """
+    m = MotorCorazones()
+    m.numero_mano = numero_mano
+    receptor = m.receptor_pase(seat)
+    if receptor is None:
+        return None, None
+    dador = next(d for d in range(4) if m.receptor_pase(d) == seat)
+    return receptor, dador
+
+
+__all__ = ["MotorCorazones", "receptor_y_dador_por_numero_mano"]

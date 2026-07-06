@@ -37,7 +37,7 @@ except Exception:
     pass
 
 from src.dominio.carta import Carta
-from src.dominio.motor import MotorCorazones
+from src.dominio.motor import MotorCorazones, receptor_y_dador_por_numero_mano
 from src.entorno.observacion import ObservacionBuilder
 from src.entorno.moon_model import EntradaBaza, EstimadorMoonProb
 from src.rllib.utils import cargar_policy_desde_checkpoint
@@ -176,14 +176,8 @@ class Recomendador:
         """Registra la ejecución REAL del pase (qué se dio y qué se recibió),
         para alimentar la memoria de pase de moon_model. Llamar después de
         recomendar_pase y antes de la primera jugada de la mano."""
-        if direccion == "sin":
-            self.receptor = None
-            self.dador = None
-        else:
-            m = MotorCorazones()
-            m.numero_mano = _DIRECCION_A_MANO[direccion]
-            self.receptor = m.receptor_pase(self.me)
-            self.dador = next(d for d in range(4) if m.receptor_pase(d) == self.me)
+        self.receptor, self.dador = receptor_y_dador_por_numero_mano(
+            _DIRECCION_A_MANO[direccion], self.me)
         self.cartas_dadas = [c.id for c in cartas_dadas]
         self.cartas_recibidas = [c.id for c in cartas_recibidas]
 

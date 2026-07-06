@@ -43,7 +43,7 @@ from src.captura.escritor import cargar_partidas
 from src.captura.modelos import RegistroMano, RegistroPartida
 from src.captura.replay import _preparar_motor, mano_reconstruible
 from src.dominio.carta import Carta
-from src.dominio.motor import MotorCorazones
+from src.dominio.motor import receptor_y_dador_por_numero_mano
 from src.entorno.moon_model import (
     DIM_PROPIO,
     DIM_RIVAL,
@@ -61,11 +61,7 @@ def _receptor_y_dador(direccion: Optional[str], seat: int) -> Tuple[Optional[int
     """Índice de asiento receptor/dador del pase de `seat`, o (None, None) sin pase."""
     if direccion is None or direccion not in _DIRECCION_A_NUMERO_MANO:
         return None, None
-    m = MotorCorazones()
-    m.numero_mano = _DIRECCION_A_NUMERO_MANO[direccion]
-    receptor = m.receptor_pase(seat)
-    dador = next(d for d in range(4) if m.receptor_pase(d) == seat)
-    return receptor, dador
+    return receptor_y_dador_por_numero_mano(_DIRECCION_A_NUMERO_MANO[direccion], seat)
 
 
 def _lunaseat_de(mano: RegistroMano) -> Optional[int]:
