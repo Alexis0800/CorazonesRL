@@ -139,15 +139,19 @@ class Recomendador:
         scores = m.puntuaciones_historicas()
         puntos_mano_actual = [j.contar_puntos_bazas() for j in m.jugadores]
         mp_ag = self._estimador_moon.propio(
-            m, self.me, self.vacios, self.historial_bazas,
-            self.cartas_dadas, self.cartas_recibidas,
-            scores, puntos_mano_actual, self.dama_picas_en,
+            motor=m, agente_idx=self.me, vacios=self.vacios,
+            historial=self.historial_bazas,
+            cartas_dadas=self.cartas_dadas, cartas_recibidas=self.cartas_recibidas,
+            puntuacion_historica=scores, puntos_mano_actual=puntos_mano_actual,
+            dama_picas_en=self.dama_picas_en,
         )
         mp_riv = max(
             self._estimador_moon.rival(
-                m, i, self.me, self.vacios, self.historial_bazas,
-                self.receptor, self.dador, self.cartas_dadas, self.cartas_recibidas,
-                self.corazones_rotos,
+                motor=m, rival_idx=i, agente_idx=self.me, vacios=self.vacios,
+                historial=self.historial_bazas,
+                receptor=self.receptor, dador=self.dador,
+                cartas_dadas=self.cartas_dadas, cartas_recibidas=self.cartas_recibidas,
+                corazones_rotos=self.corazones_rotos,
             )
             for i in range(4) if i != self.me
         )
