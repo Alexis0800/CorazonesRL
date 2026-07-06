@@ -74,6 +74,48 @@ def test_receptor_y_dador_sin_pase():
     assert _receptor_y_dador(None, 0) == (None, None)
 
 
+def test_ejemplos_de_mano_usa_puntuacion_historica_inicial():
+    mano = _mano_completa_simple()
+    ejemplos_propio, _ = ejemplos_de_mano(
+        mano, asiento_agente_real=0, puntuacion_historica_inicial=[10, 20, 30, 40])
+    feats, _ = ejemplos_propio[0]
+    # obs[172:176]: rel=(jug_idx-agente)%4 -> [172]=propio, [173]=seat1, [174]=seat2, [175]=seat3
+    assert feats[172] == 10 / 100.0
+    assert feats[173] == 20 / 100.0
+    assert feats[174] == 30 / 100.0
+    assert feats[175] == 40 / 100.0
+
+
+def test_ejemplos_de_mano_default_puntuacion_historica_es_cero():
+    mano = _mano_completa_simple()
+    ejemplos_propio, _ = ejemplos_de_mano(mano, asiento_agente_real=0)
+    feats, _ = ejemplos_propio[0]
+    assert feats[172] == 0.0
+
+
+def test_construir_dataset_acumula_marcador_entre_manos(tmp_path):
+    mano1 = _mano_completa_simple()  # asiento 0 hace el pozo -> puntuacion_mano == [0, 26, 26, 26]
+    assert mano1.puntuacion_mano == [0, 26, 26, 26]
+    mano2 = _mano_completa_simple()
+    mano2.numero_mano = 2
+    partida = RegistroPartida(
+        partida_id="p1", timestamp="2026-01-01T00:00:00", asiento_agente=0,
+        fuente="test", manos=[mano1, mano2],
+    )
+    ruta = tmp_path / "partidas.jsonl"
+    EscritorJsonl(ruta).escribir(partida)
+
+    propio, _, _ = construir_dataset(str(ruta))
+    # el ÚLTIMO ejemplo de la partida es del asiento 0 en mano2 (el único
+    # asiento que el gate nunca excluye, porque hace el pozo en las dos
+    # manos) -- debe reflejar el marcador acumulado de mano1 ([0,26,26,26])
+    # como puntuacion_historica, NO [0,0,0,0].
+    ultimo_feats, _ = propio["p1"][-1]
+    assert ultimo_feats[173] == 26 / 100.0  # rival 1 (rel=1) ya tiene 26 de mano1
+    assert ultimo_feats[174] == 26 / 100.0
+    assert ultimo_feats[175] == 26 / 100.0
+
+
 def test_ejemplos_de_mano_formas_y_no_vacio():
     mano = _mano_completa_simple()
     ejemplos_propio, ejemplos_rival = ejemplos_de_mano(mano, asiento_agente_real=0)

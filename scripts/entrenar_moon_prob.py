@@ -14,17 +14,6 @@ real de los datos disponibles, y coincide con el caso legítimo de "sin
 información de pase" que también ocurre en producción (el 4º jugador nunca
 tiene relación de pase conmigo).
 
-Segunda limitación conocida: `ejemplos_de_mano` pasa `puntuacion_historica=
-[0, 0, 0, 0]` fijo a `features_propio` en TODA llamada, en vez del marcador
-real acumulado de manos previas de la misma partida (`RegistroMano.
-puntuacion_mano` sumado a través de las manos anteriores del `RegistroPartida`
--- el dato existe, pero no se hila entre manos hoy). Esto significa que el
-modelo "propio" nunca aprende de las features dependientes del marcador
-(`[172:176]`, `[195]`, `[197]`, `[198]`, `puedo_alimentar`) -- son,
-efectivamente, entradas muertas en el modelo tal como está entrenado hoy. Un
-futuro reentrenamiento debería acumular el marcador real entre manos dentro
-de `construir_dataset` antes de confiar en esas features.
-
 Uso:
     python scripts/entrenar_moon_prob.py --partidas data/partidas_bridge.jsonl \
         --out-dir models/moon --epocas 300
@@ -93,12 +82,23 @@ def _lunaseat_de(mano: RegistroMano) -> Optional[int]:
     return None
 
 
-def ejemplos_de_mano(mano: RegistroMano, asiento_agente_real: int):
+def ejemplos_de_mano(
+    mano: RegistroMano, asiento_agente_real: int,
+    puntuacion_historica_inicial: Optional[List[int]] = None,
+):
     """(features, label) para el modelo propio y para el rival, por cada
-    baza resuelta, desde las 4 perspectivas posibles."""
+    baza resuelta, desde las 4 perspectivas posibles.
+
+    `puntuacion_historica_inicial` es el marcador acumulado ANTES de esta
+    mano (de manos previas de la misma partida) -- [0,0,0,0] si se omite
+    (p.ej. la primera mano de una partida)."""
     motor = _preparar_motor(mano)
     luna_seat = _lunaseat_de(mano)
     receptor_agente, dador_agente = _receptor_y_dador(mano.direccion_pase, asiento_agente_real)
+    puntuacion_historica = (
+        list(puntuacion_historica_inicial) if puntuacion_historica_inicial is not None
+        else [0, 0, 0, 0]
+    )
 
     historial: List[EntradaBaza] = []
     ejemplos_propio = []
@@ -123,7 +123,7 @@ def ejemplos_de_mano(mano: RegistroMano, asiento_agente_real: int):
                 recibidas = mano.pase_recibido if seat == asiento_agente_real else []
                 feats = features_propio(
                     motor, seat, vacios, historial, dadas, recibidas,
-                    [0, 0, 0, 0], puntos_mano_actual, dama_picas_en,
+                    puntuacion_historica, puntos_mano_actual, dama_picas_en,
                 )
                 ejemplos_propio.append((feats, 1.0 if seat == luna_seat else 0.0))
 
@@ -174,16 +174,29 @@ def construir_dataset(ruta_partidas: str):
     for p in partidas:
         ep: list = []
         er: list = []
+        puntuacion_historica = [0, 0, 0, 0]
         for mano in p.manos:
             if not mano_reconstruible(mano):
+                if mano.puntuacion_mano:
+                    puntuacion_historica = [
+                        puntuacion_historica[i] + mano.puntuacion_mano[i] for i in range(4)
+                    ]
                 continue
             try:
-                e1, e2 = ejemplos_de_mano(mano, p.asiento_agente)
+                e1, e2 = ejemplos_de_mano(mano, p.asiento_agente, puntuacion_historica)
             except ValueError as e:
                 avisos.append(f"{p.partida_id}: mano {mano.numero_mano} descartada ({e})")
+                if mano.puntuacion_mano:
+                    puntuacion_historica = [
+                        puntuacion_historica[i] + mano.puntuacion_mano[i] for i in range(4)
+                    ]
                 continue
             ep.extend(e1)
             er.extend(e2)
+            if mano.puntuacion_mano:
+                puntuacion_historica = [
+                    puntuacion_historica[i] + mano.puntuacion_mano[i] for i in range(4)
+                ]
         if ep or er:
             propio_por_partida[p.partida_id] = ep
             rival_por_partida[p.partida_id] = er
