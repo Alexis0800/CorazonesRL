@@ -14,6 +14,7 @@ from src.entorno.moon_model import (
     _ratio_bazas_con_puntos,
     _tasa_lidero_corazon_dama,
     features_propio,
+    features_rival,
 )
 
 
@@ -134,3 +135,77 @@ class TestFeaturesPropio:
         ]
         feats = features_propio(m, 0, vacios, historial, [], [], [0, 0, 0, 0], [0, 0, 0, 0], None)
         assert feats[-1] == 1.0  # gané la única baza-con-puntos jugada
+
+
+class TestFeaturesRival:
+    def test_forma(self):
+        m = MotorCorazones()
+        m.repartir()
+        vacios = [set() for _ in range(4)]
+        feats = features_rival(m, 1, 0, vacios, [], [], [], False)
+        assert feats.shape == (DIM_RIVAL,)
+        assert feats.dtype == np.float32
+
+    def test_capturas_del_rival_en_el_primer_bloque(self):
+        m = MotorCorazones()
+        m.repartir()
+        carta_rival = _carta(3, 5)  # 5 de corazones
+        m.jugadores[1].bazas_ganadas = [carta_rival]
+        vacios = [set() for _ in range(4)]
+        feats = features_rival(m, 1, 0, vacios, [], [], [], False)
+        assert feats[carta_rival.id] == 1.0
+
+    def test_cementerio_global_en_el_segundo_bloque(self):
+        m = MotorCorazones()
+        m.repartir()
+        carta_ajena = _carta(0, 7)
+        m.jugadores[2].bazas_ganadas = [carta_ajena]
+        vacios = [set() for _ in range(4)]
+        feats = features_rival(m, 1, 0, vacios, [], [], [], False)
+        assert feats[52 + carta_ajena.id] == 1.0
+
+    def test_vacios_del_rival(self):
+        m = MotorCorazones()
+        m.repartir()
+        vacios = [set() for _ in range(4)]
+        vacios[1].add(2)  # rival 1 es void en picas
+        feats = features_rival(m, 1, 0, vacios, [], [], [], False)
+        assert feats[156 + 2] == 1.0
+        assert feats[156 + 0] == 0.0
+
+    def test_posicion_relativa_one_hot(self):
+        m = MotorCorazones()
+        m.repartir()
+        vacios = [set() for _ in range(4)]
+        # rival 1 respecto de agente 0: rel=1 -> izquierda -> índice 165
+        feats = features_rival(m, 1, 0, vacios, [], [], [], False)
+        assert feats[165] == 1.0
+        assert feats[166] == 0.0 and feats[167] == 0.0
+        # rival 3 respecto de agente 0: rel=3 -> derecha -> índice 167
+        feats3 = features_rival(m, 3, 0, vacios, [], [], [], False)
+        assert feats3[167] == 1.0
+
+    def test_cartas_dadas_al_rival_aun_no_jugadas(self):
+        m = MotorCorazones()
+        m.repartir()
+        vacios = [set() for _ in range(4)]
+        carta_dada = m.jugadores[2].mano[0]  # cualquier carta que no esté jugada
+        feats = features_rival(m, 1, 0, vacios, [], [carta_dada.id], [], False)
+        assert feats[168 + carta_dada.id] == 1.0
+
+    def test_cartas_dadas_ya_jugadas_no_se_marcan(self):
+        m = MotorCorazones()
+        m.repartir()
+        vacios = [set() for _ in range(4)]
+        carta_jugada = _carta(0, 9)
+        m.jugadores[0].bazas_ganadas = [carta_jugada]
+        feats = features_rival(m, 1, 0, vacios, [], [carta_jugada.id], [], False)
+        assert feats[168 + carta_jugada.id] == 0.0
+
+    def test_cartas_recibidas_del_rival_marcadas_siempre(self):
+        m = MotorCorazones()
+        m.repartir()
+        vacios = [set() for _ in range(4)]
+        carta_recibida = _carta(1, 6)
+        feats = features_rival(m, 1, 0, vacios, [], [], [carta_recibida.id], False)
+        assert feats[220 + carta_recibida.id] == 1.0

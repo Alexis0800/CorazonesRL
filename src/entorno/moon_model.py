@@ -128,3 +128,64 @@ def features_propio(
     )
     ratio = _ratio_bazas_con_puntos(historial, agente_idx)
     return np.concatenate([base, np.array([ratio], dtype=np.float32)])
+
+
+def features_rival(
+    motor: MotorCorazones,
+    rival_idx: int,
+    agente_idx: int,
+    vacios: List[set],
+    historial: List[EntradaBaza],
+    cartas_dadas_a_rival: List[int],
+    cartas_recibidas_de_rival: List[int],
+    corazones_rotos: bool,
+) -> np.ndarray:
+    """Features para "¿el rival `rival_idx` está armando el pozo?" -- SOLO
+    señales públicas sobre ESE rival específico (nunca su mano real: eso
+    filtraría información imposible de tener en producción).
+
+    Layout (272 dims):
+      [0:52]    cartas capturadas por el rival (one-hot exacto, no conteo)
+      [52:104]  cementerio global (todas las capturas de los 4 jugadores)
+      [104:156] mesa actual (la baza en curso hasta el momento)
+      [156:160] vacíos del rival por palo
+      [160]     razón bazas-con-puntos que ganó el rival
+      [161]     tasa que lideró con corazón/Q♠ pudiendo evitarlo
+      [162]     ¿va ganando la baza en curso ahora mismo?
+      [163]     baza actual / 13.0
+      [164]     corazones rotos
+      [165:168] posición relativa del rival (izquierda/frente/derecha)
+      [168:220] cartas que LE DI (soy su dador) y aún no se han jugado
+      [220:272] cartas que recibí DE ÉL (ya no las tiene)
+    """
+    obs = np.zeros(DIM_RIVAL, dtype=np.float32)
+
+    for c in motor.jugadores[rival_idx].bazas_ganadas:
+        obs[c.id] = 1.0
+    for j in motor.jugadores:
+        for c in j.bazas_ganadas:
+            obs[52 + c.id] = 1.0
+    for _, c in motor.mesa:
+        obs[104 + c.id] = 1.0
+
+    for palo in vacios[rival_idx]:
+        obs[156 + palo] = 1.0
+
+    obs[160] = _ratio_bazas_con_puntos(historial, rival_idx)
+    obs[161] = _tasa_lidero_corazon_dama(historial, rival_idx)
+    obs[162] = 1.0 if _ganador_parcial(motor) == rival_idx else 0.0
+    obs[163] = min(motor.numero_baza / 13.0, 1.0)
+    obs[164] = 1.0 if corazones_rotos else 0.0
+
+    rel = (rival_idx - agente_idx) % 4  # 1=izquierda, 2=frente, 3=derecha (nunca 0)
+    obs[165 + (rel - 1)] = 1.0
+
+    jugadas = {c.id for j in motor.jugadores for c in j.bazas_ganadas}
+    jugadas.update(c.id for _, c in motor.mesa)
+    for cid in cartas_dadas_a_rival:
+        if cid not in jugadas:
+            obs[168 + cid] = 1.0
+    for cid in cartas_recibidas_de_rival:
+        obs[220 + cid] = 1.0
+
+    return obs
