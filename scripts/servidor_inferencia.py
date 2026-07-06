@@ -14,6 +14,10 @@ Uso:
 Endpoints (todos POST salvo aclaración, cuerpo y respuesta JSON):
     /reset_mano       {"cartas": [id, ...]}                        -> {"ok": true}
     /recomendar_pase  {"direccion": "izquierda|derecha|frente|sin"} -> {"cartas": [id, id, id]}
+    /registrar_pase   {"direccion": "...", "cartas_dadas": [id,id,id],
+                        "cartas_recibidas": [id,id,id]} -> {"ok": true}
+        El bridge reporta la ejecución REAL del pase (no solo la sugerencia
+        de /recomendar_pase) -- alimenta la memoria de pase de moon_model.
     /recomendar_jugada {"mesa_antes": [[asiento, cartaId], ...]}    -> {"carta": id}
     /registrar_baza   {"jugadas": [[asiento, cartaId], ...], "ganador": asiento}
         -> {"ok": true} normalmente; si esa era la 13ª baza de la mano, además
@@ -131,6 +135,13 @@ class Handler(BaseHTTPRequestHandler):
                 cartas = r.recomendar_pase(datos["direccion"])
                 salida = {"cartas": [c.id for c in cartas]}
                 self._log_evento("recomendar_pase", datos, salida)
+                self._responder(200, salida)
+            elif self.path == "/registrar_pase":
+                cartas_dadas = [_carta(i) for i in datos["cartas_dadas"]]
+                cartas_recibidas = [_carta(i) for i in datos["cartas_recibidas"]]
+                r.registrar_pase(datos["direccion"], cartas_dadas, cartas_recibidas)
+                salida = {"ok": True}
+                self._log_evento("registrar_pase", datos, salida)
                 self._responder(200, salida)
             elif self.path == "/recomendar_jugada":
                 mesa_antes = [(idx, _carta(cid))

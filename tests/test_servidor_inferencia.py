@@ -121,6 +121,24 @@ def test_puntos_endpoint_devuelve_marcador_actual(tmp_path):
         server.shutdown()
 
 
+def test_registrar_pase_actualiza_estado_del_recomendador(tmp_path):
+    server, r = _servidor_sin_modelo(tmp_path)
+    try:
+        puerto = server.server_address[1]
+        salida = _post(puerto, "/registrar_pase", {
+            "direccion": "izquierda",
+            "cartas_dadas": [0, 1, 2],
+            "cartas_recibidas": [10, 11, 12],
+        })
+        assert salida == {"ok": True}
+        assert r.receptor == 1
+        assert r.dador == 3
+        assert r.cartas_dadas == [0, 1, 2]
+        assert r.cartas_recibidas == [10, 11, 12]
+    finally:
+        server.shutdown()
+
+
 def test_terminar_partida_reinicia_marcador_y_devuelve_scores_finales(tmp_path):
     server, r = _servidor_sin_modelo(tmp_path)
     try:
