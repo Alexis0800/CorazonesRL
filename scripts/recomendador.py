@@ -40,6 +40,7 @@ except Exception:
 
 from src.dominio.carta import Carta
 from src.dominio.motor import MotorCorazones
+from src.entorno.moon_model import EntradaBaza
 from src.entorno.observacion import ObservacionBuilder
 from src.mcts.pimc import determinizar
 from src.rllib.utils import cargar_policy_desde_checkpoint
@@ -141,6 +142,7 @@ class Recomendador:
         self.corazones_rotos = False
         self.numero_baza = 1
         self.dama_picas_en: Optional[int] = None
+        self.historial_bazas: List[EntradaBaza] = []
 
     # ---- reconstrucción del motor desde el estado público ----
     def _motor(self, mesa: List, numero_mano: int = 1) -> MotorCorazones:
@@ -272,6 +274,14 @@ class Recomendador:
             if idx == self.me and c in self.mano:
                 self.mano.remove(c)
         self.cementerio[ganador].extend([c for _, c in jugadas])
+        self.historial_bazas.append(EntradaBaza(
+            lider=jugadas[0][0],
+            ganador=ganador,
+            tenia_puntos=any(c.puntos > 0 for _, c in jugadas),
+            lidero_corazon_o_dama=(
+                jugadas[0][1].es_corazon or jugadas[0][1].es_dama_de_picas
+            ),
+        ))
         self.numero_baza += 1
         if self.numero_baza > 13:
             return self._finalizar_mano()
@@ -294,6 +304,12 @@ class Recomendador:
             if c in self.mano:
                 self.mano.remove(c)
         self.cementerio[ganador].extend(cartas_restantes)
+        self.historial_bazas.append(EntradaBaza(
+            lider=None,
+            ganador=ganador,
+            tenia_puntos=any(c.puntos > 0 for c in cartas_restantes),
+            lidero_corazon_o_dama=False,
+        ))
         self.numero_baza = 14
         return self._finalizar_mano()
 

@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 from recomendador import Recomendador, parse_carta, parse_cartas
 from src.dominio.carta import Carta
+from src.entorno.moon_model import EntradaBaza
 
 
 def _recomendador_sin_modelo(mi_idx: int = 0) -> Recomendador:
@@ -63,3 +64,35 @@ def test_mundos_moon_devuelve_n_mundos_validos():
     for mundo in mundos:
         repartidas = sum(len(mundo.jugadores[i].mano) for i in range(4) if i != r.me)
         assert repartidas == len(Carta._TODAS) - len(r.mano)
+
+
+def test_registrar_baza_agrega_al_historial():
+    r = _recomendador_sin_modelo()
+    r.mano = parse_cartas("AP KP QP JP 10P 9P 8P 7P 6P 5P 4P 3P 2P")
+    jugadas = [(0, parse_carta("2T")), (1, parse_carta("5T")),
+               (2, parse_carta("9C")), (3, parse_carta("3T"))]  # 9 de corazones: tiene puntos
+    r.registrar_baza(jugadas, ganador=2)
+    assert len(r.historial_bazas) == 1
+    entrada = r.historial_bazas[0]
+    assert entrada.lider == 0
+    assert entrada.ganador == 2
+    assert entrada.tenia_puntos is True
+    assert entrada.lidero_corazon_o_dama is False  # lideró con 2♣, no con corazón/Q♠
+
+
+def test_registrar_resto_agrega_al_historial_sin_lider():
+    r = _recomendador_sin_modelo()
+    r.mano = []
+    r.registrar_resto(ganador=1, cartas_restantes=parse_cartas("QP 5C"))
+    assert len(r.historial_bazas) == 1
+    entrada = r.historial_bazas[0]
+    assert entrada.lider is None
+    assert entrada.ganador == 1
+    assert entrada.tenia_puntos is True
+
+
+def test_reset_mano_limpia_el_historial():
+    r = _recomendador_sin_modelo()
+    r.historial_bazas = [EntradaBaza(0, 0, True, False)]
+    r.reset_mano([])
+    assert r.historial_bazas == []
