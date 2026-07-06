@@ -191,7 +191,9 @@ def _auc(y_true: np.ndarray, y_score: np.ndarray) -> float:
     neg = y_score[y_true == 0]
     if len(pos) == 0 or len(neg) == 0:
         return float("nan")
-    return float(np.mean(pos[:, None] > neg[None, :]))
+    gana = pos[:, None] > neg[None, :]
+    empata = pos[:, None] == neg[None, :]
+    return float(np.mean(gana) + 0.5 * np.mean(empata))
 
 
 def _brier(y_true: np.ndarray, y_score: np.ndarray) -> float:
@@ -248,6 +250,13 @@ def _entrenar(red, X_train, y_train, X_val, y_val, epocas: int, lr: float = 1e-3
     return red, _auc(y_val, pred_final), _brier(y_val, pred_final)
 
 
+def _apilar(ejemplos):
+    """[(features, label), ...] -> (X, y) arrays float32."""
+    X = np.stack([f for f, _ in ejemplos]).astype(np.float32)
+    y = np.array([l for _, l in ejemplos], dtype=np.float32)
+    return X, y
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -257,6 +266,7 @@ def main() -> None:
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--val-frac", type=float, default=0.2)
     args = p.parse_args()
+    torch.manual_seed(args.seed)
 
     print("Generando ejemplos desde manos reales reconstruibles...", flush=True)
     propio_por_partida, rival_por_partida, timestamp_por_partida = construir_dataset(args.partidas)
@@ -275,7 +285,10 @@ def main() -> None:
     # vez de generalización real.
     ids_por_fecha = sorted(ids, key=lambda pid: timestamp_por_partida[pid])
     corte_fecha = int(len(ids_por_fecha) * (1 - args.val_frac))
-    val_ids_recientes = set(ids_por_fecha[corte_fecha:])
+    # Intersecar con val_ids: si no, la mayoría de las "recientes" ya estarían
+    # en train (vistas en entrenamiento) y el diagnóstico de sobreajuste
+    # mediría datos que el modelo ya conoce, no datos realmente no vistos.
+    val_ids_recientes = set(ids_por_fecha[corte_fecha:]) & val_ids
 
     out = _Path(args.out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -293,10 +306,8 @@ def main() -> None:
         print(f"\n=== modelo {nombre}: {len(train)} train / {len(val)} val "
               f"({pct_pos:.1f}% positivos train) ===", flush=True)
 
-        X_train = np.stack([f for f, _ in train]).astype(np.float32)
-        y_train = np.array([l for _, l in train], dtype=np.float32)
-        X_val = np.stack([f for f, _ in val]).astype(np.float32)
-        y_val = np.array([l for _, l in val], dtype=np.float32)
+        X_train, y_train = _apilar(train)
+        X_val, y_val = _apilar(val)
 
         red = _RedMoonMLP(dim)
         red, auc, brier = _entrenar(red, X_train, y_train, X_val, y_val, args.epocas)
@@ -304,8 +315,7 @@ def main() -> None:
 
         recientes = [e for pid in val_ids_recientes for e in ejemplos_por_partida[pid]]
         if recientes:
-            X_r = np.stack([f for f, _ in recientes]).astype(np.float32)
-            y_r = np.array([l for _, l in recientes], dtype=np.float32)
+            X_r, y_r = _apilar(recientes)
             with torch.no_grad():
                 pred_r = red(torch.from_numpy(X_r)).numpy()
             print(f"  AUC en sesiones más recientes: {_auc(y_r, pred_r):.3f}  "

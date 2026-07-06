@@ -135,10 +135,16 @@ def test_auc_perfecto_cuando_scores_separan_las_clases():
     assert _auc(y_true, y_score) == 1.0
 
 
-def test_auc_medio_si_no_hay_de_una_clase():
+def test_auc_nan_si_no_hay_de_una_clase():
     y_true = np.array([1, 1], dtype=np.float32)
     y_score = np.array([0.5, 0.6], dtype=np.float32)
     assert np.isnan(_auc(y_true, y_score))
+
+
+def test_auc_medio_si_todos_los_scores_empatan():
+    y_true = np.array([0, 1], dtype=np.float32)
+    y_score = np.array([0.5, 0.5], dtype=np.float32)
+    assert _auc(y_true, y_score) == 0.5
 
 
 def test_brier_cero_si_prediccion_perfecta():
