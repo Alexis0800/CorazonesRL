@@ -291,13 +291,21 @@ class OpponentPool:
         diverso = self._pool_diverso
 
         def _bot_dificil():
-            """Oponente 'duro': BotExperto, o un arquetipo humano al azar si pool_diverso."""
+            """Oponente 'duro': BotExperto, o un arquetipo humano al azar si pool_diverso.
+
+            BotLunatico con el doble de peso que los demás: el backtest de regret
+            sobre partidas reales (2026-07-06, pimc_regret_real.py --volcar-json)
+            mostró que las manos con pozo concentran el error del campeón (regret
+            medio 2.35 vs 1.05 en manos normales) pese a que pool_diverso ya
+            incluía a BotLunatico -- exposición insuficiente en el mix original.
+            """
             if diverso:
                 from src.agentes.bot_castigador import BotCastigador
                 from src.agentes.bot_lunatico import BotLunatico
                 from src.agentes.bot_atacante_lider import BotAtacanteLider
-                return random.choice([BotExperto, BotCastigador, BotLunatico,
-                                      BotAtacanteLider])()
+                arquetipos = [BotExperto, BotCastigador, BotLunatico, BotAtacanteLider]
+                pesos = [1, 1, 2, 1]
+                return random.choices(arquetipos, weights=pesos, k=1)[0]()
             return BotExperto()
 
         def _factory(agente_idx: int = 0) -> Dict[int, PolicyFn]:
