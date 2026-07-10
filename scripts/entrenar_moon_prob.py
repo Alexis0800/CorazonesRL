@@ -224,12 +224,18 @@ def _brier(y_true: np.ndarray, y_score: np.ndarray) -> float:
 
 
 def _entrenar(red, X_train, y_train, X_val, y_val, epocas: int, lr: float = 1e-3,
-              paciencia: int = 15):
+              paciencia: int = 15, batch: int = 256):
+    # ponytail: full-batch (1 paso de gradiente por época) andaba bien con los
+    # ~10-20k ejemplos del dataset solo-real, pero con el dataset simulado
+    # (cientos de miles de ejemplos) 300 pasos totales ni se acercan a converger
+    # -- por eso el AUC salía en 0.48 (sin señal) pese a tener miles de positivos.
+    # Mini-batch shuffled, igual que finetune_bc_pozo.py.
     opt = torch.optim.Adam(red.parameters(), lr=lr)
     perdida = nn.BCELoss()
     Xt = torch.from_numpy(X_train)
     yt = torch.from_numpy(y_train)
     Xv = torch.from_numpy(X_val)
+    g = torch.Generator().manual_seed(0)
 
     mejor_auc = -1.0
     mejor_brier = float("inf")
@@ -238,10 +244,13 @@ def _entrenar(red, X_train, y_train, X_val, y_val, epocas: int, lr: float = 1e-3
 
     for _ in range(epocas):
         red.train()
-        opt.zero_grad()
-        loss = perdida(red(Xt), yt)
-        loss.backward()
-        opt.step()
+        perm = torch.randperm(len(Xt), generator=g)
+        for i in range(0, len(perm), batch):
+            b = perm[i:i + batch]
+            opt.zero_grad()
+            loss = perdida(red(Xt[b]), yt[b])
+            loss.backward()
+            opt.step()
 
         red.eval()
         with torch.no_grad():
@@ -286,6 +295,7 @@ def main() -> None:
     p.add_argument("--partidas", required=True)
     p.add_argument("--out-dir", default="models/moon")
     p.add_argument("--epocas", type=int, default=300)
+    p.add_argument("--batch", type=int, default=256)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--val-frac", type=float, default=0.2)
     args = p.parse_args()
@@ -333,7 +343,7 @@ def main() -> None:
         X_val, y_val = _apilar(val)
 
         red = _RedMoonMLP(dim)
-        red, auc, brier = _entrenar(red, X_train, y_train, X_val, y_val, args.epocas)
+        red, auc, brier = _entrenar(red, X_train, y_train, X_val, y_val, args.epocas, batch=args.batch)
         print(f"  AUC val: {auc:.3f}  |  Brier val: {brier:.4f}")
 
         recientes = [e for pid in val_ids_recientes for e in ejemplos_por_partida[pid]]

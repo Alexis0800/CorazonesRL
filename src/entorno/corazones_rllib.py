@@ -35,6 +35,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 from src.dominio.carta import Carta
 from src.dominio.motor import MotorCorazones
 from src.entorno.dimensiones import DIM_ENTORNO
+from src.entorno.moon_model import EntradaBaza, EstimadorMoonProb
 from src.entorno.observacion import ObservacionBuilder
 from src.entorno.recompensas_partida import (
     CalculadoraRecompensasPartida,
@@ -100,11 +101,18 @@ class CorazonesEnvRLlib(gym.Env):
         self._motor = MotorCorazones()
         self._obs_builder = ObservacionBuilder(dim=self._obs_dim)
         self._calc = CalculadoraRecompensasPartida(self._reward_config)
+        # Modelos aprendidos de moon_prob (fallback seguro a 0.0 si no hay
+        # pesos entrenados en models/moon/) -- MISMO estimador que produccion
+        # (recomendador.py), para que la política entrene sobre la señal que
+        # de verdad va a ver en inferencia (antes usaba la heurística fija de
+        # _calcular_moon_prob solo aquí, nunca en producción).
+        self._estimador_moon = EstimadorMoonProb()
 
         # Estado por mano (se reinicia al inicio de cada mano)
         self._puntos_mano_actual: List[int] = [0] * 4
         self._vacios: List[set] = [set() for _ in range(4)]
         self._dama_picas_en: Optional[int] = None
+        self._historial_bazas: List[EntradaBaza] = []
 
         # Estado por partida (se reinicia en reset())
         self._opponents: Dict[int, PolicyFn] = {}
@@ -282,6 +290,7 @@ class CorazonesEnvRLlib(gym.Env):
         self._puntos_mano_actual = [0] * 4
         self._vacios = [set() for _ in range(4)]
         self._dama_picas_en = None
+        self._historial_bazas = []
 
     def _reset_oponentes_por_mano(self) -> None:
         """Resetea el estado interno de oponentes con estado por mano (BotExperto, etc.)."""
@@ -320,11 +329,17 @@ class CorazonesEnvRLlib(gym.Env):
                 self._resolver_baza()
 
     def _resolver_baza(self) -> None:
-        """Resuelve la baza y actualiza estado táctico (Q♠, puntos de mano)."""
+        """Resuelve la baza y actualiza estado táctico (Q♠, puntos de mano, historial)."""
+        lider_idx, carta_lider = self._motor.mesa[0]  # capturar ANTES: resolver_baza() vacía mesa
         cartas_en_mesa = [c for _, c in self._motor.mesa]
+        tenia_puntos = any(c.puntos > 0 for c in cartas_en_mesa)
         ganador = self._motor.resolver_baza()
         if any(c.es_dama_de_picas for c in cartas_en_mesa):
             self._dama_picas_en = ganador
+        self._historial_bazas.append(EntradaBaza(
+            lider=lider_idx, ganador=ganador, tenia_puntos=tenia_puntos,
+            lidero_corazon_o_dama=carta_lider.es_corazon or carta_lider.es_dama_de_picas,
+        ))
         for i, jug in enumerate(self._motor.jugadores):
             self._puntos_mano_actual[i] = jug.contar_puntos_bazas()
 
@@ -347,30 +362,6 @@ class CorazonesEnvRLlib(gym.Env):
             if carta.palo != self._motor.palo_de_salida:
                 self._vacios[jugador_idx].add(self._motor.palo_de_salida)
 
-    def _calcular_moon_prob(self, jugador_idx: int) -> float:
-        """Probabilidad aproximada [0, 1] de que jugador_idx complete Moon."""
-        for i, jug in enumerate(self._motor.jugadores):
-            if i != jugador_idx and jug.contar_puntos_bazas() > 0:
-                return 0.0
-
-        jug = self._motor.jugadores[jugador_idx]
-        todas = list(jug.mano) + list(jug.bazas_ganadas)
-
-        high_hearts = sum(1 for c in todas if c.es_corazon and c.valor >= 10)
-        hearts_ganados = sum(1 for c in jug.bazas_ganadas if c.es_corazon)
-        qs_control = any(c.es_dama_de_picas for c in todas)
-        hearts_en_rivales = sum(
-            1 for i, jug_r in enumerate(self._motor.jugadores)
-            if i != jugador_idx
-            for c in jug_r.mano if c.es_corazon
-        )
-
-        control = (high_hearts / 5.0) * 0.60
-        qs_bonus = 0.20 if qs_control else 0.0
-        progreso = min(hearts_ganados / 13.0, 1.0) * 0.10
-        escape = min(hearts_en_rivales * 0.015, 0.10)
-        return max(0.0, min(1.0, control + qs_bonus + progreso - escape))
-
     def _build_obs(self, agente: Optional[int] = None) -> dict:
         # Permite construir la obs desde la perspectiva de CUALQUIER jugador
         # (no solo el agente), para alimentar a rivales SnapshotPolicy con la
@@ -379,9 +370,29 @@ class CorazonesEnvRLlib(gym.Env):
             agente = self._agente_idx
         # El marcador histórico ahora ESTÁ VIVO (persiste entre manos).
         puntuacion_historica = self._motor.puntuaciones_historicas()
-        moon_prob_agente = self._calcular_moon_prob(agente)
+        cartas_dadas = self._pase_dado_por[agente] if self._pase_memoria else []
+        cartas_recibidas = self._pase_recibido_por[agente] if self._pase_memoria else []
+        moon_prob_agente = self._estimador_moon.propio(
+            motor=self._motor, agente_idx=agente, vacios=self._vacios,
+            historial=self._historial_bazas,
+            cartas_dadas=cartas_dadas, cartas_recibidas=cartas_recibidas,
+            puntuacion_historica=puntuacion_historica,
+            puntos_mano_actual=self._puntos_mano_actual,
+            dama_picas_en=self._dama_picas_en,
+        )
+        receptor_agente = self._motor.receptor_pase(agente)
+        dador_agente = next(
+            (i for i in range(4) if self._motor.receptor_pase(i) == agente), None
+        )
         moon_prob_rival = max(
-            self._calcular_moon_prob(i) for i in range(4) if i != agente
+            self._estimador_moon.rival(
+                motor=self._motor, rival_idx=i, agente_idx=agente, vacios=self._vacios,
+                historial=self._historial_bazas,
+                receptor=receptor_agente, dador=dador_agente,
+                cartas_dadas=cartas_dadas, cartas_recibidas=cartas_recibidas,
+                corazones_rotos=self._motor.corazones_rotos,
+            )
+            for i in range(4) if i != agente
         )
         puedo_alimentar = any(
             puntuacion_historica[j] >= 85
