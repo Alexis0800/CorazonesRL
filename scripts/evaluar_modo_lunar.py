@@ -20,9 +20,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 import numpy as np
+
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+except Exception:
+    pass
 
 # --- bootstrap path ---
 import sys as _sys
@@ -45,7 +51,13 @@ def _jugar_partidas(model, env, n_partidas: int, modo=None,
     luna = {"lunas_logradas": 0, "pts_comprometidas_fallidas": [], "manos_totales": 0}
 
     for i in range(n_partidas):
-        obs, _ = env.reset(seed=seed_offset + i)  # mismas semillas por brazo (parea repartos)
+        # Pareo REAL por partida: la semilla de env cubre repartos y _pyrandom,
+        # pero los clones muestrean de torch.multinomial (RNG GLOBAL de torch)
+        # → sin esto los brazos divergen siempre y el A/B queda no-pareado
+        # (piso de ruido ~±3pp, del orden de los efectos buscados). Con torch
+        # resembrado, las partidas donde el modo no interviene son IDÉNTICAS.
+        torch.manual_seed(seed_offset + i)
+        obs, _ = env.reset(seed=seed_offset + i)
         if modo is not None:
             modo.nueva_partida()
         pase_cola: list[int] = []
@@ -145,10 +157,11 @@ def main() -> None:
 
     salida = {"config": vars(args)}
 
+    res_base = None
     if not args.sin_baseline:
-        res, _ = _jugar_partidas(model, make_env(), args.partidas,
-                                 seed_offset=args.seed_offset)
-        agg = _agregar(res)
+        res_base, _ = _jugar_partidas(model, make_env(), args.partidas,
+                                      seed_offset=args.seed_offset)
+        agg = _agregar(res_base)
         salida["baseline"] = agg
         print(f"\n=== BASELINE campeón puro ({args.partidas} partidas vs 3 clones) ===")
         print(f"  win_rate: {agg['win']:.3f}  top2: {agg['top2']:.3f}  "
@@ -175,6 +188,27 @@ def main() -> None:
     print(f"  lunas logradas: {luna['lunas_logradas']} "
           f"(conversión {luna['conversion']:.1%})  abortos gate: {luna['abortos_gate']}")
     print(f"  pts medios en intento fallido: {luna['pts_medios_intento_fallido']:.2f}")
+
+    if res_base is not None:
+        # Estadística PAREADA por semilla: partidas sin intervención son
+        # idénticas → contribuyen 0 al error del delta.
+        wb = np.array([float(r["gano_partida"]) for r in res_base])
+        wl = np.array([float(r["gano_partida"]) for r in res])
+        pb = np.array([r["puesto"] for r in res_base])
+        pl = np.array([r["puesto"] for r in res])
+        d = wl - wb
+        se = float(d.std(ddof=1) / np.sqrt(len(d)))
+        identicas = int((pb == pl).sum())
+        salida["pareado"] = {
+            "delta_win": float(d.mean()), "se": se,
+            "partidas_identicas_puesto": identicas,
+            "delta_puesto": float((pl - pb).mean()),
+        }
+        print(f"\n=== PAREADO (n={len(d)}) ===")
+        print(f"  Δwin_rate: {d.mean():+.4f} ± {se:.4f} (1 SE)")
+        print(f"  Δpuesto:   {(pl - pb).mean():+.4f}")
+        print(f"  partidas con mismo puesto en ambos brazos: {identicas}/{len(d)}")
+
     print("\n" + json.dumps(salida, indent=2, default=str))
 
 
