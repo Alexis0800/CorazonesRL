@@ -117,8 +117,9 @@ def main() -> None:
     p.add_argument("--humano", default="models/humano_bc/pesos.npz")
     p.add_argument("--partidas", type=int, default=300)
     p.add_argument("--obs-dim", type=int, default=DIM_V12)
+    # Defaults = los de ModoLunar (SSOT); aquí solo para el CLI/registro.
     p.add_argument("--umbral-pase", type=float, default=0.10)
-    p.add_argument("--umbral-juego", type=float, default=0.15)
+    p.add_argument("--umbral-juego", type=float, default=0.30)
     p.add_argument("--moon-dir", default=RUTA_MOON)
     p.add_argument("--sin-baseline", action="store_true",
                    help="Solo el brazo lunar (la línea base del campeón ya se conoce)")
