@@ -39,7 +39,7 @@ class ModoLunar:
         self,
         estimador: EstimadorMoonProb,
         umbral_pase: float = 0.10,
-        umbral_juego: float = 0.15,
+        umbral_juego: float = 0.30,  # barrido 300 partidas: 0.15→win plano, 0.30→+8.7pp, 0.50→+7pp
     ):
         self._estimador = estimador
         self._umbral_pase = umbral_pase

@@ -30,7 +30,8 @@ _sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 # --- fin bootstrap ---
 
 
-def _jugar_partidas(model, env, n_partidas: int, modo=None) -> tuple[list, dict]:
+def _jugar_partidas(model, env, n_partidas: int, modo=None,
+                    seed_offset: int = 0) -> tuple[list, dict]:
     """Loop de eval idéntico para ambos brazos; `modo` intercepta acciones.
 
     Devuelve (infos_terminales, stats_luna). stats_luna incluye la conversión
@@ -44,7 +45,7 @@ def _jugar_partidas(model, env, n_partidas: int, modo=None) -> tuple[list, dict]
     luna = {"lunas_logradas": 0, "pts_comprometidas_fallidas": [], "manos_totales": 0}
 
     for i in range(n_partidas):
-        obs, _ = env.reset(seed=i)  # mismas semillas en ambos brazos (parea repartos)
+        obs, _ = env.reset(seed=seed_offset + i)  # mismas semillas por brazo (parea repartos)
         if modo is not None:
             modo.nueva_partida()
         pase_cola: list[int] = []
@@ -121,6 +122,8 @@ def main() -> None:
     p.add_argument("--moon-dir", default=RUTA_MOON)
     p.add_argument("--sin-baseline", action="store_true",
                    help="Solo el brazo lunar (la línea base del campeón ya se conoce)")
+    p.add_argument("--seed-offset", type=int, default=0,
+                   help="Desplaza las semillas (para confirmar sin reusar las del barrido)")
     args = p.parse_args()
 
     policy = cargar_policy_desde_checkpoint(args.modelo)
@@ -142,7 +145,8 @@ def main() -> None:
     salida = {"config": vars(args)}
 
     if not args.sin_baseline:
-        res, _ = _jugar_partidas(model, make_env(), args.partidas)
+        res, _ = _jugar_partidas(model, make_env(), args.partidas,
+                                 seed_offset=args.seed_offset)
         agg = _agregar(res)
         salida["baseline"] = agg
         print(f"\n=== BASELINE campeón puro ({args.partidas} partidas vs 3 clones) ===")
@@ -151,7 +155,8 @@ def main() -> None:
 
     modo = ModoLunar(EstimadorMoonProb(args.moon_dir),
                      umbral_pase=args.umbral_pase, umbral_juego=args.umbral_juego)
-    res, luna = _jugar_partidas(model, make_env(), args.partidas, modo=modo)
+    res, luna = _jugar_partidas(model, make_env(), args.partidas, modo=modo,
+                                seed_offset=args.seed_offset)
     agg = _agregar(res)
     salida["lunar"] = agg
 
