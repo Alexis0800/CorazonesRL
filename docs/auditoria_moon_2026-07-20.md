@@ -427,6 +427,45 @@ del clon). Este agujero es de POLÍTICA sobre información completamente observa
 Scripts de esta auditoría: `scratchpad/audit2.py` (descomposición), `paso1.py`
 (validación + control 4-asientos), `paso2.py` (control sin-pase + efecto pase).
 
+## ModoLunar — implementación y veredicto vs clon (2026-07-21, rama feature/modo-lunar)
+
+Se implementó la recomendación #1+#2 como composición (`src/agentes/modo_lunar.py`):
+gate aprendido (`propio.pt`) → pase constructivo de BotLunatico → persecución
+`_jugar_moon` → abort duro (gate) + abort blando (P mid-mano con historial
+sintético). A/B contra 3 clones humanos: `scripts/evaluar_modo_lunar.py`.
+
+**Lección metodológica (la más valiosa de la campaña):** las primeras 3000
+partidas de A/B fueron RUIDO. Los clones muestrean de `torch.multinomial`
+(RNG global, nunca resembrado por partida) → los brazos jamás estuvieron
+pareados y el piso de ruido (~±3 pp) era del orden de todos los efectos
+"medidos" — el +8.7 pp de un barrido y los −2/−4 pp de sus "confirmaciones"
+por igual. Lo destapó un diagnóstico imposible (9 intervenciones "moviendo"
+−3.1 pp). Fix: `torch.manual_seed` por partida + estadística pareada → las
+partidas sin intervención son idénticas bit a bit y el SE del delta cae a
+±0.7 pp. **Regla para futuros A/B con clones estocásticos: resembrar TODOS
+los RNG por partida y reportar el delta pareado, nunca comparar brazos
+sueltos.**
+
+**Veredicto (1000 partidas pareadas, semillas vírgenes, p.10/j.30/abort.10):**
+
+- Δwin_rate **+0.002 ± 0.007** (IC95 ≈ [−1.2, +1.6 pp]) — EV-NEUTRO exacto.
+- El mecanismo funciona: lunas/partida 0.020→0.067 (×3.4), conversión 35.7 %,
+  112 manos comprometidas. Pero 72 fallos × 18.4 pts anulan 40 lunas × 26.
+- La composición es SEGURA (no degrada al campeón) pero no paga con la
+  política de persecución cruda de BotLunatico a estos umbrales.
+
+**Por qué esto NO cierra la palanca:** el clon no defiende lunas (casi no las
+vio en su dataset) — no puede medir la transferencia a humanos reales. Contra
+defensores reales la conversión baja pero los fallos se abaratan (el defensor
+corta TEMPRANO → abort barato; hoy los fallos son caros porque mueren tarde
+"solos"). El signo real es incierto y solo lo responde el bridge.
+
+**Siguiente paso recomendado:** cablear `ModoLunar` al recomendador/autoplay
+tras un flag (es EV-neutro vs clon → riesgo bajo) y medir el gate REAL del
+doc: lunas-a-favor y win-rate en partidas del bridge. Mejoras de política si
+el real da señal: persecución guiada por PIMC (lenta pero válida en el
+copiloto) y compromiso sensible al marcador (lunear más al ir perdiendo).
+
 ## Artefactos
 
 - `hearts-sfs-bridge/src/export-reconstructed-from-jsonl.js` (nuevo, en el bridge;
