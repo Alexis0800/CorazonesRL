@@ -62,6 +62,7 @@ from rich.progress import (
 )
 from rich.table import Table
 from src.entorno.dimensiones import DIM_ENTORNO, DIM_V12
+from src.entorno.moon_model import RUTA_MOON
 from src.rllib.callbacks import HeartsCallbacks
 from src.rllib.config import build_ppo_config
 from src.rllib.eval_bots import evaluar_vs_bots
@@ -145,8 +146,8 @@ def parse_args() -> argparse.Namespace:
                         "atrapado en Fase 4 self-play (bug del run v10d).")
     p.add_argument("--moon-dir", type=str, default=None,
                    help="Directorio de pesos moon (propio.pt/rival.pt) para las "
-                        "features [187:189]. Default None = models/moon. Usar "
-                        "models/moon_realfull (rival AUC 0.578->0.707).")
+                        "features [187:189]. Default None = RUTA_MOON "
+                        "(models/moon_realfull, rival AUC 0.707).")
     p.add_argument("--pool-diverso", action="store_true",
                    help="El oponente duro de cada fase es un arquetipo humano al "
                         "azar (experto/castigador/lunatico/atacante), no solo "
@@ -451,7 +452,7 @@ def main() -> None:
                                 _res_h = _eval_model_vs_factory(
                                     _model_eval, _fac_humana, 150,
                                     obs_dim=args.obs_dim, con_pase=args.con_pase,
-                                    moon_dir=args.moon_dir or "models/moon",
+                                    moon_dir=args.moon_dir or RUTA_MOON,
                                 )
                                 win_humano = _agregar(_res_h)["win"]
                                 metricas_bot["win_rate_vs_humano"] = round(win_humano, 4)

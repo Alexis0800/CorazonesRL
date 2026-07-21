@@ -77,8 +77,10 @@ def generar_dataset_una_mano(
             "pimc2" — PIMC recursivo 2-ply (estrategia multibaza)
             "mcts2" — MCTS con profundidad_agente=2
         tipo_oponentes: "heuristicos", "experto", "mixto" (oponentes reales).
-        use_mcts: Si True, usa MCTS (multi-step) en vez de PIMC (one-step).
-            Obsoleto cuando rollout_tipo="pimc2" o "mcts2".
+        use_mcts: Si True, usa MCTS multi-step (requiere profundidad>=2; lanza
+            ValueError si no). Obsoleto cuando rollout_tipo="pimc2" o "mcts2".
+            NOTA: antes esta bandera hacía PIMC en silencio (bug corregido), así
+            que los datasets generados con ella ANTES del fix son PIMC, no MCTS.
         mcts_simulaciones: Simulaciones MCTS por decision (default 100).
         soft_labels: Si True, retorna scores (52,) en vez de action_id.
         multi_agente: Si True, genera para los 4 jugadores (4x datos).
@@ -208,7 +210,7 @@ def _seleccionar_mejor_carta(
     Soporta:
       - PIMC estándar (rollout_tipo: evasivo, experto, mixto)
       - PIMC recursivo (rollout_tipo: pimc2)
-      - MCTS estándar (use_mcts=True)
+      - MCTS multi-step (use_mcts=True; exige profundidad>=2)
       - MCTS profundo (rollout_tipo: mcts2)
 
     Args:
@@ -340,10 +342,33 @@ def _score_una_carta(
 
     # ── MCTS estándar ──
     if use_mcts:
-        return _pimc_score_carta(
+        # BUG CORREGIDO: esta rama llamaba a `_pimc_score_carta`, exactamente la
+        # misma función que la rama PIMC de abajo (solo cambiaba el presupuesto
+        # de mundos). Es decir, en la ruta de SOFT LABELS `use_mcts=True` NUNCA
+        # hizo MCTS, pese a que la API lo promete y a que la ruta de HARD LABELS
+        # (`_seleccionar_mejor_carta`) sí llama al MCTS real -> las dos rutas
+        # habían divergido y las labels blandas salían PIMC etiquetadas MCTS.
+        #
+        # Asimetría legítima: el MCTS de raíz (UCB) reparte simulaciones entre
+        # cartas de forma ADAPTATIVA, así que no produce un score comparable por
+        # carta -- sirve para elegir la mejor (hard label), no para puntuar todas
+        # (soft label). Por eso aquí solo hay MCTS real con profundidad>=2, donde
+        # la puntuación por carta sí está definida (se expanden los turnos
+        # futuros del agente tras jugarla). Con profundidad<2 se falla explícito
+        # en vez de devolver en silencio un score que no es el pedido.
+        if profundidad < 2:
+            raise ValueError(
+                "soft_labels + use_mcts=True requiere profundidad>=2: el MCTS de "
+                "raíz reparte simulaciones adaptativamente y no da un score "
+                f"comparable por carta (recibido profundidad={profundidad}). "
+                "Opciones: profundidad>=2 (MCTS multi-step), o use_mcts=False "
+                "(PIMC), que es lo que esta rama hacía en silencio antes del fix. "
+                "La ruta de hard labels sí soporta MCTS de raíz con profundidad=1."
+            )
+        return _mcts_profundo_score_carta(
             motor, agente_idx, carta,
-            num_mundos=mcts_simulaciones,
-            rollout_tipo=rollout_tipo, rng=rng)
+            mcts_simulaciones=mcts_simulaciones, rng=rng,
+            profundidad=profundidad)
 
     # ── PIMC estándar ──
     return _pimc_score_carta(

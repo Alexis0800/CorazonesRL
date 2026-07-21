@@ -31,7 +31,7 @@ def build_ppo_config(
     random_position: bool = True,
     reward_config=None,
     con_pase: bool = False,
-    moon_dir: Optional[str] = None,  # dir de pesos moon (propio.pt/rival.pt); None = "models/moon"
+    moon_dir: Optional[str] = None,  # dir de pesos moon; None = RUTA_MOON (moon_model.py)
     # PPO hiperparámetros
     lr: float = 3e-4,
     lr_end: float = 1e-4,          # piso del LR — nunca decae a cero para que el

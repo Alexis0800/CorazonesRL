@@ -48,6 +48,7 @@ def main() -> None:
     from src.captura.escritor import cargar_partidas
     from src.captura import replay
     from src.entorno.dimensiones import DIM_V12, NUM_CARTAS
+    from src.entorno.moon_model import RUTA_MOON
     from src.rllib.model import HeartsActionMaskModel
 
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -60,7 +61,7 @@ def main() -> None:
     p.add_argument("--val-frac", type=float, default=0.2)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--paciencia", type=int, default=8)
-    p.add_argument("--moon-dir", default="models/moon_realfull",
+    p.add_argument("--moon-dir", default=RUTA_MOON,
                    help="Pesos moon para [187:189]. DEBE coincidir con el --moon-dir "
                         "del fine-tune (train_rllib) o esas 2 features quedan OOD.")
     args = p.parse_args()

@@ -212,6 +212,93 @@ previo (el salto bots→humanos es mayor): ~10M pasos, monitoreando win-rate vs 
 humano. **Fallback a desde-cero** solo si ese win-rate se estanca cerca de 0.46
 (señal de que la burbuja es un atractor fuerte que el fine-tune no escapa).
 
+## Experimento v10e — fine-tune corregido (2026-07-20 noche): REFUTADO
+
+Se corrió el fine-tune corto con TODOS los fixes: clon humano v2 (BC con máscara
+legal, val top-1 66.1%→**71.6%**; estocástico T=1.0), mesas 70% humanas
+(exposición real ~47% de asientos), `--progress-fino` (sin trampa de fase 4),
+LR 5e-5 plano, entropy 0.01, moon_realfull, rail de elite por `win_rate_vs_humano`.
+
+Baseline re-calibrado: campeón vs clon-v2 = **0.480** (300 partidas). Gate: ≥0.54.
+
+Resultado (2M pasos, 25.01M→27M): rail 0.393 → 0.453 → 0.440; snapshot final
+**0.377** (300 partidas). **Reward de entrenamiento cayó 0.694→~0.40 al entrar en
+la distribución humana y quedó PLANO los 2M pasos** — la optimización nunca
+despegó. No es lentitud: no hay gradiente útil a LR conservador sobre el campeón
+convergido. **La vía fine-tune queda refutada dos veces** (v10d por bug de
+progress; v10e limpiamente).
+
+## v11 — desde-cero humanizado (lanzado, en curso)
+
+Conclusión operativa: reentrenar con política PLÁSTICA. No desde pesos
+aleatorios: **init BC-PIMC** (`models/produccion/bc_base_con_pase.pkl`) + pool
+humanizado desde progress 0. Config (wrapper `scripts/reanudar_finetune.sh`):
+30M pasos, mesas 50% humanas (clon v2, T=1.0), prob-humano 0.5, pool-diverso +
+ancla-experto, LR 1e-4→5e-5, entropy 0.03, moon_realfull, rail de elite por
+win_rate_vs_humano cada ~1M pasos. Output: `models/v11_humano_scratch/`.
+Duración estimada 4–8 h CPU (10 workers). **Gate de éxito: elite con
+win_rate_vs_humano ≥ 0.54** (supera al campeón 0.480 por >2 SE) y luego
+validación en partidas reales held-out.
+
+## Veredicto v11 (2026-07-21): tampoco supera al campeón — ambas vías agotadas
+
+v11 completó 30M pasos (5h48, sin crashes). Curva `win_rate_vs_humano`: 0.18 →
+pico **0.407** (25.6M) → meseta ~0.37 los últimos 8M, mientras `vs_experto`
+seguía subiendo (0.32→0.46): la misma firma de "mejora general sin mejora
+humana", pese a 50 % de mesas humanas. Evaluación sólida del mejor elite
+(25.6M, 300 partidas): **0.337 vs clon** (campeón 0.480) y **0.150 vs 3
+campeones head-to-head** (paridad 0.25) — el v11 es sencillamente un jugador
+más débil; 30M desde init BC no alcanzan el linaje del campeón (~25M + BC +
+varios fine-tunes).
+
+**Conclusión de la campaña RL (honesta):**
+1. El campeón v10c sigue siendo el mejor modelo. Producción intacta.
+2. Dos vías refutadas limpiamente: fine-tune humanizado (sin gradiente útil
+   sobre política convergida) y desde-cero humanizado (no alcanza la fuerza
+   general; el aprendizaje extraíble del clon se satura en ~0.37-0.40).
+3. Lección central: entrenar contra el clon (71.6 % fidelidad) desarrolla
+   fuerza general, no ventaja específica anti-humana. El techo es la fidelidad
+   del clon, no el algoritmo de RL.
+4. Camino recomendado: **volante de datos** — seguir capturando partidas
+   reales (el bridge), reentrenar el clon al crecer el dataset (~10k+ manos),
+   y re-evaluar RL entonces. El pase sigue sin auditarse (palanca virgen).
+5. Subproducto útil: el elite v11 (estilo distinto) puede servir como oponente
+   de diversidad en pools futuros.
+
+## Auditoría del PASE y del regret (2026-07-21, offline, cero cómputo RL)
+
+**El pase NO es una fuga — descartado con datos:**
+- Pasar "peligro" (Q♠ o corazón alto) al receptor **no** aumenta que él haga
+  luna: 4.7 % vs 4.9 % con pase seguro. Y nuestros puntos son mejores al pasar
+  peligro (6.36 vs 7.13). La hipótesis "alimentamos la luna por el pase" es falsa.
+- La política de Q♠ del modelo es **de libro**, monotónica en protección de
+  picas: pasa Q♠ el 100 % con 1-2 picas, 93.9 % con 3, 68.8 % con 4, 29.5 % con
+  5, 9.7 % con 6. Quedársela sin protección es catastrófico (12.64 pts medios,
+  64 % de manos ≥13) pero **solo ocurre 14 veces de 344** (4 %).
+- Conclusión: construir un "modelo de pase" no rendiría. Palanca cerrada.
+
+**El regret contra oráculo info-completa ya NO discrimina (hallazgo metodológico):**
+- Concentración: 5.2 % de decisiones acumulan ~la mitad del regret (1907 pts de
+  4000 decisiones); el regret pico está en bazas 2-8 y crece monótono con la
+  libertad de elección (2 legales → 0.60; 7-8+ → 1.42-1.53). O sea: descartes y
+  liderazgos discrecionales de midgame.
+- PERO el campeón **gana al BotExperto en todos esos segmentos** (brecha −0.15 a
+  −0.23): no es defecto suyo, es dificultad estructural del segmento.
+- El aparente "+3.38 peor que el experto en sus peores decisiones" era **sesgo de
+  selección**: invertida la selección sale simétrico (experto 9.31 / campeón
+  4.75). Comparación pareada limpia sobre las 4000: campeón mejor 18.7 %,
+  experto mejor 19.1 %, empate 62.2 % → **indistinguibles por decisión**.
+- Implicación: el regret vs oráculo omnisciente está saturado como métrica entre
+  jugadores competentes. Explica por qué toda intervención guiada por regret
+  falló. No usarlo más como guía de mejora.
+
+**Cómo perdemos realmente (556 partidas):** las derrotas no son sangrado lento
+sino **desastres puntuales**: el **82.8 %** de las partidas perdidas tienen 2+
+manos de ≥13 pts, y la peor mano aporta el **45 %** del score final. Ganadas vs
+perdidas: 4.13 vs 8.29 pts/mano, 1.29 vs 2.48 manos-desastre. El problema es la
+**cola** (evitar catástrofes), no la media por jugada — coherente con que el
+regret medio por decisión no discrimine.
+
 ## Artefactos
 
 - `hearts-sfs-bridge/src/export-reconstructed-from-jsonl.js` (nuevo, en el bridge;

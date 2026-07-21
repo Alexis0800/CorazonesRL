@@ -35,7 +35,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 from src.dominio.carta import Carta
 from src.dominio.motor import MotorCorazones
 from src.entorno.dimensiones import BAZAS_POR_MANO, DIM_ENTORNO, DIM_V12, NUM_CARTAS
-from src.entorno.moon_model import EntradaBaza, EstimadorMoonProb
+from src.entorno.moon_model import RUTA_MOON, EntradaBaza, EstimadorMoonProb
 from src.entorno.observacion import ObservacionBuilder, puede_alimentar
 from src.entorno.recompensas_partida import (
     CalculadoraRecompensasPartida,
@@ -107,7 +107,7 @@ class CorazonesEnvRLlib(gym.Env):
         # de verdad va a ver en inferencia (antes usaba la heurística fija de
         # _calcular_moon_prob solo aquí, nunca en producción).
         self._estimador_moon = EstimadorMoonProb(
-            dir_modelos=cfg.get("moon_dir", "models/moon")
+            dir_modelos=cfg.get("moon_dir", RUTA_MOON)
         )
 
         # Estado por mano (se reinicia al inicio de cada mano)

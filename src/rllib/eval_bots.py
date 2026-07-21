@@ -27,6 +27,7 @@ from src.agentes.bot_atacante_lider import BotAtacanteLider
 from src.agentes.heuristicos import bot_agresivo, bot_conservador, bot_evasivo
 from src.entorno.corazones_rllib import CorazonesEnvRLlib
 from src.entorno.dimensiones import DIM_ENTORNO
+from src.entorno.moon_model import RUTA_MOON
 
 
 def _obtener_modelo(policy, obs_dim: int):
@@ -48,7 +49,7 @@ def _eval_model_vs_factory(
     agente_idx: int = 0,
     con_pase: bool = False,
     pase_memoria: bool = True,
-    moon_dir: str = "models/moon",
+    moon_dir: str = RUTA_MOON,
 ) -> List[dict]:
     """Juega n partidas completas con `model` como agente, vía el ENV.
 

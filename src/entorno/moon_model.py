@@ -214,6 +214,17 @@ def _cargar_red(ruta: Path, dim_entrada: int) -> Optional[_RedMoonMLP]:
     return red
 
 
+# SSOT de la ruta de pesos moon VIVOS. Antes había dos directorios en uso
+# simultáneo (`models/moon`, rival AUC 0.578, y `models/moon_realfull`, 0.707)
+# según qué módulo se mirara, así que las features [187:189] cambiaban de valor
+# entre entrenamiento e inferencia. Canónico = moon_realfull (entrenado sobre el
+# dataset limpio de 4168 manos; propio AUC 0.945 / rival 0.707). Verificado que
+# el campeón v10c rinde igual o mejor con él (0.467 vs 0.460 contra el clon
+# humano), así que el cambio de default no lo degrada. `models/moon` queda como
+# legado histórico; nada lo lee por defecto. Ver docs/auditoria_moon_2026-07-20.md.
+RUTA_MOON = "models/moon_realfull"
+
+
 class EstimadorMoonProb:
     """Reemplaza la heurística de moon_prob con los 2 modelos aprendidos.
 
@@ -222,7 +233,7 @@ class EstimadorMoonProb:
     pipeline funcione mientras se entrena o si el entrenamiento aún no corrió.
     """
 
-    def __init__(self, dir_modelos: str = "models/moon"):
+    def __init__(self, dir_modelos: str = RUTA_MOON):
         d = Path(dir_modelos)
         self._propio = _cargar_red(d / "propio.pt", DIM_PROPIO)
         self._rival = _cargar_red(d / "rival.pt", DIM_RIVAL)

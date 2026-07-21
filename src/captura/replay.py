@@ -18,7 +18,7 @@ import numpy as np
 from src.dominio.carta import Carta
 from src.dominio.motor import MotorCorazones
 from src.entorno.dimensiones import DIM_ENTORNO
-from src.entorno.moon_model import EntradaBaza, EstimadorMoonProb
+from src.entorno.moon_model import RUTA_MOON, EntradaBaza, EstimadorMoonProb
 from src.entorno.observacion import ObservacionBuilder, puede_alimentar
 from src.captura.modelos import RegistroMano, RegistroPartida
 
@@ -212,7 +212,7 @@ def ejemplos_de_mano(
 def ejemplos_de_partida(
     partida: RegistroPartida, obs_builder: ObservacionBuilder | None = None,
     dim: int = DIM_ENTORNO, seats_de: str = "agente",
-    moon_dir: str = "models/moon", con_mask: bool = False,
+    moon_dir: str = RUTA_MOON, con_mask: bool = False,
 ) -> List[Ejemplo]:
     """Concatena los ejemplos de todas las manos reconstruibles de una partida,
     hilando el marcador acumulado entre manos (obs alineada con el env).
@@ -250,7 +250,7 @@ def ejemplos_de_partida(
 
 def partidas_a_arrays(
     partidas, dim: int = DIM_ENTORNO, seats_de: str = "agente",
-    moon_dir: str = "models/moon", con_mask: bool = False,
+    moon_dir: str = RUTA_MOON, con_mask: bool = False,
 ):
     """Convierte un iterable de `RegistroPartida` en `(X[n,dim], y[n])`, o en
     `(X, y, M[n,52])` con `con_mask=True` (M = máscara legal de cada decisión).

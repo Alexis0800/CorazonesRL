@@ -61,7 +61,13 @@ class TestDatasetSoftLabels:
             assert scores.dtype == np.float32
 
     def test_soft_labels_con_mcts(self):
-        """Soft labels + MCTS multi-step."""
+        """Soft labels + MCTS multi-step (requiere profundidad>=2).
+
+        Antes este test NO pasaba `profundidad`, así que usaba el default 1 y
+        recibía PIMC pese a su nombre: la rama use_mcts de `_score_una_carta`
+        llamaba a `_pimc_score_carta`. Los asserts (shape/finitud) no podían
+        detectarlo. Ahora pide profundidad=2 y ejerce el MCTS real.
+        """
         from src.mcts.dataset import generar_dataset_una_mano
 
         pares = generar_dataset_una_mano(
@@ -73,12 +79,36 @@ class TestDatasetSoftLabels:
             use_mcts=True,
             mcts_simulaciones=20,
             soft_labels=True,
+            profundidad=2,
         )
         assert len(pares) > 0
         obs, scores = pares[0]
         assert scores.shape == (52,)
         # Scores deben ser finitos para acciones legales
         assert np.any(np.isfinite(scores))
+
+    def test_soft_labels_mcts_profundidad_1_falla_explicito(self):
+        """soft_labels + use_mcts + profundidad=1 debe FALLAR, no degradar a PIMC.
+
+        Contrato del fix: el MCTS de raíz reparte simulaciones adaptativamente y
+        no da score comparable por carta, así que no se puede servir como soft
+        label. Antes devolvía PIMC en silencio (etiquetado como MCTS).
+        """
+        import pytest
+        from src.mcts.dataset import generar_dataset_una_mano
+
+        with pytest.raises(ValueError, match="profundidad"):
+            generar_dataset_una_mano(
+                seed=42,
+                agente_idx=0,
+                num_mundos=10,
+                rollout_tipo="evasivo",
+                tipo_oponentes="heuristicos",
+                use_mcts=True,
+                mcts_simulaciones=20,
+                soft_labels=True,
+                profundidad=1,
+            )
 
 
 class TestDatasetCompatibilidad:
