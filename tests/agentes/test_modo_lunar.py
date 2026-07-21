@@ -67,6 +67,21 @@ def test_compromiso_y_gate_duro():
     assert modo.elegir_jugada(m, 0, legales) is None
 
 
+def test_abort_blando_por_prob():
+    stub = _EstimadorStub(0.50)
+    modo = ModoLunar(stub, umbral_juego=0.15, umbral_abort=0.10)
+    m = _motor_13()
+    assert modo.elegir_jugada(m, 0, m.jugadores[0].mano) is not None  # comprometida
+    # Mid-mano (mano < 13) y P se desploma → abort blando definitivo.
+    m.jugadores[0].mano = m.jugadores[0].mano[:9]
+    m.jugadores[0].bazas_ganadas = [Carta._TODAS[39], Carta._TODAS[40],
+                                    Carta._TODAS[41], Carta._TODAS[42]]
+    stub.p = 0.02
+    assert modo.elegir_jugada(m, 0, m.jugadores[0].mano) is None
+    assert modo.stats["abortos_prob"] == 1
+    assert not modo.comprometida
+
+
 def test_sin_compromiso_devuelve_none():
     modo = ModoLunar(_EstimadorStub(0.01), umbral_juego=0.15)
     m = _motor_13()

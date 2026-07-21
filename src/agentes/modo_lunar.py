@@ -29,7 +29,30 @@ from typing import List, Optional
 from src.agentes.bot_lunatico import BotLunatico
 from src.dominio.carta import Carta
 from src.dominio.motor import MotorCorazones
-from src.entorno.moon_model import EstimadorMoonProb
+from src.entorno.moon_model import EntradaBaza, EstimadorMoonProb
+
+
+def _historial_sintetico(motor: MotorCorazones) -> list:
+    """Reconstruye un historial de bazas aproximado desde el motor.
+
+    `bazas_ganadas` se llena de a 4 cartas por baza, así que cada chunk de 4 es
+    una baza ganada por ese jugador. `lider` se desconoce (None, como en los
+    remates) — solo alimenta la feature del modelo rival, no la del propio.
+    Da al estimador la razón bazas-con-puntos REAL a mitad de mano (con
+    historial vacío esa feature quedaría en 0 y sesgaría P a la baja justo
+    cuando vamos capturando puntos en una persecución de pozo).
+    """
+    historial = []
+    for i, j in enumerate(motor.jugadores):
+        cartas = j.bazas_ganadas
+        for k in range(0, len(cartas) - 3, 4):
+            chunk = cartas[k:k + 4]
+            historial.append(EntradaBaza(
+                lider=None, ganador=i,
+                tenia_puntos=any(c.puntos > 0 for c in chunk),
+                lidero_corazon_o_dama=False,
+            ))
+    return historial
 
 
 class ModoLunar:
@@ -39,11 +62,13 @@ class ModoLunar:
         self,
         estimador: EstimadorMoonProb,
         umbral_pase: float = 0.10,
-        umbral_juego: float = 0.30,  # barrido 300 partidas: 0.15→win plano, 0.30→+8.7pp, 0.50→+7pp
+        umbral_juego: float = 0.30,
+        umbral_abort: float = 0.10,  # P mid-mano bajo esto → abortar antes de comer más
     ):
         self._estimador = estimador
         self._umbral_pase = umbral_pase
         self._umbral_juego = umbral_juego
+        self._umbral_abort = umbral_abort
         self._bot = BotLunatico()
 
         # Estado por mano
@@ -57,6 +82,7 @@ class ModoLunar:
             "pases_ofensivos": 0,
             "manos_comprometidas": 0,
             "abortos_gate": 0,
+            "abortos_prob": 0,
         }
 
     # ------------------------------------------------------------------
@@ -72,12 +98,13 @@ class ModoLunar:
         self._bot.reset()
 
     def _prob_luna(self, motor: MotorCorazones, idx: int) -> float:
-        """P(luna propia) con trackers vacíos (config validada de inicio de mano)."""
+        """P(luna propia). Al inicio de mano el historial sintético queda vacío
+        (config validada); a mitad de mano da la razón bazas-con-puntos real."""
         return self._estimador.propio(
             motor=motor,
             agente_idx=idx,
             vacios=[set() for _ in range(4)],
-            historial=[],
+            historial=_historial_sintetico(motor),
             cartas_dadas=[],
             cartas_recibidas=[],
             puntuacion_historica=list(motor.puntuaciones_historicas()),
@@ -129,6 +156,15 @@ class ModoLunar:
             # Pozo imposible → abortar de forma definitiva esta mano.
             self._comprometida = False
             self.stats["abortos_gate"] += 1
+            return None
+
+        # Abort blando: si P mid-mano cayó bajo el piso (perdimos control),
+        # salir ANTES de seguir acumulando corazones que ya no podemos soltar.
+        # No se re-chequea en la primera decisión (recién nos comprometimos).
+        if len(motor.jugadores[idx].mano) < 13 and \
+                self._prob_luna(motor, idx) < self._umbral_abort:
+            self._comprometida = False
+            self.stats["abortos_prob"] += 1
             return None
 
         return self._bot._jugar_moon(motor, idx, legales)
