@@ -75,6 +75,7 @@ python -m src.torneo.elo --directorio models/v8/elite --partidas 50 --elo-puro -
 - `bot_lunatico.py`: `BotLunatico` — moon-shooter (hunts the pozo).
 - `bot_atacante_lider.py`: `BotAtacanteLider` — loads points onto the scoreboard leader.
 - `pase.py`: `pase_heuristico` — per-archetype card-pass strategy.
+- `modo_lunar.py`: `ModoLunar` — moon OFFENSE by composition (no RL): learned gate (`EstimadorMoonProb.propio`) + `BotLunatico` constructive pass & pursuit; returns `None` when not applicable (caller falls back to the champion). A/B eval: `scripts/evaluar_modo_lunar.py`. See `docs/auditoria_moon_2026-07-20.md` §Auditoría de OFENSIVA.
 
 **`src/rllib/`** — RLlib pipeline components (new).
 
