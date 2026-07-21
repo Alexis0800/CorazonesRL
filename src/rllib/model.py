@@ -2,7 +2,7 @@
 Modelo PyTorch con action masking para Ray RLlib (old API stack).
 
 Arquitectura: MLP encoder → policy head + value head.
-La máscara de acciones se aplica añadiendo -∞ a las acciones ilegales
+La máscara de acciones se aplica añadiendo -1e9 a las acciones ilegales
 antes del softmax, lo que las hace efectivamente imposibles.
 
 Uso (en PPOConfig):
@@ -17,7 +17,6 @@ Observation space esperado:
 """
 from __future__ import annotations
 
-import numpy as np
 import torch
 import torch.nn as nn
 from typing import List, Tuple
@@ -33,7 +32,7 @@ class HeartsActionMaskModel(TorchModelV2, nn.Module):
     """MLP con action masking nativo para Hearts.
 
     La action_mask se obtiene de input_dict["obs"]["action_mask"].
-    Las acciones ilegales reciben logit = -∞ antes de la política.
+    Las acciones ilegales reciben logit = -1e9 antes de la política.
     """
 
     def __init__(

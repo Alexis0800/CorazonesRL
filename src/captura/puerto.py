@@ -84,8 +84,12 @@ class AdaptadorJuego(ABC):
         """Genera los eventos de una o varias partidas hasta agotar la sesión.
 
         Debe emitir, por partida: `InicioPartida`, y por mano `InicioMano`,
-        opcional `PaseAgente`, una `JugadaObservada` por cada carta (52),
-        `FinMano`, y al terminar la partida `FinPartida`.
+        opcional `PaseAgente`, una `JugadaObservada` por cada carta jugada
+        (52 en una mano completa), `FinMano`, y al terminar la partida
+        `FinPartida`. Si un asiento concede el resto, emite `RemateResto`
+        (tras la última `JugadaObservada`, antes de `FinMano`); en ese caso
+        las bazas concedidas NO se emiten como jugadas, por lo que la mano
+        tiene menos de 52 `JugadaObservada`.
         """
         raise NotImplementedError
 

@@ -60,7 +60,7 @@ class ClienteADB:
             cmd += ["-s", self.serial]
         return cmd
 
-    def _run(self, *args: str, binario: bool = False) -> bytes:
+    def _run(self, *args: str) -> bytes:
         try:
             res = subprocess.run(
                 self._base() + list(args),
@@ -81,7 +81,6 @@ class ClienteADB:
     def captura(self) -> np.ndarray:
         """Screenshot actual como array BGR (requiere OpenCV)."""
         import cv2  # import perezoso (dep opcional)
-        import time
 
         for intento in range(3):
             png = self._run("exec-out", "screencap", "-p")

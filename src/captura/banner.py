@@ -8,7 +8,7 @@ la implementacion sin tocar el resto del pipeline de vision.
 Jerarquia:
   IBannerClasificador  (ABC)
   ├── BannerClasificador       (distancia euclidea sobre firma grayscale)
-  └── BannerClasificadorTexto  (IoU de mascara de texto — ignora nombres)"""
+  └── BannerClasificadorTexto  (similitud coseno de mascara de texto — ignora nombres)"""
 from __future__ import annotations
 
 from abc import ABC, abstractmethod

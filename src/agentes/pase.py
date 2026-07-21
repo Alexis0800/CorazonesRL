@@ -1,5 +1,5 @@
 """
-Heurística de pase para Corazones (v10b), codificada de los MD de estrategia.
+Heurística de pase para Corazones, codificada de los MD de estrategia.
 
 `pase_heuristico(motor, idx)` devuelve las 3 cartas que un jugador competente
 pasaría, según Estrategias Avanzadas.md:
@@ -19,7 +19,7 @@ from typing import List
 from src.dominio.carta import Carta
 from src.dominio.motor import MotorCorazones
 
-_PICA, _CORAZON = 2, 3
+_TREBOL, _DIAMANTE, _PICA = 0, 1, 2
 
 
 def _peligro(carta: Carta, conteo_palo: dict) -> float:
@@ -44,7 +44,7 @@ def _peligro(carta: Carta, conteo_palo: dict) -> float:
         score += valor * 0.4
 
     # Incentivo de vaciado: soltar cartas de un palo corto (≤2) ayuda a quedar void.
-    if palo in (0, 1) and conteo_palo[palo] <= 2:
+    if palo in (_TREBOL, _DIAMANTE) and conteo_palo[palo] <= 2:
         score += 3.0 - conteo_palo[palo]  # palo de 1 → +2, de 2 → +1
 
     # Desempate suave por valor (preferir soltar la más alta).

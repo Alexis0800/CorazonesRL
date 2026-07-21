@@ -49,7 +49,6 @@ _BOT_NAMES_EXPERTO = ["conservador", "agresivo", "evasivo", "experto"]
 __all__ = [
     "K_FACTOR", "ELO_INICIAL", "BOT_PREFIX",
     "_expected_score", "_update_elo", "_calcular_elo_convergente",
-    "_Modelo190Wrapper",
     "_extraer_paso_snapshot", "_listar_snapshots_torneo",
     "_encontrar_adyacentes", "_simular_resultado_torneo",
     "_get_bot_func", "_es_bot", "_nombre_bot",
@@ -192,42 +191,6 @@ def _calcular_elo_convergente(
 # ------------------------------------------------------------------
 # Utilidades de snapshots
 # ------------------------------------------------------------------
-
-class _Modelo190Wrapper:
-    """Envuelve un modelo 190-dim para aceptar observaciones 194-dim.
-
-    Recorta las 4 dimensiones extra (all_void) antes de pasarlas
-    al modelo subyacente. Esto permite que snapshots v5 compitan
-    en entornos v6 sin modificar sus pesos.
-    """
-
-    def __init__(self, modelo_190: Any):
-        self._model = modelo_190
-        self.policy = modelo_190.policy
-        self._total_timesteps = getattr(modelo_190, '_total_timesteps', 0)
-
-        # Parchear observation_space para compatibilidad con predict()
-        from gymnasium import spaces
-        self.observation_space = spaces.Box(
-            low=0.0, high=1.0, shape=(DIM_ENTORNO,), dtype=np.float32
-        )
-
-    def predict(self, observation, **kwargs):
-        """Recorta observacion de 194 a 190 y delega al modelo original."""
-        import numpy as np
-        obs = np.asarray(observation)
-        if obs.ndim == 1 and obs.shape[0] == 194:
-            obs = obs[:190]
-        elif obs.ndim == 2 and obs.shape[1] == 194:
-            obs = obs[:, :190]
-        return self._model.predict(obs, **kwargs)
-
-    def save(self, *args, **kwargs):
-        return self._model.save(*args, **kwargs)
-
-    def load(self, *args, **kwargs):
-        return self._model.load(*args, **kwargs)
-
 
 def _es_checkpoint_rllib(ruta: str) -> bool:
     """Detecta si una ruta es un checkpoint RLlib (directorio) vs SB3 (.zip)."""
@@ -484,23 +447,10 @@ def _nombre_bot(ruta: str) -> str:
 
 
 def _cargar_snap_como_politica(ruta: str, obs_dim: int = DIM_ENTORNO) -> Any:
-    """Carga un snapshot SB3 o RLlib como callable (motor, idx, legales) → Carta.
-
-    Detecta automáticamente el tipo por extensión/estructura.
-    """
+    """Carga un checkpoint RLlib como callable (motor, idx, legales) → Carta."""
     if _es_checkpoint_rllib(ruta):
         return _cargar_participante_rllib(ruta, obs_dim=obs_dim)
-
-    # SB3 legacy (.zip)
-    from sb3_contrib import MaskablePPO
-    from src.torneo.evaluacion import _detectar_vecnorm, _PoliticaSnapshot
-    ruta_clean = ruta[:-4] if ruta.endswith(".zip") else ruta
-    modelo_raw = MaskablePPO.load(ruta_clean, device="cpu")
-    modelo = (_Modelo190Wrapper(modelo_raw)
-              if modelo_raw.observation_space.shape[0] == 190
-              else modelo_raw)
-    vecnorm = _detectar_vecnorm(ruta)
-    return _PoliticaSnapshot(modelo, vecnorm)
+    raise ValueError(f"No es un checkpoint RLlib válido: {ruta}")
 
 
 def _jugar_match_snapshots(

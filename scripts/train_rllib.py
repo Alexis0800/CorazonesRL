@@ -61,7 +61,7 @@ from rich.progress import (
     TimeRemainingColumn,
 )
 from rich.table import Table
-from src.entorno.dimensiones import DIM_ENTORNO
+from src.entorno.dimensiones import DIM_ENTORNO, DIM_V12
 from src.rllib.callbacks import HeartsCallbacks
 from src.rllib.config import build_ppo_config
 from src.rllib.eval_bots import evaluar_vs_bots
@@ -123,12 +123,36 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--bc-weights", type=str, default=None,
                    help="Pickle de pesos BC (entrenar_bc.py) para inicializar la "
                         "política PPO por imitación de PIMC. Usar con LR bajo.")
+    p.add_argument("--humano-bc", type=str, default=None,
+                   help="Ruta a pesos.npz del bot de imitación humana "
+                        "(scripts/entrenar_bc_humano.py). Lo mete al pool como "
+                        "oponente 'duro' para romper la burbuja de self-play "
+                        "(79%% vs bots, 24%% vs humanos). Ver docs/auditoria_moon_2026-07-20.md.")
+    p.add_argument("--prob-humano", type=float, default=0.5,
+                   help="Fracción de slots de oponente duro cubiertos por el bot "
+                        "humano (si --humano-bc). Default 0.5.")
+    p.add_argument("--mesa-humana", type=float, default=0.0,
+                   help="Fracción de MESAS completas con 2 clones humanos + 1 ancla "
+                        "(si --humano-bc). Exposición mayoritaria al meta humano; "
+                        "la vía por-slot (prob-humano) se diluye a ~1/6.")
+    p.add_argument("--temp-humano", type=float, default=1.0,
+                   help="Temperatura de muestreo del clon humano (softmax/T). "
+                        "1.0 = estocástico como un humano; 0 o negativo = argmax.")
+    p.add_argument("--progress-fino", action="store_true",
+                   help="Calcula el progress del curriculum RELATIVO al paso "
+                        "reanudado: (pasos-reanudado)/(total-reanudado). Sin esto, "
+                        "un fine-tune con --resume arranca con progress≈1 y queda "
+                        "atrapado en Fase 4 self-play (bug del run v10d).")
+    p.add_argument("--moon-dir", type=str, default=None,
+                   help="Directorio de pesos moon (propio.pt/rival.pt) para las "
+                        "features [187:189]. Default None = models/moon. Usar "
+                        "models/moon_realfull (rival AUC 0.578->0.707).")
     p.add_argument("--pool-diverso", action="store_true",
                    help="El oponente duro de cada fase es un arquetipo humano al "
                         "azar (experto/castigador/lunatico/atacante), no solo "
                         "BotExperto. Mejora la generalización a juego variado.")
     p.add_argument("--con-pase", action="store_true",
-                   help="Habilita la fase de PASE. Fuerza obs_dim>=228 (DIM_V12). "
+                   help="Habilita la fase de PASE. Fuerza obs_dim>=DIM_V12. "
                         "Con --obs-dim 332 (DIM_V13) añade memoria del pase: "
                         "cartas dadas al receptor + recibidas del dador.")
     p.add_argument("--baza-reward-weight", type=float, default=0.15,
@@ -197,9 +221,8 @@ def main() -> None:
     args = parse_args()
     random_position = not args.no_random_position
 
-    # v10b: el pase requiere las 4 features de pase en la obs (DIM_V12=228).
-    if args.con_pase and args.obs_dim < 228:
-        from src.entorno.dimensiones import DIM_V12
+    # v10b: el pase requiere las 4 features de pase en la obs (DIM_V12).
+    if args.con_pase and args.obs_dim < DIM_V12:
         args.obs_dim = DIM_V12
 
     snapshot_dir = os.path.join(args.output_dir, "snapshots")
@@ -233,6 +256,10 @@ def main() -> None:
         obs_dim=args.obs_dim,
         anclar_experto=args.ancla_experto,
         pool_diverso=args.pool_diverso,
+        humano_bc_path=args.humano_bc,
+        prob_humano=args.prob_humano,
+        mesa_humana=args.mesa_humana,
+        temp_humano=args.temp_humano if args.temp_humano > 0 else None,
     )
 
     from src.entorno.recompensas_partida import RewardConfigPartida
@@ -247,6 +274,7 @@ def main() -> None:
         random_position=random_position,
         reward_config=reward_config,
         con_pase=args.con_pase,
+        moon_dir=args.moon_dir,
         gamma=args.gamma,
         entropy_coeff=args.entropy_coeff,
         lr=args.lr,
@@ -305,7 +333,16 @@ def main() -> None:
         console.print(f"[green]Política inicializada desde BC:[/green] {args.bc_weights}")
 
     # Inyectar factory inicial (en la FASE correcta si se reanuda).
-    factory_inicial = pool.make_factory(progress=paso_reanudado / args.total_steps)
+    # Progress del curriculum. Con --progress-fino es RELATIVO al tramo de este
+    # run (fix del bug v10d: resume a 32.44M/35M daba progress=0.93 → todo el
+    # fine-tune atrapado en Fase 4 self-play, exposición humana real 1/6).
+    _prog_base = paso_reanudado if args.progress_fino else 0
+    _prog_total = max(1, args.total_steps - _prog_base)
+
+    def _progress_de(pasos: int) -> float:
+        return max(0.0, (pasos - _prog_base)) / _prog_total
+
+    factory_inicial = pool.make_factory(progress=_progress_de(paso_reanudado))
     try:
         algo.env_runner_group.foreach_env(
             lambda env: setattr(env, "_opponent_factory", factory_inicial)
@@ -331,7 +368,7 @@ def main() -> None:
     pasos_totales = paso_reanudado
     ultimo_snapshot = paso_reanudado
     ultimo_factory_refresh = paso_reanudado
-    fase_actual = _fase(paso_reanudado / args.total_steps)
+    fase_actual = _fase(_progress_de(paso_reanudado))
     iter_count = 0
     reward_medio = float("nan")
     reward_max = float("nan")
@@ -346,7 +383,7 @@ def main() -> None:
                 iter_count += 1
 
                 pasos_totales = result.get("timesteps_total", pasos_totales)
-                progress = pasos_totales / args.total_steps
+                progress = _progress_de(pasos_totales)
 
                 env_r = result.get("env_runners", {})
                 reward_medio = env_r.get("episode_reward_mean", float("nan"))
@@ -388,6 +425,37 @@ def main() -> None:
                                 policy, obs_dim=args.obs_dim, n_partidas=150,
                                 con_pase=args.con_pase,
                             )
+                            # RAIL humano: si hay clon humano-BC, medir también
+                            # win-rate contra 3 clones — el proxy de humanos. Sin
+                            # esto, el score de elite es 100% métrica de bots (la
+                            # burbuja) y preserva regresiones vs humanos como la
+                            # de v10d (0.46→0.30). Ver docs/auditoria_moon_*.md.
+                            win_humano = None
+                            if args.humano_bc:
+                                from src.rllib.eval_bots import (
+                                    _eval_model_vs_factory, _obtener_modelo, _agregar,
+                                )
+                                from src.rllib.opponent_pool import SnapshotPolicy
+                                import numpy as _np
+                                _d = _np.load(args.humano_bc)
+                                _pesos_h = {k: _d[k] for k in _d.files}
+                                _temp = args.temp_humano if args.temp_humano > 0 else None
+
+                                def _fac_humana(ai=0):
+                                    return {i: SnapshotPolicy.from_weights(
+                                                _pesos_h, obs_dim=args.obs_dim,
+                                                temperatura=_temp)
+                                            for i in range(4) if i != ai}
+
+                                _model_eval = _obtener_modelo(policy, args.obs_dim)
+                                _res_h = _eval_model_vs_factory(
+                                    _model_eval, _fac_humana, 150,
+                                    obs_dim=args.obs_dim, con_pase=args.con_pase,
+                                    moon_dir=args.moon_dir or "models/moon",
+                                )
+                                win_humano = _agregar(_res_h)["win"]
+                                metricas_bot["win_rate_vs_humano"] = round(win_humano, 4)
+
                             metricas_bot["tipo"] = "bot_eval"
                             metricas_bot["paso"] = pasos_totales
                             metricas_bot["fase"] = fase_actual
@@ -396,12 +464,20 @@ def main() -> None:
 
                             # Preservar el mejor modelo (elite) — protege contra
                             # el pruning y contra la regresión del self-play.
-                            # Score compuesto centrado en el desafío real (experto).
-                            score = (
-                                0.5 * metricas_bot.get("top2_rate_vs_experto", 0.0)
-                                + 0.3 * metricas_bot.get("win_rate_vs_experto", 0.0)
-                                + 0.2 * metricas_bot.get("top2_rate", 0.0)
-                            )
+                            # Con clon humano: el score pesa el proxy de humanos
+                            # (el objetivo real); sin él, score legacy de bots.
+                            if win_humano is not None:
+                                score = (
+                                    0.5 * win_humano
+                                    + 0.3 * metricas_bot.get("top2_rate_vs_experto", 0.0)
+                                    + 0.2 * metricas_bot.get("top2_rate", 0.0)
+                                )
+                            else:
+                                score = (
+                                    0.5 * metricas_bot.get("top2_rate_vs_experto", 0.0)
+                                    + 0.3 * metricas_bot.get("win_rate_vs_experto", 0.0)
+                                    + 0.2 * metricas_bot.get("top2_rate", 0.0)
+                                )
                             if preservar_elite(ruta, elite_dir, score,
                                                pasos_totales, max_elite=10):
                                 console.print(

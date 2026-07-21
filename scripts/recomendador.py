@@ -38,7 +38,8 @@ except Exception:
 
 from src.dominio.carta import Carta
 from src.dominio.motor import MotorCorazones, receptor_y_dador_por_numero_mano
-from src.entorno.observacion import ObservacionBuilder
+from src.entorno.observacion import ObservacionBuilder, puede_alimentar
+from src.entorno.dimensiones import con_pase_de_obs
 from src.entorno.moon_model import EntradaBaza, EstimadorMoonProb
 from src.rllib.utils import cargar_policy_desde_checkpoint
 
@@ -99,7 +100,7 @@ class Recomendador:
     def __init__(self, ckpt: str, mi_idx: int = 0):
         self.snap = cargar_policy_desde_checkpoint(ckpt)
         self.obs_dim = self.snap._obs_dim
-        self.con_pase = self.obs_dim >= 228
+        self.con_pase = con_pase_de_obs(self.obs_dim)
         self.builder = ObservacionBuilder(dim=self.obs_dim)
         self.me = mi_idx
         self._estimador_moon = EstimadorMoonProb()
@@ -155,7 +156,7 @@ class Recomendador:
             )
             for i in range(4) if i != self.me
         )
-        puedo_alim = any(scores[j] >= 85 for j in range(4) if j != self.me)
+        puedo_alim = puede_alimentar(scores, self.me)
         return self.builder.construir(
             motor=m, agente_idx=self.me, vacios=self.vacios,
             puntuacion_historica=scores,

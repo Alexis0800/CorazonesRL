@@ -113,6 +113,4 @@ class CalculadoraRecompensasPartida:
         return mejores + 1
 
 
-_recompensas_partida = CalculadoraRecompensasPartida()
-
 __all__ = ["RewardConfigPartida", "CalculadoraRecompensasPartida"]

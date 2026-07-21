@@ -34,9 +34,9 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 from src.dominio.carta import Carta
 from src.dominio.motor import MotorCorazones
-from src.entorno.dimensiones import DIM_ENTORNO
+from src.entorno.dimensiones import BAZAS_POR_MANO, DIM_ENTORNO, DIM_V12, NUM_CARTAS
 from src.entorno.moon_model import EntradaBaza, EstimadorMoonProb
-from src.entorno.observacion import ObservacionBuilder
+from src.entorno.observacion import ObservacionBuilder, puede_alimentar
 from src.entorno.recompensas_partida import (
     CalculadoraRecompensasPartida,
     RewardConfigPartida,
@@ -82,11 +82,11 @@ class CorazonesEnvRLlib(gym.Env):
         # gamma para el shaping PBRS — DEBE coincidir con el de PPO para que
         # la garantía de invarianza de política se mantenga.
         self._gamma: float = cfg.get("gamma", 0.999)
-        # v10b: habilitar la fase de PASE (requiere obs_dim >= 228 = DIM_V12).
+        # v10b: habilitar la fase de PASE (requiere obs_dim >= DIM_V12).
         self._con_pase: bool = cfg.get("con_pase", False)
-        if self._con_pase and self._obs_dim < 228:
+        if self._con_pase and self._obs_dim < DIM_V12:
             raise ValueError(
-                "con_pase=True requiere obs_dim >= 228 (DIM_V12) para las features de pase."
+                f"con_pase=True requiere obs_dim >= {DIM_V12} (DIM_V12) para las features de pase."
             )
         # Ablación (v13): si False, los planos de memoria del pase [228:332] quedan
         # en cero aunque obs_dim sea 332. Sirve para medir su contribución real.
@@ -94,9 +94,9 @@ class CorazonesEnvRLlib(gym.Env):
 
         self.observation_space = spaces.Dict({
             "obs": spaces.Box(0.0, 1.0, shape=(self._obs_dim,), dtype=np.float32),
-            "action_mask": spaces.Box(0.0, 1.0, shape=(52,), dtype=np.float32),
+            "action_mask": spaces.Box(0.0, 1.0, shape=(NUM_CARTAS,), dtype=np.float32),
         })
-        self.action_space = spaces.Discrete(52)
+        self.action_space = spaces.Discrete(NUM_CARTAS)
 
         self._motor = MotorCorazones()
         self._obs_builder = ObservacionBuilder(dim=self._obs_dim)
@@ -106,7 +106,9 @@ class CorazonesEnvRLlib(gym.Env):
         # (recomendador.py), para que la política entrene sobre la señal que
         # de verdad va a ver en inferencia (antes usaba la heurística fija de
         # _calcular_moon_prob solo aquí, nunca en producción).
-        self._estimador_moon = EstimadorMoonProb()
+        self._estimador_moon = EstimadorMoonProb(
+            dir_modelos=cfg.get("moon_dir", "models/moon")
+        )
 
         # Estado por mano (se reinicia al inicio de cada mano)
         self._puntos_mano_actual: List[int] = [0] * 4
@@ -352,7 +354,7 @@ class CorazonesEnvRLlib(gym.Env):
         self._manos_jugadas += 1
 
     def _es_fin_de_mano(self) -> bool:
-        return self._motor.numero_baza > 13 or all(
+        return self._motor.numero_baza > BAZAS_POR_MANO or all(
             len(j.mano) == 0 for j in self._motor.jugadores
         )
 
@@ -394,10 +396,7 @@ class CorazonesEnvRLlib(gym.Env):
             )
             for i in range(4) if i != agente
         )
-        puedo_alimentar = any(
-            puntuacion_historica[j] >= 85
-            for j in range(4) if j != agente
-        )
+        puedo_alimentar = puede_alimentar(puntuacion_historica, agente)
 
         # Features de la fase de pase (solo aplican al agente).
         en_pase = self._fase_pase and agente == self._agente_idx
@@ -426,7 +425,7 @@ class CorazonesEnvRLlib(gym.Env):
             ),
         )
 
-        mask = np.zeros(52, dtype=np.float32)
+        mask = np.zeros(NUM_CARTAS, dtype=np.float32)
         if en_pase:
             # En fase de pase, legal = cartas de la mano aún no seleccionadas.
             for c in self._motor.jugadores[agente].mano:

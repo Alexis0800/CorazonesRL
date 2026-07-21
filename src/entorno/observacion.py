@@ -29,8 +29,11 @@ Vector de observación (v11, 224 dimensiones):
     [207:211] Probabilidad Q♠ por jugador relativo
     [211:215] Corazones capturados esta mano / 13.0
     [215:219] Alerta pozo por jugador (≥6 corazones)
-    [219]     Palo de salida (-1.0 si None, else palo/3.0)
+    [219]     Palo de salida (0.0 si None, else palo/3.0)
     [220:224] quien_jugo_mesa — 4 flags: ¿el jugador relativo ya jugó en esta baza?
+    [224:228] Fase de PASE (v12): fase_pase, direccion, n_seleccionadas, reservado
+    [228:332] Memoria del pase (v13, por perspectiva): cartas que DI al receptor
+              [228:280] + cartas que RECIBÍ del dador [280:332] (one-hot)
 """
 
 from __future__ import annotations
@@ -39,25 +42,41 @@ from typing import List, Optional
 
 import numpy as np
 
-from src.entorno.dimensiones import DIM_V5, DIM_V6, DIM_V10, DIM_V11, DIM_ENTRENAMIENTO
+from src.entorno.dimensiones import (
+    DIM_V5, DIM_V6, DIM_V10, DIM_V11, DIM_V12, DIM_V13, DIM_ENTRENAMIENTO,
+    BAZAS_POR_MANO,
+)
+
+# Umbral de "cerca de perder" (score ≥ este valor). SSOT del 85 que replicaban
+# la feature [189] puede_alimentar y el conteo [195] jugadores_cerca_de_100.
+UMBRAL_CERCA_100 = 85
+
+
+def puede_alimentar(puntuacion_historica: List[int], idx: int) -> bool:
+    """[189] ¿el jugador `idx` puede 'alimentar' puntos a un rival ya en peligro?
+
+    True si algún OTRO jugador tiene score ≥ UMBRAL_CERCA_100. SSOT de las 5
+    copias que replicaban `any(scores[j] >= 85 for j in range(4) if j != idx)`.
+    """
+    return any(
+        puntuacion_historica[j] >= UMBRAL_CERCA_100
+        for j in range(4) if j != idx
+    )
 
 
 class ObservacionBuilder:
     """Construye vectores de observación desde el estado del motor y entorno.
 
-    Centraliza TODA la lógica de construcción de observación en un solo lugar,
-    eliminando la duplicación que existía en entorno.py, PoliticaSB3, y
-    entorno_multi.py.
+    Centraliza TODA la lógica de construcción de observación en un solo lugar.
 
-    Soporta 3 dimensiones (definidas en dimensiones.py):
-        DIM_V5 = 190 (features básicas + flags estratégicos)
-        DIM_V6 = 194 (+ all_void por palo)
+    Soporta las dimensiones definidas en dimensiones.py:
+        DIM_V5  = 190 (features básicas + flags estratégicos)
+        DIM_V6  = 194 (+ all_void por palo)
         DIM_V10 = 220 (+ bloque v9 de features avanzadas)
+        DIM_V11 = 224 (+ quien_jugo_mesa)
+        DIM_V12 = 228 (+ fase de PASE)
+        DIM_V13 = 332 (+ memoria del pase por perspectiva)
     """
-
-    DIM_V5: int = DIM_V5
-    DIM_V6: int = DIM_V6
-    DIM_V10: int = DIM_V10
 
     def __init__(self, dim: int = DIM_ENTRENAMIENTO):
         self.dim = dim
@@ -142,13 +161,13 @@ class ObservacionBuilder:
             obs[183 + rel] = 1.0
 
         # --- Features v5 [187:190] ---
-        if self.dim >= 190:
+        if self.dim >= DIM_V5:
             obs[187] = float(moon_prob_agente)   # P(Moon agente) continuo [0,1]
             obs[188] = float(moon_prob_rival)    # max P(Moon rival) continuo [0,1]
             obs[189] = 1.0 if puedo_alimentar else 0.0
 
         # --- Features all_void v6 [190:194] ---
-        if self.dim >= 194:
+        if self.dim >= DIM_V6:
             for palo in range(4):
                 todos_vacios = all(
                     palo in vacios[j] for j in range(4) if j != a
@@ -156,24 +175,24 @@ class ObservacionBuilder:
                 obs[190 + palo] = 1.0 if todos_vacios else 0.0
 
         # --- Bloque v9 [194:220] ---
-        if self.dim >= 220:
+        if self.dim >= DIM_V10:
             self._construir_bloque_v9(
                 obs, a, motor, puntuacion_historica, dama_picas_en, vacios
             )
 
         # --- Bloque v11 [220:224]: quien_jugo_mesa ---
-        if self.dim >= 224:
+        if self.dim >= DIM_V11:
             self._construir_bloque_v11(obs, a, motor)
 
         # --- Bloque v12 [224:228]: fase de PASE (v10b) ---
-        if self.dim >= 228:
+        if self.dim >= DIM_V12:
             obs[224] = float(fase_pase)                  # 1.0 si estamos pasando
             obs[225] = float(direccion_pase)             # izq/der/enfrente normalizado
             obs[226] = float(n_pase_seleccionadas) / 3.0 # cartas ya elegidas para pasar
             obs[227] = 0.0                               # reservado
 
         # --- Bloque v13 [228:332]: memoria del pase (por perspectiva) ---
-        if self.dim >= 332:
+        if self.dim >= DIM_V13:
             self._construir_bloque_v13(obs, a, motor, cartas_pasadas, cartas_recibidas)
 
         return obs
@@ -220,10 +239,10 @@ class ObservacionBuilder:
             dama_picas_en: Índice del jugador con Q♠, o None.
         """
         # [194] baza_numero / 13.0
-        obs[194] = min(motor.numero_baza / 13.0, 1.0)
+        obs[194] = min(motor.numero_baza / BAZAS_POR_MANO, 1.0)
 
         # [195] jugadores_cerca_de_100 / 3.0
-        cerca = sum(1 for p in puntuacion_historica if p >= 85)
+        cerca = sum(1 for p in puntuacion_historica if p >= UMBRAL_CERCA_100)
         obs[195] = cerca / 3.0
 
         # [196] Q♠ ya fue capturada

@@ -1,0 +1,265 @@
+{
+  "resumen": "El código está funcionalmente sano (362 tests verdes) pero acumula deuda de mantenibilidad concentrada en cuatro focos: (1) números mágicos de dominio sin SSOT —52, 85, 228, 13, 26, 78— repetidos en 5-7 sitios cada uno, que son el mayor riesgo real porque desalinean en silencio la observación de entrenamiento vs. inferencia/producción; (2) código muerto legacy de la era SB3 (módulo entero evaluacion.py, rama SB3 de elo.py, flags/params obsoletos) y huérfanos de esquemas de versión abandonados (DIM_V3); (3) docstrings y comentarios stale que mienten sobre el comportamiento (fases del pool, umbrales, dims, referencias a módulos removidos); y (4) duplicación de lógica de dominio (ganador-de-baza, scoring/pleno, tracker táctico, ensamblado de obs) entre env, replay, bots y scripts, donde un cambio en un lado deriva sin que ningún test lo detecte. La mayoría es refactor mecánico de bajo riesgo aplicable ya; solo los god-functions y la unificación de trackers/obs tocan comportamiento y deben proponerse, no auto-aplicarse. Regla transversal del proyecto (\"Never hardcode 224/228\") ya está siendo violada en el propio código de entorno.",
+  "temas": [
+    {
+      "tema": "SSOT / números mágicos de dominio (52, 85, 228, 13, 26, 78, 4, 272, gates de dim)",
+      "severidad": "alta",
+      "n_findings": 20,
+      "descripcion": "Constantes de dominio hardcodeadas y replicadas: 52 (nº cartas/acción) en env/rllib/mcts/scripts; 85 (cerca-de-100 para puedo_alimentar) en 7 sitios; 228=DIM_V12 (con_pase) en env+scripts pese a la regla explícita de no hardcodear; 13 (bazas/mano), 26/78 (regla de pleno), 4 (jugadores), 272 (DIM_RIVAL). Riesgo real: la feature [189]/[187:189] queda fuera de distribución entre entrenamiento e inferencia si una copia se recalibra y otra no."
+    },
+    {
+      "tema": "Código muerto (legacy SB3 y huérfanos de versión)",
+      "severidad": "media",
+      "n_findings": 20,
+      "descripcion": "Módulo entero src/torneo/evaluacion.py (importa single_agent inexistente + sb3_contrib removido, 0 callers) y rama SB3 de elo.py + _Modelo190Wrapper; DIM_V3=265 y colecciones DIMS_VALIDAS/DIM_NOMBRES nunca consumidas; params/flags obsoletos (baza_reward_weight, --baza-reward-weight, _run(binario)); funciones sin caller (_mcts_score_desde_estado); estado write-only (_vacios en bot_castigador); imports muertos (numpy en model.py, Dict); no-ops (línea dama-picas en jugar_modelo)."
+    },
+    {
+      "tema": "Duplicación de lógica (drift silencioso train/inference)",
+      "severidad": "alta",
+      "n_findings": 13,
+      "descripcion": "Cuatro copias de 'ganador de baza' (motor, bot_experto, bot_lunatico, bot_atacante_lider, manual, maquina, auto_juego); scoring+pleno reimplementado en manual.py; tracker táctico (voids/Q/puntos) y ensamblado de obs+moon duplicados verbatim entre corazones_rllib.py y captura/replay.py; construir_desde_motor copia _construir_bloque_v11; forward+argmax ×3 en rllib; simular_resto_mano ×4 en mcts (con condición de fin distinta); construcción de modelo BC ×3; heurística moon_prob recopiada en pimc_regret."
+    },
+    {
+      "tema": "Docstrings y comentarios desalineados con el código",
+      "severidad": "baja",
+      "n_findings": 18,
+      "descripcion": "Fases del pool (3 vs 5 reales), masking -inf vs -1e9, palo_salida -1.0 vs 0.0, baza>=8 vs constante 10, mcts_mejor_jugada 'árbol' vs UCB plano en raíz, 26 cartas vs 26 puntos, ranking_final 'peor->mejor' vs productor 'mejor->peor', banner IoU vs coseno, RemateResto omitido del contrato, referencias a train.py/CorazonesEnv/SB3 ya removidos, [187:188] vs [187:189]."
+    },
+    {
+      "tema": "Version drift (rutas moon y defaults obs_dim)",
+      "severidad": "media",
+      "n_findings": 10,
+      "descripcion": "Doble directorio moon vivo: defaults apuntan a models/moon (peor, AUC rival 0.578) mientras BC-humano/finetune usan models/moon_realfull (0.707); inconsistente entre env, EstimadorMoonProb, config, eval_bots, replay, train_rllib. Defaults obs_dim=DIM_ENTORNO=224 (sin pase) desalineados con el campeón v10c=228. Docstrings fijados en v10b, dim 220/224. elo.py defaultea a models/v5 (SB3)."
+    },
+    {
+      "tema": "Convenciones de nombres (es/en, visibilidad, nombres engañosos)",
+      "severidad": "baja",
+      "n_findings": 8,
+      "descripcion": "_mano_activa privado usado como API pública por ~8 consumidores; seat vs jugador_idx en la misma firma; claves del dict info mezclan español/inglés (shooting_moon vs pozo); literales 0/1 de palo junto a constantes nombradas; seats/scoreboard en replay; _calcular_elo_convergente que no itera; caracteres chinos ('预留') en analisis.py; convención reset() inconsistente entre bots."
+    }
+  ],
+  "quick_wins": [
+    "Purga de código muerto de un solo archivo, sin cambio de comportamiento (Batch 1): carta._ES_DOS_TREBOL/_VALORES, recompensas_partida._recompensas_partida, model.py import numpy, config.baza_reward_weight, dataset._mcts_score_desde_estado/_clonar_motor_para_score, adb._run(binario)+import time redundante, jugar_modelo no-op dama-picas.",
+    "Constantes de dominio internas en motor.py (NUM_JUGADORES=4, PUNTOS_TOTALES_MANO=26) que no cruzan de archivo — reemplazo mecánico de literales + renumerar comentarios de filtros de obtener_jugadas_legales (Batch 2).",
+    "Todas las correcciones de docstring/comentario que no tocan comportamiento (Batch 3): fases del pool, -inf->-1e9, palo_salida 0.0, baza>=10, 26 puntos, banner coseno, RemateResto, referencias a módulos SB3 removidos.",
+    "Eliminar el módulo muerto completo src/torneo/evaluacion.py y la rama SB3 de elo.py (_Modelo190Wrapper) — borrado de alto valor que reduce superficie y quita imports rotos (Batch 10).",
+    "SSOT del gate de dimensiones dentro de observacion.py: sustituir literales 190/194/220/224/228/332 por DIM_V5..DIM_V13 ya importados (valores idénticos, cero cambio de comportamiento; incluido en Batch 3)."
+  ],
+  "batches": [
+    {
+      "orden": 1,
+      "titulo": "Purga de dead-code de un solo archivo (archivos disjuntos)",
+      "archivos": [
+        "src/dominio/carta.py",
+        "src/entorno/recompensas_partida.py",
+        "src/rllib/model.py",
+        "src/rllib/config.py",
+        "src/mcts/dataset.py",
+        "src/captura/adb.py",
+        "scripts/jugar_modelo.py"
+      ],
+      "cambios": [
+        "carta.py:_ES_DOS_TREBOL (l94) y _VALORES (l91) -> eliminar + quitar de __all__ (l96-97)",
+        "recompensas_partida.py:_recompensas_partida (l116) -> eliminar el singleton de módulo (no referenciado, no en __all__)",
+        "model.py:import numpy (l20) -> eliminar; docstring 'masking -inf' (l5,l36) -> '-1e9'",
+        "config.py:baza_reward_weight (l35) -> eliminar parámetro + línea de docstring; import typing.Dict (l14) -> eliminar",
+        "dataset.py:_mcts_score_desde_estado (l451) y _clonar_motor_para_score (l422) -> eliminar (0 callers)",
+        "adb.py:_run(binario) (l63) -> quitar kwarg no usado; captura() -> quitar 'import time' local redundante (l84)",
+        "jugar_modelo.py:bucle de baza (l163-164) -> borrar el 'if any(...dama...): pass' no-op"
+      ],
+      "riesgo": "bajo",
+      "test_gate": "python -m pytest tests/ -q (foco: tests/mcts, tests que importen rllib/model)"
+    },
+    {
+      "orden": 2,
+      "titulo": "Dominio: constantes internas + comentarios + dead-code por archivo (disjuntos)",
+      "archivos": [
+        "src/dominio/motor.py",
+        "src/agentes/bot_castigador.py",
+        "src/mcts/analisis.py",
+        "src/agentes/bot_lunatico.py",
+        "src/agentes/pase.py"
+      ],
+      "cambios": [
+        "motor.py: añadir NUM_JUGADORES=4 y PUNTOS_TOTALES_MANO=26 (nivel módulo/clase) y sustituir literales internos (%4, [26]*4, if pts==26, range(4)); renumerar comentarios inline de obtener_jugadas_legales (l143) al orden real 1-Salida/2-Asistir/3-Primera-baza/4-Corazones",
+        "bot_castigador.py:_vacios (l51) y _palo_salida_baza_actual (l53) write-only -> eliminar + bloque de inferencia en _actualizar_estado (l134-140) + corregir docstring (l34-38) y comentario 'inferir voids' (l125)",
+        "analisis.py: eliminar bloque muerto n_mundos=30 (l337-338) y reportar 30 real en vez de 200 (l352); quitar param rollout_tipo de comparar_politicas (l652); corregir comentarios baza>=8 -> baza>=10 / _BAZA_MINIMA_EXACTA (l5,l582) y quitar caracteres chinos",
+        "bot_lunatico.py: docstring (l4) '26 cartas' -> '26 puntos (13 corazones + Q picas = 14 cartas)'",
+        "pase.py: quitar sufijo de versión 'v10b' del docstring (l2); definir _TREBOL,_DIAMANTE=0,1 y usarlos en _peligro (l47); eliminar _CORAZON no usado (l22)"
+      ],
+      "riesgo": "bajo",
+      "test_gate": "python -m pytest tests/dominio tests/ -q (foco: test_bot_castigador, test_bot_lunatico, test analisis/pase)"
+    },
+    {
+      "orden": 3,
+      "titulo": "Docstrings/gates sin cambio de comportamiento + SSOT de gates en observacion (disjuntos)",
+      "archivos": [
+        "src/entorno/dimensiones.py",
+        "src/entorno/observacion.py",
+        "src/mcts/pimc.py",
+        "src/rllib/opponent_pool.py",
+        "src/rllib/eval_bots.py",
+        "src/captura/modelos.py",
+        "src/captura/banner.py",
+        "src/captura/puerto.py"
+      ],
+      "cambios": [
+        "dimensiones.py: reformular docstring/comentarios (DIM_ENTORNO=224 es default SIN pase; campeón v10c=DIM_V12=228; 'train.py'->'scripts/train_rllib.py'; 'CorazonesEnv'->'CorazonesEnvRLlib'); eliminar DIM_V3=265 (l32) y colecciones no consumidas DIMS_VALIDAS/DIM_NOMBRES (l39) + __all__. AÑADIR aquí NUM_CARTAS=52 y BAZAS_POR_MANO=13 para los batches cross-cutting siguientes",
+        "observacion.py: gates de construir (l145-176) -> usar constantes DIM_V5..DIM_V13 en vez de literales (importar DIM_V12/DIM_V13); eliminar atributos de clase muertos DIM_V5/V6/V10 (l58-60); corregir docstring [219] '-1.0'->'0.0' y añadir bloques [224:228]/[228:332]; docstring de clase -> dims reales V5..V13, quitar refs a entorno.py/PoliticaSB3/entorno_multi",
+        "pimc.py: docstring de mcts_mejor_jugada (l455) -> describir UCB en la raíz sobre determinizaciones (no árbol multinivel)",
+        "opponent_pool.py: reescribir docstring de clase (l229-244) a las 5 fases reales (0.05/0.15/0.40/0.70) y matizar el ancla-experto a 'solo si anclar_experto=True'",
+        "eval_bots.py: docstring de evaluar_vs_bots (l118) -> listar los 8 escenarios y aclarar 'mixto' distinto; corregir ref construir_desde_motor a ObservacionBuilder",
+        "modelos.py: comentario ranking_final (l94) -> 'mejor->peor' (lo que produce el recolector y espera el test)",
+        "banner.py: docstring de módulo (l11) 'IoU' -> 'similitud coseno'",
+        "puerto.py: docstring de eventos (l84) -> mencionar RemateResto y que con concesión hay <52 JugadaObservada"
+      ],
+      "riesgo": "bajo",
+      "test_gate": "python -m pytest tests/ -q (verifica shape==DIM_ENTORNO y test_captura ranking)"
+    },
+    {
+      "orden": 4,
+      "titulo": "CROSS-CUTTING: NUM_CARTAS=52 (batch solo)",
+      "archivos": [
+        "src/entorno/corazones_rllib.py",
+        "src/entorno/moon_model.py",
+        "src/entorno/observacion.py",
+        "src/rllib/opponent_pool.py",
+        "src/rllib/model.py",
+        "src/rllib/eval_bots.py",
+        "src/mcts/dataset.py",
+        "scripts/entrenar_bc.py",
+        "scripts/finetune_bc_pozo.py",
+        "scripts/entrenar_bc_humano.py"
+      ],
+      "cambios": [
+        "Usar NUM_CARTAS (ya añadida en dimensiones.py, batch 3) en todos los Box(shape=(52,)), Discrete(52), np.zeros(52) y num_outputs=52",
+        "corazones_rllib.py: observation/action space + mask (l97,99,431)",
+        "moon_model.py: offsets base del layout features_rival (52/104/156/168/220) derivados de NUM_CARTAS",
+        "opponent_pool.py (l93,107,110,131,204), model.py, eval_bots.py, dataset.py (l299): idem",
+        "scripts BC: action_mask Box(52) del helper de modelo"
+      ],
+      "riesgo": "bajo (valores idénticos; amplitud lo hace cross-cutting)",
+      "test_gate": "python -m pytest tests/ -q completo (shape de obs/acción)"
+    },
+    {
+      "orden": 5,
+      "titulo": "CROSS-CUTTING: UMBRAL_CERCA_100=85 + helper puede_alimentar(scores, idx) (batch solo)",
+      "archivos": [
+        "src/entorno/observacion.py",
+        "src/entorno/corazones_rllib.py",
+        "src/entorno/moon_model.py",
+        "src/captura/replay.py",
+        "scripts/recomendador.py",
+        "scripts/pimc_regret.py",
+        "src/agentes/bot_experto.py"
+      ],
+      "cambios": [
+        "Definir UMBRAL_CERCA_100=85 y helper puede_alimentar(scores, idx) como SSOT de la feature [189] (en observacion.py)",
+        "Reemplazar las 7 copias de 'any(scores[j]>=85 for j!=idx)': corazones_rllib.py:399, moon_model.py:113, replay.py:100, recomendador.py:158, pimc_regret.py:139, observacion.py:226, bot_experto.py:310/325",
+        "Verificar que la obs de inferencia queda byte-idéntica a la de entrenamiento (refactor puro)"
+      ],
+      "riesgo": "medio (feature de obs; debe quedar idéntica bit a bit)",
+      "test_gate": "python -m pytest tests/ -q + test de igualdad de obs env vs replay si existe (test_replay_obs_completa)"
+    },
+    {
+      "orden": 6,
+      "titulo": "CROSS-CUTTING: DIM_V12 para con_pase + helper con_pase_de_obs(obs_dim) (batch solo)",
+      "archivos": [
+        "src/entorno/corazones_rllib.py",
+        "scripts/recomendador.py",
+        "scripts/jugar_modelo.py",
+        "scripts/train_rllib.py",
+        "scripts/entrenar_bc_humano.py",
+        "scripts/evaluar_vs_humano_bc.py"
+      ],
+      "cambios": [
+        "Añadir helper con_pase_de_obs(obs_dim)=obs_dim>=DIM_V12 (en dimensiones.py o entorno) e importar DIM_V12",
+        "corazones_rllib.py:__init__ guard (l87) -> '< DIM_V12' e interpolar DIM_V12 en el mensaje",
+        "recomendador.py:102 y jugar_modelo.py:76 -> self.con_pase = con_pase_de_obs(obs_dim)",
+        "train_rllib.py:213 guard -> '< DIM_V12'; quitar 228 literal de ayuda/comentario",
+        "entrenar_bc_humano.py:55 y evaluar_vs_humano_bc.py:35 -> default=DIM_V12; evaluar_vs_humano_bc derivar con_pase del obs_dim en vez de True hardcodeado",
+        "train_rllib/entrenar_bc_humano: corregir ayuda '[187:188]' -> '[187:189]'"
+      ],
+      "riesgo": "bajo",
+      "test_gate": "python -m pytest tests/ -q + smoke de recomendador.py/train_rllib --help"
+    },
+    {
+      "orden": 7,
+      "titulo": "CROSS-CUTTING: BAZAS_POR_MANO=13 + helpers de pleno hubo_pozo/asiento_pozo (78/26) (batch solo)",
+      "archivos": [
+        "src/entorno/corazones_rllib.py",
+        "src/entorno/moon_model.py",
+        "src/entorno/observacion.py",
+        "scripts/entrenar_moon_prob.py",
+        "scripts/generar_dataset_pozo.py",
+        "scripts/generar_dataset_moon_simulado.py",
+        "scripts/auditar_logs_servidor.py",
+        "scripts/pimc_regret.py"
+      ],
+      "cambios": [
+        "Usar BAZAS_POR_MANO (dimensiones, batch 3) en: corazones_rllib _es_fin_de_mano (l357 '>13'), moon_model.py:177 y observacion.py:223 (min(baza/13,1.0)), scripts que replican /13",
+        "Añadir helpers de dominio hubo_pozo(puntuacion_mano)=sum==78 y asiento_pozo(...) en src/dominio; reemplazar la regla inline en entrenar_moon_prob.py:76, generar_dataset_pozo.py:57, generar_dataset_moon_simulado.py:183, auditar_logs_servidor.py:55",
+        "Documentar 78/26 en un único lugar del dominio"
+      ],
+      "riesgo": "bajo",
+      "test_gate": "python -m pytest tests/ -q (foco: test_entrenar_moon_prob, tests de dominio)"
+    },
+    {
+      "orden": 8,
+      "titulo": "CROSS-CUTTING: ruta moon canónica única — REQUIERE DECISIÓN (batch solo)",
+      "archivos": [
+        "src/entorno/moon_model.py",
+        "src/entorno/corazones_rllib.py",
+        "src/rllib/config.py",
+        "src/rllib/eval_bots.py",
+        "src/captura/replay.py",
+        "scripts/train_rllib.py",
+        "scripts/entrenar_moon_prob.py"
+      ],
+      "cambios": [
+        "DECISIÓN previa del owner: fijar directorio canónico (la evidencia apunta a models/moon_realfull, rival AUC 0.578->0.707)",
+        "Definir constante única RUTA_MOON e alinear TODOS los defaults: EstimadorMoonProb.dir_modelos (moon_model.py:227), corazones_rllib.py:110, config.py:34, eval_bots.py:50, replay.py (ejemplos_de_partida), train_rllib.py:134 (--moon-dir), out-dir de entrenar_moon_prob.py:296",
+        "Documentar en CLAUDE.md/dimensiones cuál es el modelo vivo"
+      ],
+      "riesgo": "medio (cambia qué pesos moon se cargan por defecto -> altera features [187:189]; NO aplicar sin confirmar el dir vivo)",
+      "test_gate": "python -m pytest tests/ -q + re-evaluar AUC/regret con el dir elegido antes de mergear"
+    },
+    {
+      "orden": 9,
+      "titulo": "CROSS-CUTTING: borrado del camino muerto SB3 (evaluacion.py + rama SB3 de elo.py)",
+      "archivos": [
+        "src/torneo/evaluacion.py",
+        "src/torneo/elo.py"
+      ],
+      "cambios": [
+        "Eliminar src/torneo/evaluacion.py completo (importa single_agent inexistente + sb3_contrib; 0 callers en scripts/tests)",
+        "elo.py: borrar rama .zip/SB3 de _cargar_snap_como_politica (l495-503) y _Modelo190Wrapper (l196) + quitarlo de __all__; dejar solo el camino RLlib (_es_checkpoint_rllib)",
+        "Revisar defaults CLI de elo (_MODELOS_V5_DIR/--incluir-v6): apuntar a models/produccion o exigir --directorio"
+      ],
+      "riesgo": "bajo (código ya inejecutable), pero cross-file por el acoplamiento elo->evaluacion",
+      "test_gate": "python -m pytest tests/torneo/test_elo.py tests/ -q"
+    }
+  ],
+  "riesgosos_diferidos": [
+    "Tracker táctico compartido: extraer TrackerTactico (voids/dama_picas/historial/puntos_mano con actualizar_vacios/resolver_baza) a src/entorno/ y consumirlo en corazones_rllib.py y captura/replay.py. Elimina la copia verbatim pero cambia el punto de verdad del bookkeeping de entrenamiento -> validar con test de igualdad env-vs-replay antes de aplicar.",
+    "construir_obs_completa compartida: función pura (motor, asiento, tracker, estimador, scoreboard, estado_pase) usada por env._build_obs y replay._obs_para_asiento. Riesgo de desalinear la obs si el refactor no es bit-idéntico.",
+    "construir_desde_motor debe delegar en _construir_bloque_v11 (observacion.py) en vez de duplicarlo; afecta a oponentes en self-play (opponent_pool/evaluacion) -> requiere test de regresión de self-play.",
+    "ganador_de_baza(jugadas_en_orden)->asiento como helper único en src/dominio y reusarlo en motor.resolver_baza, bot_experto, bot_lunatico, bot_atacante_lider, manual, maquina, auto_juego. Toca dominio+bots+captura; alto valor pero amplio.",
+    "manual.py: reconstruir bazas en MotorCorazones y llamar a aplicar_puntuacion() en vez de reimplementar scoring+pleno (26 hardcodeado). Cambia el camino de puntuación de captura manual.",
+    "_build_obs (corazones_rllib, ~75 líneas): separar en _features_moon / _features_pase / _action_mask. God-function; el split arriesga la obs de producción.",
+    "SnapshotPolicy (opponent_pool): separar carga/detección de modelo (LSTM vs MLP), init de campos transitorios y lógica de pase; SRP con 6 responsabilidades y init triplicada. Riesgo alto (self-play).",
+    "forward+argmax: helper _forward_argmax(model, obs, mask, state) reusado por opponent_pool.__call__/pasar y eval_bots. Toca el arrastre de estado LSTM -> validar determinismo.",
+    "bot_experto._liderar/_seguir_palo/_descartar: partir los god-functions por fase/modo; y DECIDIR sobre _modo 'ALIMENTAR' (implementarlo de verdad o quitarlo del enum). Cambia estrategia del bot -> puede mover Elo.",
+    "ObservacionBuilder.construir (14 params): agrupar el estado de pase en un dataclass EstadoPase. Toca todos los callers (env, dataset, replay).",
+    "train_rllib.main() (~260 líneas): extraer _snapshot_y_eval, _refrescar_factory_si_toca, _score_elite (pesos 0.5/0.3/0.2 como constantes). Lógica de negocio del loop de entrenamiento.",
+    "motor._mano_activa -> atributo público mano_activa (o property de solo lectura): lo leen ~8 módulos (elo, mcts, replay) y lo setean tests. Corrige el contrato de visibilidad pero toca muchos consumidores + tests.",
+    "Extraer direccion_pase/receptor_pase como funciones puras de módulo (hoy instancian un MotorCorazones descartable solo para aritmética modular) y renombrar seat->jugador_idx. Cross-cutting a recomendador/entrenar_moon_prob/tests.",
+    "Unificar convención reset() de bots: que BotExperto/BotCastigador expongan reset() y el env lo llame siempre, eliminando la auto-detección frágil por numero_baza==1. Cambia el ciclo de vida de estado de los bots.",
+    "BUG de comportamiento (no solo estilo): dataset._score_una_carta con soft_labels=True+use_mcts=True degrada silenciosamente a PIMC (comentario dice MCTS pero llama _pimc_score_carta). Unificar vía resolver_oraculo(rollout_tipo,use_mcts) y alinear con la rama hard-label. Cambia las labels blandas generadas -> decidir y regenerar datasets.",
+    "pimc: unificar las 4 copias de simular_resto_mano en avanzar_mano(motor,bots,hook) con una única condición de fin de mano (dataset usa 'while numero_baza<=13 and _mano_activa', las otras 'while True'+chequeo). Divergencia sutil -> refactor con test de determinismo.",
+    "ranking_final: unificar la convención de orden entre RecolectorPartidas (mejor->peor) y los scripts importadores (importar_sesiones_bridge, generar_dataset_moon_simulado) que escriben peor->mejor. Es formato de datos persistido -> puede invalidar JSONL existentes.",
+    "Naming del dict info de step (corazones_rllib): 'shooting_moon'->'hizo_pozo' y unificar es/en; toca src/rllib/callbacks.py y tests. Renombre con consumidores.",
+    "elo._calcular_elo_convergente -> _calcular_elo_minimos_cuadrados y quitar params ignorados (k/max_iters/epsilon/seed); revisar que test_elo.py no los pase por nombre.",
+    "Helpers compartidos de scripts (build_hearts_bc_model(obs_dim) para los 3 scripts BC; formato de carta _cstr/_mano_str y _fin_mano en un util común): baja urgencia, evita divergencia de mantenimiento."
+  ]
+}

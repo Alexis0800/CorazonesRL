@@ -21,6 +21,15 @@ from src.dominio.baraja import Baraja
 from src.dominio.jugador import Jugador
 
 
+NUM_JUGADORES = 4
+PUNTOS_TOTALES_MANO = 26
+# Regla de Pleno (Shooting the Moon): quien captura los 26 puntos deja a los
+# otros 3 en 26 y a sí mismo en 0, así que una mano-pozo suma 26*(4-1)=78; una
+# mano normal (reparto cualquiera de los 26) SIEMPRE suma 26. Ese contraste
+# (26 vs 78) es el único marcador confiable de que hubo pozo. SSOT del número 78.
+PUNTOS_POZO = PUNTOS_TOTALES_MANO * (NUM_JUGADORES - 1)
+
+
 class MotorCorazones:
     """Motor headless del juego de Corazones con validación estricta de reglas."""
 
@@ -85,7 +94,7 @@ class MotorCorazones:
         direccion = self.direccion_pase()
         if direccion is None:
             return None
-        return (jugador_idx + self._OFFSET_PASE[direccion]) % 4
+        return (jugador_idx + self._OFFSET_PASE[direccion]) % NUM_JUGADORES
 
     def ejecutar_pase(self, selecciones: dict) -> None:
         """Ejecuta el intercambio de 3 cartas y recalcula el portador del 2♣.
@@ -110,7 +119,7 @@ class MotorCorazones:
 
         # 2) Entregar a los receptores.
         for idx, cartas in selecciones.items():
-            receptor = (idx + offset) % 4
+            receptor = (idx + offset) % NUM_JUGADORES
             self.jugadores[receptor].mano.extend(cartas)
 
         # 3) El portador del 2♣ pudo cambiar → recalcular quién abre.
@@ -118,7 +127,7 @@ class MotorCorazones:
 
     def obtener_jugador_actual(self) -> int:
         """Retorna el índice del jugador que debe jugar en este momento."""
-        return (self.indice_jugador_inicial + len(self.mesa)) % 4
+        return (self.indice_jugador_inicial + len(self.mesa)) % NUM_JUGADORES
 
     def obtener_jugadas_legales(self, jugador_idx: int) -> List[Carta]:
         """Determina el subconjunto de cartas legales para un jugador.
@@ -140,7 +149,7 @@ class MotorCorazones:
                     return [c]
             return list(mano)
 
-        # Filtro 3: Asistir al Palo
+        # Filtro 2: Asistir al Palo
         palo_salida = self.palo_de_salida
         if self.mesa and palo_salida is not None:
             mismo_palo = [c for c in mano if _PALOS[c.id] == palo_salida]
@@ -148,7 +157,7 @@ class MotorCorazones:
         else:
             legales = list(mano)
 
-        # Filtro 2: Primera Baza Segura
+        # Filtro 3: Primera Baza Segura
         if self.numero_baza == 1:
             sin_puntos = [c for c in legales if _PUNTOS[c.id] == 0]
             if sin_puntos:
@@ -200,8 +209,8 @@ class MotorCorazones:
         """Calcula la puntuación de la mano actual aplicando regla de Pleno."""
         puntos_crudos = [j.contar_puntos_bazas() for j in self.jugadores]
         for i, pts in enumerate(puntos_crudos):
-            if pts == 26:
-                resultado = [26] * 4
+            if pts == PUNTOS_TOTALES_MANO:
+                resultado = [PUNTOS_TOTALES_MANO] * NUM_JUGADORES
                 resultado[i] = 0
                 return resultado
         return puntos_crudos
@@ -246,13 +255,13 @@ class MotorCorazones:
         El primer elemento es el ganador (menor puntuación). Los empates se
         resuelven de forma estable por índice de jugador.
         """
-        return sorted(range(4), key=lambda i: self.jugadores[i].puntuacion_historica)
+        return sorted(range(NUM_JUGADORES), key=lambda i: self.jugadores[i].puntuacion_historica)
 
     def jugar_mano(self, selector_cartas: Optional[Callable] = None) -> List[int]:
         """Ejecuta una mano completa de 13 bazas."""
         self.repartir()
         for _ in range(13):
-            for _ in range(4):
+            for _ in range(NUM_JUGADORES):
                 idx = self.obtener_jugador_actual()
                 legales = self.obtener_jugadas_legales(idx)
                 if selector_cartas is not None:
@@ -263,6 +272,19 @@ class MotorCorazones:
             self.resolver_baza()
         self._mano_activa = False
         return self.aplicar_puntuacion()
+
+
+def hubo_pozo(puntuacion_mano: List[int]) -> bool:
+    """True si la mano fue un Pleno (un jugador se llevó los 26 puntos).
+
+    Se detecta por la suma: una mano-pozo suma 78 (`PUNTOS_POZO`), una normal
+    suma 26 (ver la nota de la regla de Pleno junto a esas constantes)."""
+    return sum(puntuacion_mano) == PUNTOS_POZO
+
+
+def asiento_pozo(puntuacion_mano: List[int]) -> Optional[int]:
+    """Índice del asiento que hizo el pozo (queda en 0), o None si no hubo pozo."""
+    return puntuacion_mano.index(0) if hubo_pozo(puntuacion_mano) else None
 
 
 def receptor_y_dador_por_numero_mano(
@@ -281,8 +303,14 @@ def receptor_y_dador_por_numero_mano(
     receptor = m.receptor_pase(seat)
     if receptor is None:
         return None, None
-    dador = next(d for d in range(4) if m.receptor_pase(d) == seat)
+    dador = next(d for d in range(NUM_JUGADORES) if m.receptor_pase(d) == seat)
     return receptor, dador
 
 
-__all__ = ["MotorCorazones", "receptor_y_dador_por_numero_mano"]
+__all__ = [
+    "MotorCorazones",
+    "receptor_y_dador_por_numero_mano",
+    "hubo_pozo",
+    "asiento_pozo",
+    "PUNTOS_POZO",
+]

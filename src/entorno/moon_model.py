@@ -26,8 +26,8 @@ import torch
 import torch.nn as nn
 
 from src.dominio.motor import MotorCorazones
-from src.entorno.dimensiones import DIM_V13
-from src.entorno.observacion import ObservacionBuilder
+from src.entorno.dimensiones import BAZAS_POR_MANO, DIM_V13, NUM_CARTAS
+from src.entorno.observacion import ObservacionBuilder, puede_alimentar
 
 DIM_PROPIO = DIM_V13 + 1  # vector v13 completo (moon_prob en 0) + razón bazas-con-puntos
 DIM_RIVAL = 272  # ver features_rival() para el desglose exacto de este número
@@ -110,9 +110,7 @@ def features_propio(
     también entrada), más 1 feature bonus: razón bazas-con-puntos que gané.
     """
     builder = ObservacionBuilder(dim=DIM_V13)
-    puedo_alimentar = any(
-        puntuacion_historica[j] >= 85 for j in range(4) if j != agente_idx
-    )
+    puedo_alimentar = puede_alimentar(puntuacion_historica, agente_idx)
     base = builder.construir(
         motor=motor,
         agente_idx=agente_idx,
@@ -164,17 +162,17 @@ def features_rival(
         obs[c.id] = 1.0
     for j in motor.jugadores:
         for c in j.bazas_ganadas:
-            obs[52 + c.id] = 1.0
+            obs[NUM_CARTAS + c.id] = 1.0
     for _, c in motor.mesa:
-        obs[104 + c.id] = 1.0
+        obs[2 * NUM_CARTAS + c.id] = 1.0
 
     for palo in vacios[rival_idx]:
-        obs[156 + palo] = 1.0
+        obs[3 * NUM_CARTAS + palo] = 1.0
 
     obs[160] = _ratio_bazas_con_puntos(historial, rival_idx)
     obs[161] = _tasa_lidero_corazon_dama(historial, rival_idx)
     obs[162] = 1.0 if _ganador_parcial(motor) == rival_idx else 0.0
-    obs[163] = min(motor.numero_baza / 13.0, 1.0)
+    obs[163] = min(motor.numero_baza / BAZAS_POR_MANO, 1.0)
     obs[164] = 1.0 if corazones_rotos else 0.0
 
     rel = (rival_idx - agente_idx) % 4  # 1=izquierda, 2=frente, 3=derecha (nunca 0)
@@ -186,7 +184,7 @@ def features_rival(
         if cid not in jugadas:
             obs[168 + cid] = 1.0
     for cid in cartas_recibidas_de_rival:
-        obs[220 + cid] = 1.0
+        obs[168 + NUM_CARTAS + cid] = 1.0
 
     return obs
 

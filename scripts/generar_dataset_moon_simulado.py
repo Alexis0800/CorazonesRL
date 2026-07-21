@@ -48,7 +48,7 @@ from src.agentes.heuristicos import bot_agresivo, bot_conservador, bot_evasivo
 from src.agentes.pase import pase_heuristico
 from src.captura.escritor import EscritorJsonl
 from src.captura.modelos import Jugada, RegistroMano, RegistroPartida
-from src.dominio.motor import MotorCorazones
+from src.dominio.motor import MotorCorazones, hubo_pozo
 
 PolicyFn = Callable  # (motor, idx, legales) -> Carta; opcionalmente .pasar()/.reset()
 
@@ -180,7 +180,7 @@ def main() -> None:
         escritor.escribir(partida)
         for m in partida.manos:
             n_manos += 1
-            if m.puntuacion_mano and sum(m.puntuacion_mano) == 78:
+            if m.puntuacion_mano and hubo_pozo(m.puntuacion_mano):
                 moon_total += 1
                 if m.puntuacion_mano[0] == 0:
                     moon_asiento0 += 1

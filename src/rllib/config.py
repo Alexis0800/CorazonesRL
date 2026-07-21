@@ -11,7 +11,7 @@ Uso:
 """
 from __future__ import annotations
 
-from typing import Callable, Dict, List, Optional
+from typing import Callable, List, Optional
 
 from ray.rllib.algorithms.ppo import PPOConfig
 from ray.rllib.models import ModelCatalog
@@ -31,7 +31,7 @@ def build_ppo_config(
     random_position: bool = True,
     reward_config=None,
     con_pase: bool = False,
-    baza_reward_weight: float = 0.15,  # obsoleto (v9), ignorado en v10
+    moon_dir: Optional[str] = None,  # dir de pesos moon (propio.pt/rival.pt); None = "models/moon"
     # PPO hiperparámetros
     lr: float = 3e-4,
     lr_end: float = 1e-4,          # piso del LR — nunca decae a cero para que el
@@ -68,7 +68,6 @@ def build_ppo_config(
                             random_position=True.
         random_position:    Si True, el env sortea agente_idx en cada episodio,
                             entrenando el modelo desde las 4 posiciones de la mesa.
-        baza_reward_weight: Peso de la señal de recompensa por baza (0=terminal-only).
         lr / lr_end:        LR inicial y piso final. Decae linealmente durante total_steps.
         entropy_coeff:      Coeficiente de entropía. Mantener ≥0.01 para exploración.
         use_lstm:           Si True, usa HeartsLSTMModel en lugar del MLP estándar.
@@ -95,6 +94,8 @@ def build_ppo_config(
     }
     if reward_config is not None:
         env_config["reward_config"] = reward_config
+    if moon_dir is not None:
+        env_config["moon_dir"] = moon_dir
 
     if use_lstm:
         model_config = {

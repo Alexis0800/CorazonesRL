@@ -1,7 +1,7 @@
 """
 Análisis exhaustivo de manos usando PIMC con enumeración completa.
 
-Cuando el número de mundos posibles es manejable (baza ≥ 8), genera
+Cuando el número de mundos posibles es manejable (baza ≥ 10), genera
 TODOS los mundos posibles en lugar de samplear aleatoriamente,
 produciendo la decisión óptima exacta (ground truth).
 
@@ -334,8 +334,6 @@ def analizar_decision(
     carta_optima = min(legales, key=lambda c: scores[c.id])
 
     n_mundos = _num_mundos_posibles(motor, agente_idx)
-    if not exacto:
-        n_mundos = 30  # fallback sampling
 
     return ResultadoDecision(
         baza=motor.numero_baza,
@@ -349,7 +347,7 @@ def analizar_decision(
         score_elegido=round(scores[carta_elegida.id], 2),
         coste=round(scores[carta_elegida.id] - scores[carta_optima.id], 2),
         exacto=exacto,
-        n_mundos=n_mundos if exacto else 200,
+        n_mundos=n_mundos if exacto else 30,
         modo_bot=modo_bot,
     )
 
@@ -579,7 +577,7 @@ def evaluar_mano(
 
         if analizar and idx == agente_idx and len(legales) >= 2:
             resultado.decisiones_total += 1
-            # Solo analizamos con exactitud si baza >= 8
+            # Solo analizamos con exactitud si baza >= _BAZA_MINIMA_EXACTA (10)
             if motor.numero_baza >= _BAZA_MINIMA_EXACTA:
                 r = analizar_decision(
                     motor, agente_idx, legales, carta,
@@ -633,7 +631,6 @@ def comparar_politicas(
     nombre_b: str = "B",
     num_manos: int = 100,
     seed_inicial: int = 42,
-    rollout_tipo: str = "experto",
     verbose: bool = True,
 ) -> ComparacionPoliticas:
     """Compara dos políticas jugando las mismas manos (misma semilla).
@@ -649,7 +646,6 @@ def comparar_politicas(
         nombre_b: Etiqueta para B.
         num_manos: Número de manos a evaluar.
         seed_inicial: Semilla base.
-        rollout_tipo: Tipo de rollout (no usado aquí,预留).
         verbose: Mostrar progreso.
 
     Returns:

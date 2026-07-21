@@ -8,11 +8,19 @@ Uso:
 """
 from __future__ import annotations
 
+# --- bootstrap path: permite `python scripts/<x>.py` desde la raiz del repo ---
+import sys as _sys
+from pathlib import Path as _Path
+_sys.path.insert(0, str(_Path(__file__).resolve().parents[1]))
+# --- fin bootstrap ---
+
 import argparse
 import glob
 import json
 import sys
 from pathlib import Path
+
+from src.dominio.motor import PUNTOS_POZO, PUNTOS_TOTALES_MANO
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -52,7 +60,7 @@ def _auditar_partida(path: Path) -> dict:
             # desde que el cálculo se movió a Python (commit 0e4b9f7).
             pts = l["salida"]["puntos_mano"]
             suma = sum(pts)
-            if suma not in (26, 78):
+            if suma not in (PUNTOS_TOTALES_MANO, PUNTOS_POZO):
                 print(f"  ⚠ puntos de mano suman {suma} (válido: 26 o 78) → {pts}")
 
     finales = [l["salida"]["scores"] for l in lineas

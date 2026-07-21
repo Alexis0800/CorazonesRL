@@ -41,6 +41,7 @@ except Exception:
     pass
 
 from gymnasium import spaces
+from src.entorno.dimensiones import NUM_CARTAS
 from src.rllib.model import HeartsActionMaskModel
 from src.rllib.utils import cargar_policy_desde_checkpoint
 
@@ -48,11 +49,11 @@ from src.rllib.utils import cargar_policy_desde_checkpoint
 def _build_model(obs_dim: int) -> HeartsActionMaskModel:
     obs_space = spaces.Dict({
         "obs": spaces.Box(0.0, 1.0, shape=(obs_dim,), dtype=np.float32),
-        "action_mask": spaces.Box(0.0, 1.0, shape=(52,), dtype=np.float32),
+        "action_mask": spaces.Box(0.0, 1.0, shape=(NUM_CARTAS,), dtype=np.float32),
     })
     model_config = {"fcnet_hiddens": [512, 512, 256],
                     "fcnet_activation": "relu", "vf_share_layers": False}
-    return HeartsActionMaskModel(obs_space, spaces.Discrete(52), 52, model_config, "bc_pozo")
+    return HeartsActionMaskModel(obs_space, spaces.Discrete(NUM_CARTAS), NUM_CARTAS, model_config, "bc_pozo")
 
 
 def main() -> None:

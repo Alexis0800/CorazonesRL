@@ -41,6 +41,7 @@ from src.captura.escritor import cargar_partidas
 from src.captura.modelos import str_a_carta_id
 from src.captura.replay import mano_reconstruible, reconstruir_manos, _preparar_motor
 from src.dominio.carta import Carta
+from src.dominio.motor import hubo_pozo
 from scripts.recomendador import Recomendador
 
 
@@ -54,7 +55,7 @@ def cargar_etiquetas(ruta_volcado: str, partidas, filtro: str = "todos") -> Dict
     for p in partidas:
         for m in p.manos:
             es_luna[(p.partida_id, m.numero_mano)] = bool(
-                m.puntuacion_mano and sum(m.puntuacion_mano) == 78)
+                m.puntuacion_mano and hubo_pozo(m.puntuacion_mano))
 
     etiquetas = {}
     with open(ruta_volcado, encoding="utf-8") as f:

@@ -43,7 +43,7 @@ from src.captura.escritor import cargar_partidas
 from src.captura.modelos import RegistroMano, RegistroPartida
 from src.captura.replay import _preparar_motor, mano_reconstruible
 from src.dominio.carta import Carta
-from src.dominio.motor import receptor_y_dador_por_numero_mano
+from src.dominio.motor import asiento_pozo, receptor_y_dador_por_numero_mano
 from src.entorno.moon_model import (
     DIM_PROPIO,
     DIM_RIVAL,
@@ -73,9 +73,7 @@ def _lunaseat_de(mano: RegistroMano) -> Optional[int]:
     (una mano normal siempre suma 26, sin importar cómo se reparten los
     puntos, así que ese caso nunca garantiza que exista un asiento en 0).
     """
-    if mano.puntuacion_mano and sum(mano.puntuacion_mano) == 78:
-        return mano.puntuacion_mano.index(0)
-    return None
+    return asiento_pozo(mano.puntuacion_mano) if mano.puntuacion_mano else None
 
 
 def ejemplos_de_mano(

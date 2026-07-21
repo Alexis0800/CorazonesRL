@@ -24,7 +24,7 @@ from src.dominio.carta import Carta
 from src.dominio.motor import MotorCorazones
 from src.agentes.bot_experto import BotExperto
 from src.agentes.heuristicos import bot_conservador, bot_agresivo, bot_evasivo
-from src.entorno.dimensiones import DIM_ENTORNO
+from src.entorno.dimensiones import DIM_ENTORNO, NUM_CARTAS
 from src.entorno.observacion import ObservacionBuilder
 
 PolicyFn = Callable[[MotorCorazones, int, List[Carta]], Carta]
@@ -40,11 +40,16 @@ class SnapshotPolicy:
     El modelo PyTorch se reconstruye de forma lazy en cada worker.
     """
 
-    def __init__(self, policy, obs_dim: int = DIM_ENTORNO):
+    def __init__(self, policy, obs_dim: int = DIM_ENTORNO, temperatura: Optional[float] = None):
         self._weights: dict = policy.get_weights()
         self._obs_dim = obs_dim
         self._obs_builder = ObservacionBuilder(dim=obs_dim)
         self._model = None
+        # temperatura None = argmax determinista (snapshots, default). Un float
+        # (p.ej. 1.0) = MUESTREA del softmax(logits/T): usado por el clon humano
+        # para ser estocástico/diverso como un humano real y no explotable por
+        # una única línea de juego memorizada.
+        self._temperatura = temperatura
         # Estado LSTM por jugador (idx -> [h, c]) y marcador previo por jugador,
         # para arrastrar la memoria a lo largo de la partida y resetearla al
         # inicio de cada partida. Dict por idx para el caso de que el mismo
@@ -53,7 +58,8 @@ class SnapshotPolicy:
         self._prev_scores_sum: dict = {}
 
     @classmethod
-    def from_weights(cls, weights: dict, obs_dim: int = DIM_ENTORNO) -> "SnapshotPolicy":
+    def from_weights(cls, weights: dict, obs_dim: int = DIM_ENTORNO,
+                     temperatura: Optional[float] = None) -> "SnapshotPolicy":
         """Crea un SnapshotPolicy directamente desde un dict de pesos numpy."""
         obj = object.__new__(cls)
         obj._weights = weights
@@ -62,10 +68,12 @@ class SnapshotPolicy:
         obj._model = None
         obj._lstm_state = {}
         obj._prev_scores_sum = {}
+        obj._temperatura = temperatura
         return obj
 
     def __getstate__(self):
-        return {"weights": self._weights, "obs_dim": self._obs_dim}
+        return {"weights": self._weights, "obs_dim": self._obs_dim,
+                "temperatura": self._temperatura}
 
     def __setstate__(self, state):
         self._weights = state["weights"]
@@ -74,6 +82,7 @@ class SnapshotPolicy:
         self._model = None
         self._lstm_state = {}
         self._prev_scores_sum = {}
+        self._temperatura = state.get("temperatura")
 
     def _get_model(self):
         """Construye el modelo PyTorch desde los pesos la primera vez (lazy).
@@ -90,9 +99,9 @@ class SnapshotPolicy:
 
         obs_space = spaces.Dict({
             "obs": spaces.Box(0.0, 1.0, shape=(self._obs_dim,), dtype=np.float32),
-            "action_mask": spaces.Box(0.0, 1.0, shape=(52,), dtype=np.float32),
+            "action_mask": spaces.Box(0.0, 1.0, shape=(NUM_CARTAS,), dtype=np.float32),
         })
-        action_space = spaces.Discrete(52)
+        action_space = spaces.Discrete(NUM_CARTAS)
 
         is_lstm = any("_lstm_layer" in k for k in self._weights.keys())
 
@@ -104,10 +113,10 @@ class SnapshotPolicy:
                 "fcnet_activation": "relu",
                 "vf_share_layers": False,
             }
-            model = HeartsLSTMModel(obs_space, action_space, 52, model_config, "snapshot")
+            model = HeartsLSTMModel(obs_space, action_space, NUM_CARTAS, model_config, "snapshot")
         else:
             model_config = {"fcnet_hiddens": [512, 512, 256], "fcnet_activation": "relu", "vf_share_layers": False}
-            model = HeartsActionMaskModel(obs_space, action_space, 52, model_config, "snapshot")
+            model = HeartsActionMaskModel(obs_space, action_space, NUM_CARTAS, model_config, "snapshot")
 
         torch_state = {k: torch.tensor(v) for k, v in self._weights.items()}
         model.load_state_dict(torch_state, strict=True)
@@ -128,7 +137,7 @@ class SnapshotPolicy:
         # si no (contextos sin env, p.ej. elo legacy), caer a la obs mínima.
         if obs_vec is None:
             obs_vec = self._obs_builder.construir_desde_motor(motor, jugador_idx=idx)
-        mask = np.zeros(52, dtype=np.float32)
+        mask = np.zeros(NUM_CARTAS, dtype=np.float32)
         for c in legales:
             mask[c.id] = 1.0
 
@@ -157,7 +166,13 @@ class SnapshotPolicy:
             logits, new_state = model.forward(input_dict, state, None)
             if es_recurrente:
                 self._lstm_state[idx] = new_state  # arrastrar al siguiente step
-            action = int(logits.argmax(dim=1).item())
+            if self._temperatura is not None:
+                # Muestreo estocástico: softmax(logits/T) sobre las legales (los
+                # ilegales ya llevan -1e9 por la máscara → prob ~0).
+                probs = torch.softmax(logits / self._temperatura, dim=1)
+                action = int(torch.multinomial(probs, 1).item())
+            else:
+                action = int(logits.argmax(dim=1).item())
 
         carta = Carta._TODAS[action]
         if carta not in legales:
@@ -201,7 +216,7 @@ class SnapshotPolicy:
                 dama_picas_en=None,
                 fase_pase=1.0, direccion_pase=dir_norm, n_pase_seleccionadas=k,
             )
-            mask = np.zeros(52, dtype=np.float32)
+            mask = np.zeros(NUM_CARTAS, dtype=np.float32)
             for c in mano:
                 if c not in seleccion:
                     mask[c.id] = 1.0
@@ -227,11 +242,21 @@ class SnapshotPolicy:
 class OpponentPool:
     """Pool de oponentes para self-play con bots y snapshots históricos.
 
-    Usa 3 fases:
-      - Fase 0 (0–5%):   3 bots simples para aprender las reglas básicas.
-      - Fase 1 (5–20%):  2 bots + 1 snapshot. Transición gradual que evita el
-                          shock de distribución y permite recuperar entropía.
-      - Fase 2 (20–100%): SIEMPRE 1 bot + 2 snapshots. Nunca self-play puro.
+    Usa 5 fases (cortes en progress 0.05/0.15/0.40/0.70):
+      - Fase 0 (0–5%):    3 bots simples para aprender las reglas básicas.
+      - Fase 1 (5–15%):   2 bots simples + 1 oponente duro (BotExperto, o
+                          arquetipo/clon humano al azar si pool_diverso/humano_bc).
+      - Fase 2 (15–40%):  1 oponente duro + 2 snapshots. Mezcla + self-play.
+      - Fase 3 (40–70%):  self-play. Sin ancla = 3 snapshots del pool completo
+                          (como v10); con `anclar_experto=True` = 1 oponente duro
+                          + 2 snapshots.
+      - Fase 4 (70–100%): presión máxima con los snapshots recientes (últimos 10).
+                          Con `anclar_experto=True` mantiene 1 oponente duro de ancla.
+
+    El ancla-experto (fases 3–4) solo aplica si se construyó con
+    `anclar_experto=True`; por defecto (False) esas fases son self-play puro.
+    Las degradaciones por pool insuficiente (p. ej. `len(snapshots) < 2`) pueden
+    mantener una fase temprana aunque `progress` ya haya avanzado.
 
     La factory retornada acepta `agente_idx` como parámetro para soportar
     rotación multi-posición (el agente puede entrenar desde cualquier asiento).
@@ -251,6 +276,10 @@ class OpponentPool:
         obs_dim: int = DIM_ENTORNO,
         anclar_experto: bool = False,
         pool_diverso: bool = False,
+        humano_bc_path: Optional[str] = None,
+        prob_humano: float = 0.5,
+        mesa_humana: float = 0.0,
+        temp_humano: Optional[float] = 1.0,
     ):
         self._agente_idx = agente_idx
         self._snapshot_dir = snapshot_dir
@@ -263,6 +292,25 @@ class OpponentPool:
         # (experto/castigador/lunatico/atacante) en vez de siempre BotExperto.
         # Hace el self-play robusto a juego variado (generaliza mejor a humanos).
         self._pool_diverso = pool_diverso
+        # Opponent de IMITACIÓN HUMANA (BC sobre partidas reales, ver
+        # scripts/entrenar_bc_humano.py). Si se da, cubre una fracción `prob_humano`
+        # de los slots de oponente "duro": mete el ESTILO HUMANO REAL en el pool,
+        # que es lo que la burbuja de self-play (79% vs bots, 24% vs humanos) no
+        # tiene. Ver docs/auditoria_moon_2026-07-20.md.
+        self._prob_humano = prob_humano
+        # mesa_humana: fracción de MESAS completas dominadas por el clon humano
+        # (2 de 3 asientos = clon + 1 ancla de robustez). El fine-tune fallido
+        # demostró que la exposición por-slot (prob_humano) se diluye a ~1/6;
+        # esta es la palanca de exposición REAL al meta humano.
+        self._mesa_humana = mesa_humana
+        # temp_humano: temperatura de muestreo del clon (None = argmax). 1.0 =
+        # estocástico como un humano; evita que el agente memorice una única
+        # línea de explotación contra un clon determinista.
+        self._temp_humano = temp_humano
+        self._humano_bc_pesos = None
+        if humano_bc_path:
+            _d = np.load(humano_bc_path)
+            self._humano_bc_pesos = {k: _d[k] for k in _d.files}
         self._snapshots: List[SnapshotPolicy] = []
 
     def add_snapshot(self, policy) -> None:
@@ -289,16 +337,33 @@ class OpponentPool:
         snapshots_recientes = snapshots[-10:] if len(snapshots) >= 10 else snapshots
         anclar = self._anclar_experto  # capturar local (closure serializable)
         diverso = self._pool_diverso
+        humano_pesos = self._humano_bc_pesos  # dict numpy picklable (o None)
+        prob_humano = self._prob_humano
+        mesa_humana = self._mesa_humana
+        temp_humano = self._temp_humano
+        obs_dim_local = self._obs_dim
+
+        def _clon_humano():
+            return SnapshotPolicy.from_weights(
+                humano_pesos, obs_dim=obs_dim_local, temperatura=temp_humano)
 
         def _bot_dificil():
-            """Oponente 'duro': BotExperto, o un arquetipo humano al azar si pool_diverso.
+            """Oponente 'duro': bot de IMITACIÓN HUMANA (si está disponible), o
+            BotExperto/arquetipo al azar.
+
+            Con `humano_bc_path`, una fracción `prob_humano` de los slots duros es
+            el clon del estilo humano real (val top-1 ~66%) -- es el oponente más
+            parecido a los humanos que enfrentamos (campeón 46% win-rate vs él, vs
+            24% real, vs 92% bots simples). Rompe la burbuja de self-play que hace
+            que el campeón le gane a los bots pero no a los humanos. Ver
+            docs/auditoria_moon_2026-07-20.md.
 
             BotLunatico con el doble de peso que los demás: el backtest de regret
-            sobre partidas reales (2026-07-06, pimc_regret_real.py --volcar-json)
-            mostró que las manos con pozo concentran el error del campeón (regret
-            medio 2.35 vs 1.05 en manos normales) pese a que pool_diverso ya
-            incluía a BotLunatico -- exposición insuficiente en el mix original.
+            sobre partidas reales mostró que las manos con pozo concentran el error
+            del campeón -- exposición insuficiente en el mix original.
             """
+            if humano_pesos is not None and random.random() < prob_humano:
+                return _clon_humano()
             if diverso:
                 from src.agentes.bot_castigador import BotCastigador
                 from src.agentes.bot_lunatico import BotLunatico
@@ -308,10 +373,29 @@ class OpponentPool:
                 return random.choices(arquetipos, weights=pesos, k=1)[0]()
             return BotExperto()
 
+        def _bot_ancla_no_humano():
+            """Ancla de robustez para las mesas humanas: heurístico, nunca el clon."""
+            if diverso:
+                from src.agentes.bot_castigador import BotCastigador
+                from src.agentes.bot_lunatico import BotLunatico
+                from src.agentes.bot_atacante_lider import BotAtacanteLider
+                arquetipos = [BotExperto, BotCastigador, BotLunatico, BotAtacanteLider]
+                return random.choices(arquetipos, weights=[1, 1, 2, 1], k=1)[0]()
+            return BotExperto()
+
         def _factory(agente_idx: int = 0) -> Dict[int, PolicyFn]:
             opp_indices = [i for i in range(4) if i != agente_idx]
             random.shuffle(opp_indices)
             fns: Dict[int, PolicyFn] = {}
+
+            # MESA HUMANA (prioridad sobre las fases): 2 clones humanos + 1 ancla.
+            # Es la exposición mayoritaria al meta humano que la vía por-slot no
+            # logra (ver docs/auditoria_moon_2026-07-20.md, post-mortem fine-tune).
+            if humano_pesos is not None and random.random() < mesa_humana:
+                fns[opp_indices[0]] = _clon_humano()
+                fns[opp_indices[1]] = _clon_humano()
+                fns[opp_indices[2]] = _bot_ancla_no_humano()
+                return fns
 
             if progress < 0.05 or len(snapshots) == 0:
                 # Fase 0: bootstrap con 3 bots simples

@@ -88,10 +88,7 @@ Carta._TODAS = [Carta(palo, valor) for palo in range(4)
 
 # Arrays precomputados para acceso rápido en el motor (indexados por carta.id)
 _PALOS: List[int] = [c.palo for c in Carta._TODAS]
-_VALORES: List[int] = [c.valor for c in Carta._TODAS]
 _PUNTOS: List[int] = [c.puntos for c in Carta._TODAS]
 _ES_CORAZON: List[bool] = [c.es_corazon for c in Carta._TODAS]
-_ES_DOS_TREBOL: List[bool] = [c.es_dos_de_treboles for c in Carta._TODAS]
 
-__all__ = ["Carta", "_PALOS", "_VALORES",
-           "_PUNTOS", "_ES_CORAZON", "_ES_DOS_TREBOL"]
+__all__ = ["Carta", "_PALOS", "_PUNTOS", "_ES_CORAZON"]

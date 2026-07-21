@@ -2,13 +2,13 @@
 Dimensiones del vector de observación — Single Source of Truth.
 
 Centraliza las constantes de dimensionalidad para que todos los módulos
-(ObservacionBuilder, CorazonesEnv, config.py, train.py) referencien
-un único lugar.
+(ObservacionBuilder, CorazonesEnvRLlib, config.py, scripts/train_rllib.py)
+referencien un único lugar.
 
 Principio: DRY (Don't Repeat Yourself) + SSOT (Single Source of Truth).
 
 Estándar actual:
-  - 224 (DIM_V11) = default del entorno SIN fase de pase (DIM_ENTORNO).
+  - 224 (DIM_V11) = DIM_ENTORNO, el default del entorno SIN fase de pase.
   - 228 (DIM_V12) = entorno CON fase de pase (con_pase=True), usado por el
     modelo campeón v10c (partida completa + pase).
 """
@@ -32,21 +32,20 @@ DIM_V13: int = 332
 DIM_V3: int = 265
 
 # --- Defaults ---
-DIM_ENTRENAMIENTO: int = DIM_V11  # usado por train.py
-DIM_ENTORNO: int = DIM_V11        # usado por CorazonesEnv (estándar actual)
+DIM_ENTRENAMIENTO: int = DIM_V11  # usado por scripts/train_rllib.py
+DIM_ENTORNO: int = DIM_V11        # usado por CorazonesEnvRLlib (estándar actual)
+
+# --- Constantes del dominio del juego ---
+NUM_CARTAS: int = 52      # cartas de la baraja (one-hot de mano/mesa/acción)
+BAZAS_POR_MANO: int = 13  # bazas en una mano completa (52 cartas / 4 jugadores)
 
 # --- Dimensiones aceptadas ---
 DIMS_VALIDAS: Tuple[int, ...] = (DIM_V6, DIM_V10, DIM_V11, DIM_V12, DIM_V13, DIM_V3)
 
-# --- Mapeo para referencia humana ---
-DIM_NOMBRES = {
-    DIM_V5: "v5 (190) — features básicas + flags estratégicos",
-    DIM_V6: "v6 (194) — + all_void por palo (obsoleto)",
-    DIM_V10: "v10 (220) — + bloque avanzado (conteo, prob Q♠, alertas)",
-    DIM_V11: "v11 (224) — + quien_jugo_mesa (4 flags) ← default sin pase",
-    DIM_V12: "v12 (228) — + fase de PASE (4 features) ← campeón v10c con pase",
-    DIM_V13: "v13 (332) — + memoria del pase (di[52] + recibí[52]) por perspectiva",
-}
+
+def con_pase_de_obs(obs_dim: int) -> bool:
+    """True si la obs incluye las features de la fase de pase (obs_dim >= DIM_V12)."""
+    return obs_dim >= DIM_V12
 
 __all__ = [
     "DIM_V5",
@@ -58,6 +57,8 @@ __all__ = [
     "DIM_V3",
     "DIM_ENTRENAMIENTO",
     "DIM_ENTORNO",
+    "NUM_CARTAS",
+    "BAZAS_POR_MANO",
     "DIMS_VALIDAS",
-    "DIM_NOMBRES",
+    "con_pase_de_obs",
 ]

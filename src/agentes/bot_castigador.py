@@ -20,7 +20,7 @@ Strategy Pattern: implementa la misma firma que los bots heurísticos
 
 from __future__ import annotations
 
-from typing import List, Set, Optional, Dict
+from typing import List
 
 from src.dominio.carta import Carta
 from src.dominio.motor import MotorCorazones
@@ -32,9 +32,7 @@ class BotCastigador:
     """Bot que presiona al portador de Q♠ liderando y siguiendo ♠ agresivamente.
 
     Mantiene estado intramano mínimo:
-      - _vacios: jugador → set de palos donde es void (inferido por descarte).
       - _ultimo_baza_num: para detectar cambio de baza y resetear en nueva mano.
-      - _palo_salida_baza_actual: palo de la baza en curso.
 
     Se reinicia automáticamente al comenzar una nueva mano.
     """
@@ -48,9 +46,7 @@ class BotCastigador:
 
     def _reset_estado(self) -> None:
         """Reinicia el estado al inicio de cada mano."""
-        self._vacios: Dict[int, Set[int]] = {i: set() for i in range(4)}
         self._ultimo_baza_num: int = 0
-        self._palo_salida_baza_actual: Optional[int] = None
 
     # ──────────────────────────────────────────────────────────────
     # Interfaz Strategy
@@ -106,10 +102,6 @@ class BotCastigador:
             else:
                 carta = self._descartar(motor, idx, legales)
 
-        # Registrar palo de salida si lideramos
-        if not motor.mesa:
-            self._palo_salida_baza_actual = carta.palo
-
         return carta
 
     # ──────────────────────────────────────────────────────────────
@@ -117,27 +109,14 @@ class BotCastigador:
     # ──────────────────────────────────────────────────────────────
 
     def _actualizar_estado(self, motor: MotorCorazones, idx: int) -> None:
-        """Actualiza voids inferidos y detecta nueva mano."""
+        """Detecta nueva mano y nueva baza."""
         # Detectar nueva mano
         if motor.numero_baza == 1 and self._ultimo_baza_num > 1:
             self._reset_estado()
 
-        # Nueva baza: inferir voids del turno anterior
+        # Nueva baza
         if motor.numero_baza > self._ultimo_baza_num:
             self._ultimo_baza_num = motor.numero_baza
-            self._palo_salida_baza_actual = motor.palo_de_salida
-
-        # Actualizar palo de salida
-        if motor.palo_de_salida is not None:
-            self._palo_salida_baza_actual = motor.palo_de_salida
-
-        # Inferir voids desde los jugadores que ya jugaron en ESTA baza
-        palo = motor.palo_de_salida
-        if palo is not None and motor.mesa:
-            starter_baza = motor.mesa[0][0]
-            for jug_idx, carta in motor.mesa:
-                if jug_idx != starter_baza and carta.palo != palo:
-                    self._vacios[jug_idx].add(palo)
 
     # ──────────────────────────────────────────────────────────────
     # Consultas de estado

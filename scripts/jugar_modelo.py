@@ -39,6 +39,7 @@ from src.agentes.bot_experto import BotExperto
 from src.agentes.bot_castigador import BotCastigador
 from src.agentes.heuristicos import bot_evasivo
 from src.agentes.pase import pase_heuristico
+from src.entorno.dimensiones import con_pase_de_obs
 from src.rllib.utils import cargar_policy_desde_checkpoint
 
 _PALO_SIMBOLO = {0: "♣", 1: "♦", 2: "♠", 3: "♥"}
@@ -73,7 +74,7 @@ class ModeloJugador:
     def __init__(self, ckpt: str):
         self.snap = cargar_policy_desde_checkpoint(ckpt)
         self.obs_dim = self.snap._obs_dim
-        self.con_pase = self.obs_dim >= 228
+        self.con_pase = con_pase_de_obs(self.obs_dim)
 
     def pasar(self, motor: MotorCorazones, idx: int) -> List[Carta]:
         if self.con_pase:
@@ -160,8 +161,6 @@ def jugar_partida(modelo: ModeloJugador, seats: Dict[int, str], modelo_idx: int,
             motor.jugar_carta(idx, carta)
             if palo_salida is not None and carta.palo != palo_salida:
                 vacios[idx].add(palo_salida)
-            if any(c.es_dama_de_picas for _, c in motor.mesa):
-                pass
             if len(motor.mesa) == 4:
                 cartas = motor.mesa[:]
                 ganador = motor.resolver_baza()

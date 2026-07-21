@@ -26,7 +26,7 @@ import numpy as np
 from src.dominio.carta import Carta
 from src.dominio.motor import MotorCorazones
 from src.entorno.observacion import ObservacionBuilder
-from src.entorno.dimensiones import DIM_ENTRENAMIENTO
+from src.entorno.dimensiones import DIM_ENTRENAMIENTO, NUM_CARTAS
 from src.mcts.pimc import (
     pimc_mejor_jugada,
     mcts_mejor_jugada,
@@ -296,7 +296,7 @@ def _obtener_scores_acciones(
     Returns:
         Array (52,) float32 con scores.
     """
-    scores = np.full(52, np.inf, dtype=np.float32)
+    scores = np.full(NUM_CARTAS, np.inf, dtype=np.float32)
 
     for carta in legales:
         score = _score_una_carta(
@@ -419,12 +419,6 @@ def _mcts_profundo_score_carta(
     return total / n_sims
 
 
-def _clonar_motor_para_score(motor: MotorCorazones) -> MotorCorazones:
-    """Clona el motor para evaluar una accion sin modificar el original."""
-    from src.mcts.pimc import _clonar_motor
-    return _clonar_motor(motor)
-
-
 def _pimc_score_carta(
     motor, agente_idx, carta, num_mundos, rollout_tipo, rng
 ) -> float:
@@ -446,25 +440,6 @@ def _pimc_score_carta(
         total += mundo.calcular_puntuacion_mano()[agente_idx]
 
     return total / num_mundos
-
-
-def _mcts_score_desde_estado(
-    motor, agente_idx, num_simulaciones, rollout_tipo, rng
-) -> float:
-    """Estima el score desde el estado actual usando simulaciones MCTS-light.
-
-    Ejecuta num_simulaciones rollouts desde el estado actual y promedia.
-    """
-    from src.mcts.pimc import crear_bots_rollout
-    bots = crear_bots_rollout(tipo=rollout_tipo, rng=rng)
-
-    total = 0.0
-    for _ in range(num_simulaciones):
-        clon = _clonar_motor_para_score(motor)
-        _simular_resto_mano(clon, agente_idx, bots)
-        total += clon.calcular_puntuacion_mano()[agente_idx]
-
-    return total / num_simulaciones
 
 
 def _simular_resto_mano(motor, agente_idx, bots) -> None:

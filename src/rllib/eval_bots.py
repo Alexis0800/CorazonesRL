@@ -4,8 +4,9 @@ Evaluación del agente contra bots fijos — PARTIDAS COMPLETAS vía el ENV (v10
 IMPORTANTE (fix de obs): la evaluación se hace paso a paso a través de
 CorazonesEnvRLlib, que construye la observación COMPLETA (scores, voids, moon,
 tracker de Q♠…) idéntica a la de entrenamiento. La versión anterior usaba
-SnapshotPolicy.construir_desde_motor (obs mínima, features estratégicas en cero),
-lo que subestimaba al agente. Ahora agente y rivales-snapshot ven la obs completa.
+ObservacionBuilder.construir_desde_motor (obs mínima, features estratégicas en
+cero) vía SnapshotPolicy, lo que subestimaba al agente. Ahora agente y
+rivales-snapshot ven la obs completa.
 
 Métricas alineadas con el objetivo real:
   - win_rate:    fracción de partidas ganadas (1er puesto).
@@ -47,11 +48,14 @@ def _eval_model_vs_factory(
     agente_idx: int = 0,
     con_pase: bool = False,
     pase_memoria: bool = True,
+    moon_dir: str = "models/moon",
 ) -> List[dict]:
     """Juega n partidas completas con `model` como agente, vía el ENV.
 
     opponent_factory: callable(agente_idx) -> dict{idx: policy_fn} (estilo env).
     pase_memoria: si False, ablaciona los planos v13 (memoria del pase) a cero.
+    moon_dir: pesos moon para [187:188] — DEBE coincidir con el moon_dir con que
+    se entrenó el modelo, o esas 2 features quedan OOD y subestiman al modelo.
     Devuelve la lista de `info` terminal de cada partida (puesto, gano, etc.).
     """
     env = CorazonesEnvRLlib({
@@ -62,6 +66,7 @@ def _eval_model_vs_factory(
         "gamma": 0.999,
         "con_pase": con_pase,
         "pase_memoria": pase_memoria,
+        "moon_dir": moon_dir,
     })
 
     initial = model.get_initial_state()
@@ -110,7 +115,10 @@ def evaluar_vs_bots(
 ) -> dict:
     """Evalúa la política jugando partidas completas (vía env) contra bots fijos.
 
-    Escenarios (3 bots del mismo tipo): evasivo / conservador / agresivo / experto.
+    Escenarios (8): siete mesas de 3 bots del MISMO tipo — evasivo /
+    conservador / agresivo / experto / castigador / lunatico / atacante — más
+    "mixto", una mesa de 3 arquetipos DISTINTOS (BotExperto + BotCastigador +
+    BotLunatico), proxy de juego variado/humano.
 
     Returns:
         Dict con win_rate / top2_rate / puesto_medio por escenario y global,

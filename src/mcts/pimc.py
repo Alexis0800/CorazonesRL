@@ -452,11 +452,15 @@ def mcts_mejor_jugada(
     rollout_tipo: str = "experto",
     profundidad_agente: int = 1,
 ) -> Carta:
-    """MCTS con árbol: búsqueda más profunda que PIMC plano.
+    """UCB plano en la raíz sobre determinizaciones (no un árbol multinivel).
 
-    A diferencia de PIMC (que evalúa cada carta independientemente en
-    mundos separados), MCTS construye un árbol de decisiones compartido,
-    concentrando simulaciones en las ramas más prometedoras.
+    Cada simulación muestrea un mundo determinizado nuevo, elige una carta
+    legal de la raíz con UCB (bandit plano sobre las cartas legales) y hace
+    rollout hasta el fin de la mano; el coste se retropropaga solo al hijo
+    elegido. No se construye un árbol de decisiones persistente ni se
+    comparten estadísticas entre niveles. Con profundidad_agente>1, cada
+    turno futuro del agente se resuelve con una búsqueda MCTS independiente
+    (mini-MCTS), no como ramas de un árbol compartido.
 
     Args:
         motor: Estado actual (NO se modifica).

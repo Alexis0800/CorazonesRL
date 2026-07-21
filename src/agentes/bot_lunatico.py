@@ -2,7 +2,7 @@
 Bot Lunático — Cazador de pozo (Shooting the Moon).
 
 Arquetipo humano que, con una mano fuerte de corazones altos y control, intenta
-capturar las 26 cartas de penalización (todos los corazones + Q♠). Si la mano no
+capturar los 26 puntos de penalización (13 corazones + Q de picas). Si la mano no
 es apta, o si un rival ya capturó puntos (pozo imposible), juega evasivo.
 
 Su valor: como rival y en los rollouts de PIMC, fuerza al agente a aprender a

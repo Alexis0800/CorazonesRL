@@ -42,7 +42,7 @@ except Exception:
 
 from src.dominio.carta import Carta
 from src.dominio.motor import MotorCorazones
-from src.entorno.observacion import ObservacionBuilder
+from src.entorno.observacion import ObservacionBuilder, puede_alimentar
 from src.agentes.bot_experto import BotExperto
 from src.agentes.bot_castigador import BotCastigador
 from src.agentes.bot_lunatico import BotLunatico
@@ -136,7 +136,7 @@ def _obs(snap, motor, idx, vacios, dama):
         dama_picas_en=dama,
         moon_prob_agente=_moon_prob(motor, idx),
         moon_prob_rival=max(_moon_prob(motor, i) for i in range(4) if i != idx),
-        puedo_alimentar=any(sc[j] >= 85 for j in range(4) if j != idx))
+        puedo_alimentar=puede_alimentar(sc, idx))
 
 
 def carta_modelo(snap, motor, vacios, dama):

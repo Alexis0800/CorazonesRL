@@ -91,7 +91,7 @@ class RegistroPartida:
     fuente: str                            # "manual" | "adb:<app>" | "test" | "sfs:<app>"
     manos: List[RegistroMano] = field(default_factory=list)
     marcador_final: List[int] = field(default_factory=list)   # 4
-    ranking_final: List[int] = field(default_factory=list)     # asientos peor->mejor
+    ranking_final: List[int] = field(default_factory=list)     # asientos mejor->peor
     # --- Contexto de habilidad/rating (solo disponible vía el puente SFS2X;
     # None en capturas antiguas o de fuentes que no lo exponen) ---
     rating_agente_inicio: Optional[float] = None                       # rating propio ANTES de esta partida
