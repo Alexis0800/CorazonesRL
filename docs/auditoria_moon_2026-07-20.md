@@ -292,12 +292,140 @@ varios fine-tunes).
   jugadores competentes. Explica por qué toda intervención guiada por regret
   falló. No usarlo más como guía de mejora.
 
-**Cómo perdemos realmente (556 partidas):** las derrotas no son sangrado lento
-sino **desastres puntuales**: el **82.8 %** de las partidas perdidas tienen 2+
-manos de ≥13 pts, y la peor mano aporta el **45 %** del score final. Ganadas vs
-perdidas: 4.13 vs 8.29 pts/mano, 1.29 vs 2.48 manos-desastre. El problema es la
-**cola** (evitar catástrofes), no la media por jugada — coherente con que el
-regret medio por decisión no discrimine.
+**⚠ RETRACTADO — sesgo de muestra en `data/partidas_bridge_full.jsonl`.**
+Una primera lectura concluyó que las derrotas eran por "desastres puntuales" y
+que comíamos MENOS puntos que los rivales (6.53 vs 8.04/mano, 27.4 % vs 30.8 %
+de manos ≥13). **Es un artefacto**: el importador descarta las manos NO
+reconstruibles, y esas están sesgadas a nuestro favor (las manos donde nos
+machacan suelen acabar en "remate", que es justo lo que falla al reconstruir).
+Contraste decisivo sobre las MISMAS 556 partidas:
+
+| Fuente | win-rate | score final nuestro | rivales |
+|---|---|---|---|
+| Servidor (`hearts.db`, verdad) | 23.9 % | **66.7** | 65.5 |
+| JSONL importado (sesgado) | 36.4 % | 48.7 | 60.0 |
+
+**Verdad**: contra estos humanos el modelo es **exactamente promedio** (66.7 vs
+65.5, marginalmente peor). No es propenso al desastre ni sistemáticamente malo:
+es del montón. Por eso se descartó la idea de un reward con aversión al riesgo:
+atacaría un problema inexistente, y además R_terminal-por-puesto YA es el
+objetivo correcto y el PBRS es policy-invariante por construcción (no puede ser
+la causa).
+
+**Regla para futuros análisis:** cualquier métrica de RESULTADO se calcula desde
+`hearts.db` (servidor). El JSONL importado sirve para re-jugar decisiones
+(regret, BC), no para medir outcomes. Las conclusiones pareadas dentro del
+subset (campeón vs experto en las MISMAS decisiones) siguen siendo válidas; las
+de nivel-partida no. Nota: el clon humano-BC se entrenó sobre este subset
+sesgado — otra razón por la que su fidelidad (71.6 %) tiene techo.
+
+## Auditoría de OFENSIVA de luna (2026-07-21, sobre `hearts.db`, cero cómputo RL)
+
+Re-encuadre. Toda la campaña anterior midió la luna como **daño recibido**
+(defensa) y la cerró como brecha estructural. Correcto pero es la palanca
+equivocada: cuando un rival lunea, los 3 perdedores comen 26 por igual, así que
+defender solo te empata con los otros dos. La palanca **asimétrica** —la que
+nadie midió— es ser TÚ el que lunea.
+
+**Descomposición del resultado (549 partidas, verdad del servidor).** La
+aritmética cierra exacta (67.6 vs 66.4):
+
+| Componente | n | pts relativos a media rival |
+|---|---|---|
+| Manos normales | 4489 | **−3.97 / partida (a tu favor)** |
+| Lunas rivales | 368 | **+5.81 / partida (en contra)** |
+| Lunas tuyas | 13 | −0.62 |
+| Neto | | +1.22 |
+
+**El campeón juega MEJOR que los humanos en manos normales.** Todo el déficit y
+más viene de un único diferencial: luneas 0.27 % de las manos, cada rival 2.52 %
+(**9.4× por jugador**). ⚠ Corrección de revisión: la primera versión de este
+apartado decía "en simulación sí lunea 2.5–5.5 %, contra humanos no entra" —
+**falso, era comparar unidades distintas**. El `moon_rate` de `eval_bots` es
+por PARTIDA (`shooting_moon` es un flag de episodio); por mano son ~0.26–0.56 %,
+lo MISMO que contra humanos (0.27 %). El campeón casi no lunea en NINGÚN
+contexto — la ofensiva de luna nunca se desarrolló (sus rivales de entrenamiento
+casi no luneaban, no hubo presión selectiva). Firma confirmada por fuerza de
+mano post-pase (heurística de fuerza, tendencia > magnitud): con cartas flojas
+le ganas al rival (7.45 vs 7.66), con cartas fuertes pierdes (10.85 vs 6.47;
+descontando las lunas rivales de ese bucket sigue ~8.7 vs 6.47). Es el patrón
+exacto de una política sin modo ofensivo.
+
+**Causa aislada = el PASE (la pregunta que la §Auditoría del PASE cerró mal).**
+Ese apartado probó "¿nuestro pase alimenta la luna rival?" (no). La pregunta
+correcta era "¿nuestro pase mata nuestras propias manos de luna?" — y la
+respuesta es SÍ. Validado con `models/moon_realfull/propio.pt` (AUC **0.958**
+sobre las 372 lunas reales de `partidas_bridge_full`, mismo modelo sobre los 4
+asientos → sin sesgo de calibración):
+
+| Situación | P(luna) nuestra | P(luna) rival |
+|---|---|---|
+| SIN pase | 1.6 % manos P≥0.10 | 3.2 % |
+| CON pase | 1.6 % | **10.3 %** |
+
+Los rivales usan el pase **ofensivamente** (triplican su P de luna, 3.2→10.3 %);
+nosotros lo usamos puramente defensivo. Medido pre/post sobre nuestro propio
+asiento (n=3291): nuestro pase **destruye 57 manos de luna potenciales** (P≥0.10
+→ <0.10) y solo crea 34 (z=2.41, p≈0.016), delta medio −0.0033. Es el pase
+100 %-defensivo de Q♠ que la propia auditoría documentó ("de libro, monotónico
+en protección de picas") — óptimo para no comer, pésimo para atacar.
+
+**Confirmación decisiva desde el SERVIDOR (sin modelo, sin sesgo de muestra)** —
+lunas completadas por tipo de mano en `hearts.db` (4870 manos):
+
+| | lunas rival (por jugador) | lunas nuestras |
+|---|---|---|
+| CON pase (n=3850) | **2.97 %** | 0.26 % |
+| SIN pase / hold (n=1020) | 0.82 % | 0.29 % |
+
+El pase **multiplica ×3.6** la tasa de luna de los rivales; a nosotros nos da
+×0.9 (nada). Y la brecha tiene DOS componentes, no una: incluso en manos hold
+(cartas iid, sin pase de por medio) los rivales convierten 2.8× más que nosotros
+(0.82 vs 0.29 %) → además del pase falta la **persecución en-mano** (el modo
+luna durante la baza). Las dos palancas de la recomendación (#1 y #2) atacan
+una componente cada una; ninguna basta sola.
+
+Caveats de la parte con modelo (la parte servidor no los tiene):
+
+- **Sesgo de reconstruibilidad, ahora cuantificado**: las manos de luna rival
+  son reconstruibles al **100 %** (368/368), las nuestras al **8 %** (1/13),
+  las normales al 84 %. El residuo sin-pase del muestreo JSONL (1.6 vs 3.2 %)
+  viene de ahí, y las tasas de conversión "top-5 % nuestras → 2.2 %" son un
+  SUELO: 12 de nuestras 13 lunas reales están excluidas de la muestra.
+- El AUC 0.958 de la validación es parcialmente in-sample (`propio.pt` se
+  entrenó sobre este mismo JSONL, 4 perspectivas → las 372 lunas rivales SON
+  sus positivos de entrenamiento); el número honesto es el **0.945 de val**
+  del entrenamiento. Sigue siendo señal real, no ruido.
+
+**Recomendación (orden de coste, sin RL primero):**
+
+1. **Pase ofensivo condicional** (barato, en inferencia): si P(luna) pre-pase
+   supera un umbral → pase CONSTRUCTIVO (conservar controles altos, descartar
+   bajas para vaciar un palo), no solo "no destruir": conservar solo recupera
+   ~2.3 % de oportunidad; los rivales llegan a ~10 % porque el pase CREA la
+   mano (3.2→10.3 %). Piezas: `propio.pt` (gate) + `pase_heuristico` estilo
+   lunático.
+2. **Modo luna compuesto durante la mano**: si el pozo sigue vivo → política
+   `BotLunatico`; si se rompe (gate duro `_alguien_mas_tiene_puntos`) → vuelve
+   al campeón. Ataca la componente de persecución (0.82 vs 0.29 % en hold).
+3. **Solo si 1–2 mueven la aguja**, RL con `BotLunatico` en el pool y un
+   currículum que no castigue acumular puntos intra-mano.
+
+⚠ **#1 y #2 se prueban JUNTOS, nunca #1 solo**: conservar cartas altas sin modo
+de persecución empeora — la evidencia de buckets ya muestra que el campeón come
+10.85 pts/mano con manos fuertes. Y el gate de evaluación tiene un límite
+conocido: el clon humano casi nunca ENFRENTÓ lunas nuestras (13 en todo el
+dataset), así que su defensa anti-luna es no-representativa → una eval optimista
+vs clon NO basta; el greenlight final son partidas reales del bridge
+(lunas-a-favor y win-rate). También medir el coste de intentos fallidos
+(pts comidos cuando P≥umbral y no se corona).
+
+NO hacer: más fine-tune / desde-cero vs el clon (refutado 2×, techo = fidelidad
+del clon). Este agujero es de POLÍTICA sobre información completamente observable
+(tu propia mano), no de información — no lo necesita.
+
+Scripts de esta auditoría: `scratchpad/audit2.py` (descomposición), `paso1.py`
+(validación + control 4-asientos), `paso2.py` (control sin-pase + efecto pase).
 
 ## Artefactos
 
