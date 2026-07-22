@@ -21,6 +21,7 @@ def _recomendador_sin_modelo(mi_idx: int = 0) -> Recomendador:
     r._estimador_moon = EstimadorMoonProb(dir_modelos="models/moon_inexistente")
     r.builder = ObservacionBuilder()
     r.scores = [0, 0, 0, 0]
+    r.modo_lunar = None
     r.reset_mano([])
     return r
 
@@ -187,3 +188,41 @@ def test_obs_con_pesos_reales_corre_el_pipeline_completo():
     obs_otro = otro._obs(m2)
 
     assert (obs_base[187], obs_base[188]) != (obs_otro[187], obs_otro[188])
+
+
+def test_modo_lunar_intercepta_pase_y_jugada():
+    """Con modo_lunar activo, el pase/jugada del modo tienen prioridad; con
+    None (no aplica), cae a la política normal (aquí: pase heurístico)."""
+    r = _recomendador_sin_modelo()
+    r.con_pase = False  # sin checkpoint: recomendar_pase caería a pase_heuristico
+    r.snap = None
+    r.mano = parse_cartas("AP KP QP AC KC QC JC 10C 9C 8C AT AD KD")
+
+    class _ModoStub:
+        def __init__(self):
+            self.stats = {}
+            self.comprometida = False
+            self.pase = None
+            self.carta = None
+        def elegir_pase(self, motor, idx):
+            return self.pase
+        def elegir_jugada(self, motor, idx, legales, obs_vec=None):
+            return self.carta
+
+    stub = _ModoStub()
+    r.modo_lunar = stub
+
+    # Pase: el modo no aplica (None) → heurística; aplica → sus 3 cartas.
+    assert len(r.recomendar_pase("izquierda")) == 3  # fallback heurístico
+    stub.pase = parse_cartas("AT AD KD")
+    assert r.recomendar_pase("izquierda") == stub.pase
+    # Con dirección "sin" (mano hold) el modo NO se consulta para el pase:
+    # debe caer a la heurística sin explotar (el stub devolvería AT AD KD).
+    heur = r.recomendar_pase("sin")
+    assert len(heur) == 3
+
+    # Jugada: el modo devuelve una legal → se usa esa.
+    r.corazones_rotos = True
+    legales_carta = parse_carta("AC")
+    stub.carta = legales_carta
+    assert r.recomendar_jugada(mesa_antes=[]) == legales_carta

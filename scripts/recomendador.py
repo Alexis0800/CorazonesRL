@@ -97,13 +97,21 @@ def mano_str(cartas: List[Carta]) -> str:
 class Recomendador:
     """Mantiene el estado público de la partida y consulta al modelo."""
 
-    def __init__(self, ckpt: str, mi_idx: int = 0):
+    def __init__(self, ckpt: str, mi_idx: int = 0, modo_lunar: bool = False):
         self.snap = cargar_policy_desde_checkpoint(ckpt)
         self.obs_dim = self.snap._obs_dim
         self.con_pase = con_pase_de_obs(self.obs_dim)
         self.builder = ObservacionBuilder(dim=self.obs_dim)
         self.me = mi_idx
         self._estimador_moon = EstimadorMoonProb()
+        # Ofensiva de luna por composición (docs/auditoria_moon_2026-07-20.md):
+        # pase constructivo + compromiso dinámico + aborts. Config validada con
+        # 3000 partidas pareadas vs clon (~+1 pp, nunca negativa). OFF por
+        # default: se activa con --modo-lunar en servidor_inferencia.py.
+        self.modo_lunar = None
+        if modo_lunar:
+            from src.agentes.modo_lunar import ModoLunar
+            self.modo_lunar = ModoLunar(self._estimador_moon)
         self.scores = [0, 0, 0, 0]
         self.ultima_mano_puntos: Optional[List[int]] = None
         self.reset_mano([])
@@ -167,6 +175,11 @@ class Recomendador:
     def recomendar_pase(self, direccion: str) -> List[Carta]:
         nm = _DIRECCION_A_MANO[direccion]
         m = self._motor(mesa=[], numero_mano=nm)
+        if self.modo_lunar is not None and direccion != "sin":
+            cartas = self.modo_lunar.elegir_pase(m, self.me)
+            if cartas is not None:
+                print(f"[modo-lunar] pase OFENSIVO: {' '.join(cstr(c) for c in cartas)}")
+                return cartas
         if self.con_pase and hasattr(self.snap, "pasar"):
             return self.snap.pasar(m, self.me)
         from src.agentes.pase import pase_heuristico
@@ -187,6 +200,11 @@ class Recomendador:
         m = self._motor(mesa=mesa_antes)
         legales = m.obtener_jugadas_legales(self.me)
         obs = self._obs(m)
+        if self.modo_lunar is not None:
+            carta = self.modo_lunar.elegir_jugada(m, self.me, legales, obs_vec=obs)
+            if carta is not None and carta in legales:
+                print(f"[modo-lunar] persecución de pozo: {cstr(carta)}")
+                return carta
         carta = self.snap(m, self.me, legales, obs_vec=obs)
         return carta if carta in legales else legales[0]
 
@@ -207,6 +225,11 @@ class Recomendador:
         if len(permitidas) == 1:
             return permitidas[0]
         obs = self._obs(m)
+        if self.modo_lunar is not None:
+            carta = self.modo_lunar.elegir_jugada(m, self.me, permitidas, obs_vec=obs)
+            if carta is not None and carta in permitidas:
+                print(f"[modo-lunar] persecución de pozo: {cstr(carta)}")
+                return carta
         carta = self.snap(m, self.me, permitidas, obs_vec=obs)
         return carta if carta in permitidas else permitidas[0]
 
@@ -290,6 +313,9 @@ class Recomendador:
             "corazones_rotos": self.corazones_rotos,
             "numero_baza": self.numero_baza,
             "dama_picas_en": self.dama_picas_en,
+            "modo_lunar": (dict(self.modo_lunar.stats,
+                                comprometida=self.modo_lunar.comprometida)
+                           if self.modo_lunar is not None else None),
         }
 
 

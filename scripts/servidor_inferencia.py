@@ -213,6 +213,12 @@ def main() -> None:
     p.add_argument("--log", default="",
                    help="Ruta al JSONL de log. Si se omite, se genera "
                    "logs/servidor_inferencia_YYYYMMDD_HHMMSS.jsonl automáticamente")
+    p.add_argument("--modo-lunar", action="store_true",
+                   help="Activa la ofensiva de luna por composición (ModoLunar: "
+                        "pase constructivo + compromiso dinámico + aborts). "
+                        "Validada EV≈+1pp / nunca negativa en 3000 partidas vs "
+                        "clon; este flag es el GATE REAL en partidas del bridge. "
+                        "Ver docs/auditoria_moon_2026-07-20.md.")
     args = p.parse_args()
 
     if not args.log:
@@ -220,10 +226,12 @@ def main() -> None:
         args.log = f"logs/servidor_inferencia_{ts}.jsonl"
 
     print(f"Cargando modelo desde {args.modelo} (asiento {args.asiento})...")
-    Handler.recomendador = Recomendador(args.modelo, mi_idx=args.asiento)
+    Handler.recomendador = Recomendador(args.modelo, mi_idx=args.asiento,
+                                        modo_lunar=args.modo_lunar)
     Handler.log_path = _Path(args.log)
     Handler.log_path.parent.mkdir(parents=True, exist_ok=True)
-    print(f"Modelo cargado (obs_dim={Handler.recomendador.obs_dim}). "
+    print(f"Modelo cargado (obs_dim={Handler.recomendador.obs_dim}"
+          f"{', MODO LUNAR ACTIVO' if args.modo_lunar else ''}). "
           f"Escuchando en http://127.0.0.1:{args.puerto} (log: {Handler.log_path})")
 
     server = ThreadingHTTPServer(("127.0.0.1", args.puerto), Handler)

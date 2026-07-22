@@ -20,6 +20,7 @@ def _servidor_sin_modelo(tmp_path: Path):
     r.scores = [0, 0, 0, 0]
     r.ultima_mano_puntos = None
     r.con_pase = False
+    r.modo_lunar = None
     r.reset_mano([])
 
     si.Handler.recomendador = r
