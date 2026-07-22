@@ -564,10 +564,21 @@ ENTRA si P sube sobre el umbral; nunca tras un abort. A/B pareado vs clon v3:
 | dinámico (50000) | 600 | **+1.5 ± 1.2 pp** | 71/146 | 47.3 % |
 | dinámico (60000) | 1000 | **+1.1 ± 0.9 pp** | 94/231 | 45.9 % |
 
-Agregado dinámico (1600 partidas): **+1.25 ± 0.72 pp (1.7σ, p≈0.08)** —
-dirección consistente en 2 lotes independientes, aún no concluyente. Regla
-pre-declarada para evitar sesgo de parada: veredicto = pool de 3 lotes (tercer
-lote de 1400 en semillas 70000 lanzado; n total 3000, SE ~±0.53 pp).
+| dinámico (70000) | 1400 | +0.5 ± 0.8 pp | 121/333 | 44.4 % |
+
+**VEREDICTO (regla pre-declarada, pool de 3 lotes, n=3000): Δwin = +0.90 ±
+0.53 pp (1.7σ, p≈0.09).** Tres lotes positivos (+1.5/+1.1/+0.5). Lectura
+honesta: el compromiso dinámico es probablemente un efecto real pero PEQUEÑO
+(~+1 pp) — mejor que el estático (−0.7), nunca negativo en 3000 partidas,
+no concluyente al estándar 2σ. lunas/partida ~0.11–0.13 vs baseline
+0.027–0.038 (×3–4) con conversión estable 44–47 %.
+
+Implicación operativa: la config completa (pase ofensivo + compromiso
+dinámico + aborts) es como mínimo neutra y probablemente +1 pp vs clon —
+**riesgo acotado para el gate real del bridge** (que además ya captura data
+completa tras el fix en vivo del ISSUE). El coste de fallos sigue en ~18 pts:
+la palanca restante con efecto potencialmente mayor es la persecución-BC de
+los 385 luneadores humanos.
 
 En reserva si confirma pero se quiere más efecto: **persecución-BC de los 385
 luneadores humanos exitosos** (sus jugadas completas están en el dataset) para
