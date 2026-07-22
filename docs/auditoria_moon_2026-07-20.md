@@ -580,9 +580,17 @@ completa tras el fix en vivo del ISSUE). El coste de fallos sigue en ~18 pts:
 la palanca restante con efecto potencialmente mayor es la persecución-BC de
 los 385 luneadores humanos.
 
-En reserva si confirma pero se quiere más efecto: **persecución-BC de los 385
-luneadores humanos exitosos** (sus jugadas completas están en el dataset) para
-reemplazar `_jugar_moon` (los fallos siguen costando ~18.5 pts).
+**Persecución-BC (probada 2026-07-22): EMPATA con la heurística.** Se entrenó
+`models/luna_bc` con las jugadas de los 385 luneadores humanos (replay
+`seats_de="luna"`, val top-1 0.478 con sobreajuste esperado en ~5k ejemplos) y
+se cableó como `politica_persecucion` opcional de ModoLunar. A/B pareado (600
+partidas, semillas 100000): **Δwin +1.5 ± 1.2 pp — igual que la heurística**,
+con el trade: conversión 37.8 % (vs 44-47 %) pero fallos más baratos (15.4 vs
+~18 pts). Neto indistinguible. **El programa offline convergió en ~+1 pp**: el
+cuello ya no es la política de persecución sino la economía fundamental vs
+este clon. Config recomendada para el bridge: dinámico + heurística (la de
+3000 partidas de evidencia y cero dependencias extra); el BC queda disponible
+tras `--luna-bc`.
 
 ## Artefactos
 
