@@ -481,6 +481,38 @@ doc: lunas-a-favor y win-rate en partidas del bridge. Mejoras de política si
 el real da señal: persecución guiada por PIMC (lenta pero válida en el
 copiloto) y compromiso sensible al marcador (lunear más al ir perdiendo).
 
+## Recuperación de las manos no-reconstruibles (2026-07-21) — sesgo de muestra ELIMINADO
+
+El corte-temprano NO perdía los datos: el wire manda el reveal (`subtype=10`
+con los `w[]` de los 4 asientos) en TODO fin de mano, y los eventos `rawOpcode`
+del jsonl conservan el payload. `session-runner` lo descartaba por un bug doble
+(solo lo grababa en la rama de remate + off-by-N en el cross-check cuando una
+carta se jugaba entre el reveal y el cierre). Ticket con el fix en vivo:
+`hearts-sfs-bridge/docs/ISSUE-reveal-descartado.md`.
+
+Mitigación offline aplicada (`export-reconstructed-from-jsonl.js` →
+`recuperarRevealDeRaw`, re-parsea rawOpcode con el mismo `GameStateTracker` +
+validación estructural; el importador Python valida puntos recomputados ==
+servidor):
+
+| | antes | después |
+|---|---|---|
+| manos reconstruibles | 4168 (85 %) | **4910 (100 % de las importadas)** |
+| lunas propias | 1 | **14** |
+| lunas totales | 372 | 385 |
+
+`data/partidas_bridge_full.jsonl` regenerado 2026-07-21. Implicaciones:
+- La regla "outcomes solo desde hearts.db" SIGUE vigente (la DB es la verdad),
+  pero el sesgo de reconstruibilidad del JSONL quedó prácticamente eliminado.
+- **El clon humano-BC se entrenó sobre el subset sesgado (85 %)** → reentrenarlo
+  sobre el dataset completo es ahora el paso más barato del volante de datos
+  (era su techo declarado de fidelidad).
+- El residuo "sin-pase 1.6 vs 3.2 %" de §OFENSIVA debería re-medirse sobre el
+  dataset completo (era artefacto del sesgo).
+- ⚠ Nota: 17/589 sesiones sin `rawOpcode` siguen sin recuperarse; y
+  `hearts.db` mantiene el flag `reconstructable` viejo (re-ingestar si se
+  necesita alineado).
+
 ## Artefactos
 
 - `hearts-sfs-bridge/src/export-reconstructed-from-jsonl.js` (nuevo, en el bridge;

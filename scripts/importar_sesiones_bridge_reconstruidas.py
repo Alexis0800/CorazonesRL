@@ -139,6 +139,13 @@ def mano_desde_reconstruida(h: dict, numero_mano: int) -> Optional[RegistroMano]
         pase_recibido = [swap_suit(c) for c in cardsIn]
 
     remate = h.get("remate")
+    puntuacion = _puntuacion_mano(h["tricks"], remate)
+    # Guard-rail (clave para los reveals recuperados de rawOpcode): la
+    # puntuación recomputada DEBE coincidir con la del servidor (`points`,
+    # verdad autoritativa). Si no cuadra, la reconstrucción es sospechosa y la
+    # mano se descarta -- mejor menos datos que datos con puntos fabricados.
+    if h.get("points") is not None and list(h["points"]) != puntuacion:
+        return None
     return RegistroMano(
         numero_mano=numero_mano,
         direccion_pase=direccion,
@@ -146,7 +153,7 @@ def mano_desde_reconstruida(h: dict, numero_mano: int) -> Optional[RegistroMano]
         pase_dado=pase_dado,
         pase_recibido=pase_recibido,
         jugadas=_jugadas_de_mano(h["tricks"]),
-        puntuacion_mano=_puntuacion_mano(h["tricks"], remate),
+        puntuacion_mano=puntuacion,
         remate_asiento=remate["winner"] if remate else None,
         manos_restantes=(
             [[swap_suit(c) for c in cartas] for cartas in remate["seats"]]
@@ -174,7 +181,7 @@ def partida_desde_archivo(ruta: Path, avisos: List[str]) -> Optional[RegistroPar
 
         mano = mano_desde_reconstruida(h, numero_mano=len(manos) + 1)
         if mano is None:
-            avisos.append(f"{ruta.name}: línea {n} no marcada reconstruible por el bridge, se omite")
+            avisos.append(f"{ruta.name}: línea {n} no reconstruible (o puntos recomputados != servidor), se omite")
             continue
         if h.get("viaPass") and mano.direccion_pase is None:
             avisos.append(
