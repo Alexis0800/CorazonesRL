@@ -531,8 +531,15 @@ servidor):
   viejo ya no existe para reproducir su split). Promoción por principio: v3 es
   el único entrenado sobre la distribución sin sesgo (incluye las manos de
   puntos-rápidos que v2 jamás vio). ⚠ Todos los baselines históricos "vs clon"
-  (0.46–0.52) son contra v2 — el baseline vs v3 se mide con el A/B pareado
-  (semillas 40000+) y ES el número de referencia de aquí en adelante.
+  (0.46–0.52) son contra v2.
+- **Baseline de referencia vs clon v3 (A/B pareado, 600 partidas, semillas
+  40000+): campeón 0.468** — v3 es un oponente más duro que v2 (0.499 pareado
+  vs v2), consistente con que v3 sí conoce las manos de puntos-rápidos.
+- **ModoLunar re-testeado vs v3: sigue EV-neutro** (Δwin −0.7 ± 1.0 pp;
+  lunas/partida 0.030→0.102, conversión 51.8 %, fallos 18.8 pts). El veredicto
+  de la campaña se sostiene contra el defensor mejor informado: seguro,
+  triplica las lunas, no mueve el win-rate — la decisión de desplegarlo al
+  bridge (gate real) sigue siendo del operador, con riesgo acotado.
 
 ## Artefactos
 
