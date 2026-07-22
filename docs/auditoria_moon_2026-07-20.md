@@ -59,6 +59,8 @@ sí están en los `session-*.jsonl` — es de ahí que se construyó la DB.
 - Importado con el script Python vigente sin modificarlo →
   **`data/partidas_bridge_full.jsonl`: 558 partidas / 4168 manos reconstruibles
   al 100 %** (antes ~483; cifra ya LIMPIA tras el fix de §Verificación).
+  *(ACTUALIZADO 2026-07-21: el archivo se regeneró tras recuperar los reveals →
+  556 partidas / 4910 manos / 385 lunas; ver §Recuperación.)*
 - Positivos de luna: **371 rival + 1 propia** (vs 11 antes; = el conteo del
   servidor, tras quitar 97 falsos). Las lunas propias reconstruibles son ~0 → el
   modelo "propio" debe seguir con datos simulados
@@ -158,7 +160,9 @@ Métrica de éxito correcta: **tasa de lunas-en-contra y win-rate en evaluación
 - Pozo-rival y liderazgo: **suficientes** (467 positivos / 4635 manos sin
   explotar). No hace falta capturar más.
 - Pozo-propio: escaso (~0 reconstruibles) → usar dataset simulado, no capturar
-  más real por eso.
+  más real por eso. *(ACTUALIZADO 2026-07-21: tras recuperar los reveals hay
+  14 lunas propias reconstruibles — siguen siendo pocas para entrenar, el
+  dataset simulado sigue vigente para "propio"; ver §Recuperación.)*
 
 ## Implementación Fase 3 (construida y validada 2026-07-20)
 
@@ -512,12 +516,30 @@ servidor):
 - ⚠ Nota: 17/589 sesiones sin `rawOpcode` siguen sin recuperarse; y
   `hearts.db` mantiene el flag `reconstructable` viejo (re-ingestar si se
   necesita alineado).
+- **Moon models re-entrenados sobre el dataset completo: SIN ganancia**
+  (propio 0.947 vs 0.945, rival 0.703 vs 0.707 — dentro del ruido; los
+  positivos solo subieron +13). Los pesos vivos `models/moon_realfull` se
+  mantienen sin cambios (no tocar la distribución de entrada del campeón por
+  nada); el dir del experimento se borró. La ganancia del dataset completo va
+  al CLON humano-BC, no a los moon models.
+- **Clon humano-BC v3 reentrenado y PROMOVIDO** (2026-07-21,
+  `models/humano_bc/pesos.npz`; el v2 quedó como `pesos_v2_sesgado.npz`):
+  val top-1 **0.706 sobre la distribución completa** (v2: 0.716 sobre el
+  subset sesgado — números NO comparables, distinta dificultad de val). El
+  intento de comparación head-to-head sobre el mismo val dio v2 0.743 pero es
+  **fuga de entrenamiento** (v2 entrenó sobre esas mismas partidas; el archivo
+  viejo ya no existe para reproducir su split). Promoción por principio: v3 es
+  el único entrenado sobre la distribución sin sesgo (incluye las manos de
+  puntos-rápidos que v2 jamás vio). ⚠ Todos los baselines históricos "vs clon"
+  (0.46–0.52) son contra v2 — el baseline vs v3 se mide con el A/B pareado
+  (semillas 40000+) y ES el número de referencia de aquí en adelante.
 
 ## Artefactos
 
 - `hearts-sfs-bridge/src/export-reconstructed-from-jsonl.js` (nuevo, en el bridge;
   incluye el fix de manos fantasma)
-- `data/partidas_bridge_full.jsonl` (558 partidas / 4168 manos, LIMPIO)
+- `data/partidas_bridge_full.jsonl` (556 partidas / 4910 manos tras la
+  recuperación de reveals 2026-07-21; validado puntos==servidor mano a mano)
 - `models/moon_realfull/{propio,rival}.pt` (AUC 0.945 / 0.707)
 - `data/regret_v10c_clean.jsonl` (campeón) + `data/regret_experto_clean.jsonl` (referencia)
   + sus `.log`. Los `*_full.*` son la versión previa al fix (contaminada).

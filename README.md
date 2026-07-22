@@ -9,6 +9,11 @@ partidas reales.
 > Estado actual: **v10c** es el mejor modelo — partida completa + pase + self-play
 > consistente. Ver `models/produccion/`. Documentación de diseño en
 > `docs/Rediseño_v10_partida_completa.md`. Próximos pasos en `docs/ROADMAP.md`.
+>
+> **Contra humanos reales** (556 partidas medidas vía bridge): win-rate 23.9 % ≈
+> azar de colocación — mejor que los humanos en manos normales, pero sin ofensiva
+> de luna (la fuga dominante). Diagnóstico y campaña completa:
+> `docs/auditoria_moon_2026-07-20.md`.
 
 ---
 

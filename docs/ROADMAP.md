@@ -21,24 +21,24 @@ en partidas reales** antes de invertir en app.
 
 ---
 
-## Fase 2 — Dataset de partidas reales vs humanos
+## Fase 2 — Dataset de partidas reales vs humanos ✅ (hecha vía `hearts-sfs-bridge`; resultados 2026-07)
 
-Para medir **qué tan eficiente es contra humanos reales** (no solo bots).
+- [x] **Logger de partidas**: resuelto con el bridge SFS (`hearts-sfs-bridge`,
+      repo aparte) → `hearts.db` (556 partidas / ~4900 manos) +
+      `data/partidas_bridge_full.jsonl` (réplica jugada-a-jugada, 100 %
+      reconstruible tras recuperar los reveals, 2026-07-21).
+- [x] **Métrica de eficiencia humana**: **win-rate 23.9 % ≈ azar de colocación**
+      (verdad del servidor). Diagnóstico completo: el modelo es MEJOR que los
+      humanos en manos normales; todo el déficit es el diferencial de ofensiva
+      de luna. Ver `docs/auditoria_moon_2026-07-20.md` (TL;DR).
+- [x] **Fine-tune con datos humanos**: clon humano-BC construido (val top-1
+      ~0.71) y añadido al pool — pero las vías RL (fine-tune ×2 y desde-cero)
+      quedaron **refutadas**: entrenar vs el clon da fuerza general, no ventaja
+      anti-humana. Palanca vigente: ofensiva de luna por composición
+      (`ModoLunar`, rama `feature/modo-lunar`) + volante de datos.
 
-- [ ] **Logger de partidas**: extender `recomendador.py` (o un modo nuevo) para que
-      GUARDE cada partida jugada (manos, pases, jugadas, resultado) a un `.jsonl`.
-      Esto convierte cada partida real en datos.
-- [ ] **Métrica de eficiencia humana**: con N partidas reales, medir el puesto medio /
-      win-rate del modelo (si jugaste siguiendo sus recomendaciones) vs humanos.
-- [ ] **(Opcional) Fine-tune con datos humanos**: si los humanos juegan distinto a
-      nuestros bots, añadir un arquetipo "humano" al pool (clonado de los logs) y/o
-      hacer un fine-tune ligero. Cierra el gap de distribución sim→real.
-
-**Entregable:** número honesto de "qué tan bueno es vs humanos" + datos para mejorar.
-
-**Nota técnica:** el `BotExperto` y los arquetipos ya cubren mucho del juego humano,
-pero los humanos tienen sesgos (errores, estilos). Un dataset real es la única forma
-de medir y cerrar ese gap.
+**Entregable:** ✅ número honesto + diagnóstico + datos. Lo que sigue vive en la
+auditoría, no aquí.
 
 ---
 

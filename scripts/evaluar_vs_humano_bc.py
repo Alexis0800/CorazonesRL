@@ -1,8 +1,10 @@
 """
 Evalúa un modelo jugando partidas completas contra 3 bots de IMITACIÓN HUMANA
 (scripts/entrenar_bc_humano.py) — el proxy más cercano a los humanos reales que
-enfrentamos (campeón v10c: ~0.46–0.52 según lote de semillas, vs 24% real, vs
-92% bots simples). Ver docs/auditoria_moon_2026-07-20.md.
+enfrentamos (vs 24% real, vs 92% bots simples). Baselines históricos del
+campeón 0.46–0.52 fueron contra el clon v2 (`pesos_v2_sesgado.npz`); el clon
+vivo desde 2026-07-21 es v3 (dataset completo sin sesgo) — su baseline de
+referencia está en docs/auditoria_moon_2026-07-20.md.
 
 ⚠ Esta eval NO está pareada: los clones muestrean del RNG global de torch, así
 que comparar dos corridas sueltas tiene un piso de ruido de ~±3pp — del orden
@@ -54,7 +56,7 @@ def main() -> None:
                                  con_pase=con_pase_de_obs(args.obs_dim))
     agg = _agregar(res)
     print(f"\n=== {args.modelo} vs 3 bots humanos ({args.partidas} partidas) ===")
-    print(f"  win_rate:    {agg['win']:.3f}  (campeón base: 0.46-0.52 según lote; no pareado, ±3pp)")
+    print(f"  win_rate:    {agg['win']:.3f}  (base 0.46-0.52 fue vs clon v2; no pareado, ±3pp)")
     print(f"  top2_rate:   {agg['top2']:.3f}")
     print(f"  puesto_medio:{agg['puesto']:.3f}")
     print(f"  moon (agente dispara): {agg['moon']:.3f}")

@@ -352,7 +352,7 @@ class OpponentPool:
             BotExperto/arquetipo al azar.
 
             Con `humano_bc_path`, una fracción `prob_humano` de los slots duros es
-            el clon del estilo humano real (val top-1 ~66%) -- es el oponente más
+            el clon del estilo humano real (val top-1 ~0.71) -- es el oponente más
             parecido a los humanos que enfrentamos (campeón 46% win-rate vs él, vs
             24% real, vs 92% bots simples). Rompe la burbuja de self-play que hace
             que el campeón le gane a los bots pero no a los humanos. Ver

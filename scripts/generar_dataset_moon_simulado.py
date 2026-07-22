@@ -31,9 +31,10 @@ nada: este script solo genera jugadas y las serializa como `RegistroPartida`
 ACTUALIZACIÓN (2026-07-20/21): la premisa "el modelo propio no puede entrenarse
 con datos reales" quedó superada — `ejemplos_de_mano` extrae las 4 perspectivas
 por mano, así que las lunas RIVALES también son positivos "propio" (desde el
-asiento del lunador): con `data/partidas_bridge_full.jsonl` (372 lunas) el
-propio llegó a AUC 0.945 val SIN simulados. Este script queda como aumento
-opcional de positivos, ya no como requisito.
+asiento del lunador): con `data/partidas_bridge_full.jsonl` (372 lunas
+entonces; 385 tras la recuperación de reveals) el propio llegó a AUC 0.945 val
+SIN simulados. Este script queda como aumento opcional de positivos, ya no
+como requisito.
 """
 from __future__ import annotations
 

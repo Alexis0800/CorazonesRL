@@ -1,8 +1,11 @@
 """
 Genera datasets y entrena los 2 modelos aprendidos de moon_prob
 (src/entorno/moon_model.py) a partir de las manos reales reconstruibles.
-Dataset canónico: data/partidas_bridge_full.jsonl (4168 manos limpias;
-partidas_bridge.jsonl es la foto vieja de 483). Ver spec:
+Dataset canónico: data/partidas_bridge_full.jsonl (4910 manos tras la
+recuperación de reveals 2026-07-21; partidas_bridge.jsonl es la foto vieja de
+483). Nota: re-entrenar sobre las 4910 NO mejoró el AUC (0.947/0.703 vs
+0.945/0.707) — los pesos vivos siguen siendo los entrenados el 2026-07-20.
+Ver spec:
 docs/superpowers/specs/2026-07-06-moon-prob-modelo-aprendido-design.md
 
 Limitación de datos conocida: la memoria del pase (cartas dadas/recibidas)
