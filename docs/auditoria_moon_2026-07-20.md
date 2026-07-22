@@ -306,8 +306,13 @@ varios fine-tunes).
 Una primera lectura concluyó que las derrotas eran por "desastres puntuales" y
 que comíamos MENOS puntos que los rivales (6.53 vs 8.04/mano, 27.4 % vs 30.8 %
 de manos ≥13). **Es un artefacto**: el importador descarta las manos NO
-reconstruibles, y esas están sesgadas a nuestro favor (las manos donde nos
-machacan suelen acabar en "remate", que es justo lo que falla al reconstruir).
+reconstruibles, y esas están sesgadas a nuestro favor. (Mecanismo CORREGIDO
+2026-07-21: NO es el remate — el remate reconstruye al 100 % vía `handRevealed`.
+Lo que falla son las manos SIN remate terminadas TEMPRANO, bazas 5–11: cuando
+los 26 puntos ya cayeron, el servidor corta la mano y las cartas restantes de
+los rivales nunca cruzan el cable — 739 manos, imposibles de reconstruir en
+general. Las manos donde los puntos caen rápido sobre nosotros —y NUESTRAS
+lunas, 12/13— son exactamente las que cortan temprano.)
 Contraste decisivo sobre las MISMAS 556 partidas:
 
 | Fuente | win-rate | score final nuestro | rivales |
