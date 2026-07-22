@@ -1,9 +1,14 @@
 """
 Evalúa un modelo jugando partidas completas contra 3 bots de IMITACIÓN HUMANA
 (scripts/entrenar_bc_humano.py) — el proxy más cercano a los humanos reales que
-enfrentamos (campeón v10c: 46% win-rate vs este bot, vs 24% real, vs 92% bots
-simples). Métrica de éxito de la Fase 3: ¿sube el win-rate vs el bot humano tras
-el fine-tune contra el pool humanizado? Ver docs/auditoria_moon_2026-07-20.md.
+enfrentamos (campeón v10c: ~0.46–0.52 según lote de semillas, vs 24% real, vs
+92% bots simples). Ver docs/auditoria_moon_2026-07-20.md.
+
+⚠ Esta eval NO está pareada: los clones muestrean del RNG global de torch, así
+que comparar dos corridas sueltas tiene un piso de ruido de ~±3pp — del orden
+de los efectos que se suelen buscar. Para medir un DELTA entre dos políticas,
+usar el patrón pareado de scripts/evaluar_modo_lunar.py (torch.manual_seed por
+partida + delta pareado). Este script sirve para números absolutos gruesos.
 
 Uso:
     python scripts/evaluar_vs_humano_bc.py --modelo models/produccion/v10c_campeon \
@@ -49,7 +54,7 @@ def main() -> None:
                                  con_pase=con_pase_de_obs(args.obs_dim))
     agg = _agregar(res)
     print(f"\n=== {args.modelo} vs 3 bots humanos ({args.partidas} partidas) ===")
-    print(f"  win_rate:    {agg['win']:.3f}  (campeón base: 0.46)")
+    print(f"  win_rate:    {agg['win']:.3f}  (campeón base: 0.46-0.52 según lote; no pareado, ±3pp)")
     print(f"  top2_rate:   {agg['top2']:.3f}")
     print(f"  puesto_medio:{agg['puesto']:.3f}")
     print(f"  moon (agente dispara): {agg['moon']:.3f}")

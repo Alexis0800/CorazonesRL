@@ -4,24 +4,28 @@ Auditoría senior sobre las partidas reales capturadas por el bridge SFS
 (`hearts-sfs-bridge`) para entender por qué v10c **no le gana de forma
 consistente a los humanos** (win-rate 23.9 % ≈ azar) y qué palanca lo mejora.
 
-## TL;DR (revisado tras verificación adversarial)
+## TL;DR (estado FINAL de la campaña, 2026-07-21 — el doc es un log cronológico; ante contradicción manda la sección más reciente)
 
-El diagnóstico previo *"no measurable improvement por escasez de datos de pozo"*
-era correcto en la causa pero se midió sobre una foto vieja de datos. La DB del
-bridge ya tenía **~30× más datos reconstruibles sin importar**. Al desbloquearlos:
-
-- Los modelos moon pasaron de **azar** (AUC 0.44–0.58) a **señal real**
-  (propio **0.945**, rival **0.707**) — sobre datos LIMPIOS (ver §Verificación).
-- Las manos de luna rival cargan **~2× el regret** de las normales (1.93 vs 0.92)…
-  **PERO el BotExperto está igual de elevado ahí (2.07)**. Es decir: NO es un
-  defecto de política del campeón, es una **brecha estructural de información**
-  (el oráculo ve las manos ocultas; ninguna política pública puede igualarlo en
-  defensa de luna). El campeón ya juega las manos de luna a nivel heurístico-fuerte.
-- **Implicación para Fase 3**: el regret NO es el yardstick correcto (no puede
-  mostrar mejora en una brecha estructural). Fase 3 es un experimento razonable
-  —hay una señal pública nueva que el entrenamiento nunca tuvo— pero con riesgo
-  real de resultado nulo, y debe juzgarse por **tasa de lunas-en-contra /
-  win-rate en evaluación**, no por regret.
+- **Modelos moon**: de azar a señal real (propio AUC **0.945** val / rival
+  **0.707**), pesos vivos `models/moon_realfull` (= `RUTA_MOON`).
+- **Defensa de luna: CERRADA.** El regret elevado en manos de luna es brecha
+  estructural de información (BotExperto igual de elevado). El regret vs
+  oráculo está saturado como métrica entre jugadores competentes — no usar
+  como guía de mejora.
+- **RL vs clon humano: REFUTADO 3×** (fine-tune ×2, desde-cero ×1). El techo
+  es la fidelidad del clon, no el algoritmo.
+- **La fuga real es la OFENSIVA de luna** (§Auditoría de OFENSIVA): en manos
+  normales el campeón es MEJOR que los humanos (−3.97 pts/partida); todo el
+  déficit es el diferencial de luna (+5.81). Luneamos 0.27 %/mano vs 2.52 %
+  cada humano (9.4×); nuestro pase 100 %-defensivo mata nuestras manos de luna
+  (verdad del servidor: pase → ×3.6 la luna rival, ×0.9 la nuestra).
+- **ModoLunar** (composición gate+BotLunatico, rama `feature/modo-lunar`):
+  **EV-neutro exacto vs clon** (+0.2 ± 0.7 pp, A/B pareado 1000 partidas).
+  Seguro pero no paga con persecución cruda. Gate pendiente: bridge real (el
+  clon no defiende lunas → no mide transferencia).
+- **Lección de instrumento**: A/B contra clones estocásticos exige resembrar
+  TODOS los RNG por partida (torch incluido) y delta pareado; si no, piso de
+  ruido ~±3 pp (≈ los efectos buscados).
 
 ## Diagnóstico (datos)
 
@@ -77,7 +81,8 @@ python scripts/importar_sesiones_bridge_reconstruidas.py \                    # 
 | propio | 0.44–0.46 | **0.945** | 0.958 ✅ |
 | rival  | 0.578     | **0.707** | 0.750 ✅ |
 
-Guardados en `models/moon_realfull/` (no pisa los vivos `models/moon/`).
+Guardados en `models/moon_realfull/` — que LUEGO pasó a ser el canónico vivo
+(`RUTA_MOON`); `models/moon/` quedó como legado que nada lee.
 
 ## Fase 1 — Regret real del campeón (hecho)
 
@@ -261,7 +266,8 @@ varios fine-tunes).
    del clon, no el algoritmo de RL.
 4. Camino recomendado: **volante de datos** — seguir capturando partidas
    reales (el bridge), reentrenar el clon al crecer el dataset (~10k+ manos),
-   y re-evaluar RL entonces. El pase sigue sin auditarse (palanca virgen).
+   y re-evaluar RL entonces. ~~El pase sigue sin auditarse (palanca virgen)~~
+   (auditado después, mismo día: §Auditoría del PASE y §Auditoría de OFENSIVA).
 5. Subproducto útil: el elite v11 (estilo distinto) puede servir como oponente
    de diversidad en pools futuros.
 
@@ -275,7 +281,11 @@ varios fine-tunes).
   picas: pasa Q♠ el 100 % con 1-2 picas, 93.9 % con 3, 68.8 % con 4, 29.5 % con
   5, 9.7 % con 6. Quedársela sin protección es catastrófico (12.64 pts medios,
   64 % de manos ≥13) pero **solo ocurre 14 veces de 344** (4 %).
-- Conclusión: construir un "modelo de pase" no rendiría. Palanca cerrada.
+- Conclusión: construir un "modelo de pase" no rendiría. ~~Palanca cerrada.~~
+  **⚠ CORREGIDO en §Auditoría de OFENSIVA**: esta sección hizo la pregunta
+  DEFENSIVA ("¿nuestro pase alimenta la luna rival?" → no). La pregunta
+  ofensiva ("¿nuestro pase mata NUESTRAS manos de luna?") da SÍ — la palanca
+  del pase sigue abierta, pero por el lado ofensivo.
 
 **El regret contra oráculo info-completa ya NO discrimina (hallazgo metodológico):**
 - Concentración: 5.2 % de decisiones acumulan ~la mitad del regret (1907 pts de

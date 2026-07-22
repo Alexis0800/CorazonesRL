@@ -358,9 +358,14 @@ class OpponentPool:
             que el campeón le gane a los bots pero no a los humanos. Ver
             docs/auditoria_moon_2026-07-20.md.
 
-            BotLunatico con el doble de peso que los demás: el backtest de regret
-            sobre partidas reales mostró que las manos con pozo concentran el error
-            del campeón -- exposición insuficiente en el mix original.
+            BotLunatico con el doble de peso que los demás. Justificación
+            histórica: el backtest de regret mostraba las manos con pozo como
+            concentradoras de error; la auditoría posterior demostró que ese
+            regret elevado es BRECHA ESTRUCTURAL (BotExperto igual de elevado),
+            no defecto entrenable. El 2x se mantiene porque la exposición a
+            intentos de pozo sigue siendo el único estímulo del pool para la
+            defensa temprana, y los humanos lunean 2.52%/mano cada uno (ver
+            docs/auditoria_moon_2026-07-20.md §OFENSIVA).
             """
             if humano_pesos is not None and random.random() < prob_humano:
                 return _clon_humano()

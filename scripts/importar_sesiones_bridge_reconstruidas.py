@@ -32,7 +32,12 @@ según `MotorCorazones._OFFSET_PASE`.
 Uso:
     python scripts/importar_sesiones_bridge_reconstruidas.py \
         --dir D:/Github/Personal/hearts-sfs-bridge/logs/reconstructed \
-        --out data/partidas_bridge.jsonl
+        --out data/partidas_bridge_full.jsonl
+
+⚠ Solo para RE-JUGAR decisiones (regret, BC, features): el subset reconstruible
+está sesgado (lunas rivales 100% reconstruibles, nuestras 8%, normales 84%).
+Cualquier métrica de RESULTADO se calcula desde hearts.db (servidor), nunca
+desde este JSONL. Ver docs/auditoria_moon_2026-07-20.md §RETRACTADO.
 """
 from __future__ import annotations
 

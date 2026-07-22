@@ -22,7 +22,11 @@ Solo evalúa decisiones de JUEGO (igual que pimc_regret.py, no evalúa el pase).
 
 Uso:
     python scripts/pimc_regret_real.py --modelo models/produccion/v10c_campeon \
-        --partidas data/partidas_bridge.jsonl --max-decisiones 500 --rollouts 20
+        --partidas data/partidas_bridge_full.jsonl --max-decisiones 500 --rollouts 20
+
+⚠ El regret vs oráculo info-completa está SATURADO entre jugadores competentes
+(campeón ≈ experto por decisión; ver docs/auditoria_moon_2026-07-20.md). Sirve
+como no-regresión gruesa, NO como guía de mejora.
 """
 from __future__ import annotations
 

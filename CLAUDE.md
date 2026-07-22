@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Reinforcement learning agent for the card game Hearts (Corazones) on **Ray RLlib v2.55.1 + PPO** (old API stack, TorchModelV2). Pipeline: **Behavioral Cloning from a PIMC oracle** → **PPO fine-tune with diverse self-play** against a pool of historical snapshots + heuristic archetypes, evaluated with a least-squares Elo system. The champion **v10c** plays full games to 100 pts including the card pass. Includes a copilot (`recomendador.py`) for real games.
 
-> **Branch `feature/v5`** (current). Legacy SB3 code removed; entry point is `scripts/train_rllib.py`. Champion model in `models/produccion/`. Design doc: `docs/Rediseño_v10_partida_completa.md`. Roadmap (copilot, mobile app, human dataset, on-device): `docs/ROADMAP.md`. Obsolete docs archived under `docs/historico/`.
+> **Branch `feature/v5`** (base de desarrollo; rama activa: `feature/modo-lunar` — ofensiva de luna por composición, EV-neutra vs clon, pendiente gate en bridge real). Legacy SB3 code removed; entry point is `scripts/train_rllib.py`. Champion model in `models/produccion/`. Design doc: `docs/Rediseño_v10_partida_completa.md`. Roadmap (copilot, mobile app, human dataset, on-device): `docs/ROADMAP.md`. Obsolete docs archived under `docs/historico/`.
 
 ## Commands
 
@@ -65,7 +65,7 @@ python -m src.torneo.elo --directorio models/v8/elite --partidas 50 --elo-puro -
 - `observacion.py`: `ObservacionBuilder` — SSOT for the observation vector. Supports 224 (v11, no pass) and 228 (v12, with pass) via the `dim` constructor arg. Scoreboard features (`[172:176]`, near-100, leader, terminal-hand) are LIVE because score persists across hands.
 - `recompensas_partida.py`: **SSOT for rewards** — `RewardConfigPartida` + `CalculadoraRecompensasPartida` (R_terminal + PBRS Φ). This is what `CorazonesEnvRLlib` uses.
 - `dimensiones.py`: SSOT for observation dimensions (`DIM_V11=224` default sin pase, `DIM_V12=228` con pase, `DIM_V13=332` con pase + memoria del pase; `DIM_ENTORNO=224`). Always import from here — never hardcode `224`/`228`/`332`.
-- `moon_model.py`: 2 modelos aprendidos (MLP chico en PyTorch) que reemplazan la heurística de coeficientes fijos para `moon_prob_agente`/`moon_prob_rival` (obs `[187:189]`) — `features_propio` (reutiliza `ObservacionBuilder(dim=332)` desde la perspectiva real del agente) + `features_rival` (solo señales públicas de un rival específico, nunca su mano) + `EstimadorMoonProb` (con gate duro y fallback seguro a 0.0 sin pesos entrenados). Usado hoy en `scripts/recomendador.py` (producción); `src/entorno/corazones_rllib.py` sigue usando la heurística vieja durante el entrenamiento de v10c (por diseño, ver spec en `docs/superpowers/specs/2026-07-06-moon-prob-modelo-aprendido-design.md`). Entrenar con `scripts/entrenar_moon_prob.py` (genera dataset re-jugando manos reales de `data/partidas_bridge.jsonl`).
+- `moon_model.py`: 2 modelos aprendidos (MLP chico en PyTorch) que reemplazan la heurística de coeficientes fijos para `moon_prob_agente`/`moon_prob_rival` (obs `[187:189]`) — `features_propio` (reutiliza `ObservacionBuilder(dim=332)` desde la perspectiva real del agente) + `features_rival` (solo señales públicas de un rival específico, nunca su mano) + `EstimadorMoonProb` (con gate duro y fallback seguro a 0.0 sin pesos entrenados). **Pesos vivos canónicos: `models/moon_realfull/` (`RUTA_MOON`)** — propio AUC 0.945 val / rival 0.707. Usado en producción (`recomendador.py`) Y en el env (`corazones_rllib.py` acepta `moon_dir`; mismo estimador en entrenamiento e inferencia). Nota histórica: el v10c en producción se ENTRENÓ con la heurística vieja (el estimador se cableó al env después). Entrenar con `scripts/entrenar_moon_prob.py --partidas data/partidas_bridge_full.jsonl` (dataset canónico limpio; `partidas_bridge.jsonl` es la foto vieja de 483 manos).
 
 **`src/agentes/`** — Agent strategies (Strategy pattern: `(motor, idx, legales) → Carta`).
 
@@ -117,7 +117,7 @@ All CLI entry points live in `scripts/` and are run from the repo root as `pytho
   - `adaptador_visual.py`: `AdaptadorVisual(AdaptadorJuego)` — conduce la máquina desde una **fuente de fotogramas** (carpeta/video o poll ADB). El mismo cerebro valida offline y captura en vivo.
 - `recolector.py`: `RecolectorPartidas` — aggregates events → `RegistroPartida`.
 - `escritor.py` / `modelos.py`: append-only JSONL I/O + DTOs (cards stored as `carta.id`).
-- `replay.py`: **pure** offline encoder — replays a `RegistroPartida` through `MotorCorazones` + `ObservacionBuilder` to emit `(obs, accion)`. Hands are reconstructed from the recorded plays plus `manos_restantes` (each seat totals 13 cards), so opponents' hands are never needed and conceded rounds still replay. ⚠ Currently emits the **minimal** obs (`construir_desde_motor`): it does NOT yet rebuild strategic features nor v13 pass-memory, so human-data BC isn't yet aligned with a v13-trained model. Aligning the encoder to full v13 obs (incl. `pase_dado`/`direccion` → di/recibí planes) is a TODO before fine-tuning on human data.
+- `replay.py`: **pure** offline encoder — replays a `RegistroPartida` through `MotorCorazones` + `ObservacionBuilder` to emit `(obs, accion)`. Hands are reconstructed from the recorded plays plus `manos_restantes` (each seat totals 13 cards), so opponents' hands are never needed and conceded rounds still replay. Since 2026-07-20 emits the **FULL** obs (identical to `env._build_obs`) via `_TrackerTactico` (voids, trick history, Q♠ tracker, moon models por `moon_dir`); `seats_de="agente"|"rivales"` selects perspective (rivales = the 3 human seats, used to train the human clone). Test: `tests/captura/test_replay_obs_completa.py`.
 
 Scripts: `scripts/capturar.py` (`--fuente manual|demo|adb`), `scripts/inspeccionar_captura.py` (decode a `.jsonl` to readable form + integrity check), `scripts/calibrar_captura.py` (grab a screenshot via ADB), `scripts/jsonl_a_dataset.py` (JSONL → `(obs, accion)` `.npz`). ⚠ Auto-clicking a game app may violate its ToS.
 
@@ -138,7 +138,7 @@ Visión por captura (app Hearts, ver `calibracion/hearts_app/README.md`): `scrip
 | `[180]` | Hearts broken (0/1) |
 | `[181]` | Position in trick (0.0, 0.33, 0.66, 1.0) |
 | `[182:187]` | Q♠ tracker (one-hot, 5 states) |
-| `[187]` | `moon_prob_agente`: P(Moon del agente) continuo [0, 1] — heurística fija en entrenamiento (`corazones_rllib.py`), modelo aprendido en producción (`moon_model.py`, ver arriba) |
+| `[187]` | `moon_prob_agente`: P(Moon del agente) continuo [0, 1] — `EstimadorMoonProb` (`models/moon_realfull`) tanto en el env como en producción; el v10c histórico se entrenó con la heurística vieja |
 | `[188]` | `moon_prob_rival`: max P(Moon) entre los 3 rivales [0, 1] — misma nota que `[187]` |
 | `[189]` | `puedo_alimentar`: puede dar puntos a un rival (0/1) |
 | `[190:194]` | `all_void_X`: all 3 opponents are void in suit X |

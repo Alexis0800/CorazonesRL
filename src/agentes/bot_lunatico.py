@@ -5,9 +5,11 @@ Arquetipo humano que, con una mano fuerte de corazones altos y control, intenta
 capturar los 26 puntos de penalización (13 corazones + Q de picas). Si la mano no
 es apta, o si un rival ya capturó puntos (pozo imposible), juega evasivo.
 
-Su valor: como rival y en los rollouts de PIMC, fuerza al agente a aprender a
-DEFENDER el pozo — algo que ningún otro bot del pool provoca, porque ninguno lo
-intenta de verdad. Los humanos sí lo intentan.
+Su valor: (a) como rival y en los rollouts de PIMC, fuerza al agente a aprender
+a DEFENDER el pozo — algo que ningún otro bot del pool provoca; los humanos sí
+lo intentan (2.52 %/mano cada uno, ver docs/auditoria_moon_2026-07-20.md).
+(b) Desde 2026-07-21, su pase constructivo y su `_jugar_moon` son la política
+de OFENSIVA de `ModoLunar` (src/agentes/modo_lunar.py).
 
 Strategy Pattern: (motor, jugador_idx, legales) → Carta. Estado por mano
 (se reinicia con reset()).

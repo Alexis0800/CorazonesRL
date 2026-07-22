@@ -1,7 +1,8 @@
 """
 Genera datasets y entrena los 2 modelos aprendidos de moon_prob
-(src/entorno/moon_model.py) a partir de las manos reales reconstruibles de
-data/partidas_bridge.jsonl. Ver spec:
+(src/entorno/moon_model.py) a partir de las manos reales reconstruibles.
+Dataset canónico: data/partidas_bridge_full.jsonl (4168 manos limpias;
+partidas_bridge.jsonl es la foto vieja de 483). Ver spec:
 docs/superpowers/specs/2026-07-06-moon-prob-modelo-aprendido-design.md
 
 Limitación de datos conocida: la memoria del pase (cartas dadas/recibidas)
@@ -15,8 +16,8 @@ información de pase" que también ocurre en producción (el 4º jugador nunca
 tiene relación de pase conmigo).
 
 Uso:
-    python scripts/entrenar_moon_prob.py --partidas data/partidas_bridge.jsonl \
-        --out-dir models/moon --epocas 300
+    python scripts/entrenar_moon_prob.py --partidas data/partidas_bridge_full.jsonl \
+        --out-dir models/moon_realfull --epocas 300
 """
 from __future__ import annotations
 
@@ -47,6 +48,7 @@ from src.dominio.motor import asiento_pozo, receptor_y_dador_por_numero_mano
 from src.entorno.moon_model import (
     DIM_PROPIO,
     DIM_RIVAL,
+    RUTA_MOON,
     EntradaBaza,
     _RedMoonMLP,
     _alguien_mas_tiene_puntos,
@@ -291,7 +293,10 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--partidas", required=True)
-    p.add_argument("--out-dir", default="models/moon")
+    # Default = RUTA_MOON (pesos vivos, models/moon_realfull). Antes era el
+    # legado models/moon, que NADA lee — reentrenar con defaults escribía a
+    # un directorio muerto.
+    p.add_argument("--out-dir", default=RUTA_MOON)
     p.add_argument("--epocas", type=int, default=300)
     p.add_argument("--batch", type=int, default=256)
     p.add_argument("--seed", type=int, default=0)

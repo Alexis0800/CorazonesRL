@@ -24,9 +24,16 @@ nada: este script solo genera jugadas y las serializa como `RegistroPartida`
 
     python scripts/generar_dataset_moon_simulado.py \
         --n-partidas 800 --manos-por-partida 4 --out data/partidas_simuladas_moon.jsonl
-    cat data/partidas_bridge.jsonl data/partidas_bridge_nuevas.jsonl \
+    cat data/partidas_bridge_full.jsonl \
         data/partidas_simuladas_moon.jsonl > data/partidas_moon_entrenamiento.jsonl
-    python scripts/entrenar_moon_prob.py --partidas data/partidas_moon_entrenamiento.jsonl --out-dir models/moon
+    python scripts/entrenar_moon_prob.py --partidas data/partidas_moon_entrenamiento.jsonl
+
+ACTUALIZACIÓN (2026-07-20/21): la premisa "el modelo propio no puede entrenarse
+con datos reales" quedó superada — `ejemplos_de_mano` extrae las 4 perspectivas
+por mano, así que las lunas RIVALES también son positivos "propio" (desde el
+asiento del lunador): con `data/partidas_bridge_full.jsonl` (372 lunas) el
+propio llegó a AUC 0.945 val SIN simulados. Este script queda como aumento
+opcional de positivos, ya no como requisito.
 """
 from __future__ import annotations
 

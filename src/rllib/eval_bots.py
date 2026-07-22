@@ -101,6 +101,9 @@ def _agregar(res: List[dict]) -> dict:
         "win": float((puestos == 1).mean()),
         "top2": float((puestos <= 2).mean()),
         "puesto": float(puestos.mean()),
+        # ⚠ moon es POR PARTIDA (flag de episodio: ≥1 pozo del agente en la
+        # partida, ~10 manos). NO comparar con tasas por MANO (p.ej. las de
+        # hearts.db): 0.03/partida ≈ 0.3%/mano. Ver auditoria_moon §OFENSIVA.
         "moon": float(np.mean([r.get("shooting_moon", False) for r in res])),
         "manos": float(np.mean([r.get("manos_jugadas", 0) for r in res])),
     }
