@@ -541,6 +541,38 @@ servidor):
   triplica las lunas, no mueve el win-rate — la decisión de desplegarlo al
   bridge (gate real) sigue siendo del operador, con riesgo acotado.
 
+## Recalibración sin sesgo + compromiso dinámico (2026-07-21/22)
+
+Con el dataset completo (4910 manos) se recalibró la ofensiva:
+
+- **Residuo sin-pase: desaparecido** (yo 2.6 % = rival 2.6 % en manos hold) —
+  la tesis del pase ofensivo queda sobre datos limpios (con pase: rival 9.1 %
+  vs yo 2.1 % de manos con P≥0.10).
+- **Conversión rival real por bucket de P**: 11 % en [0.10–0.15), 16 % en
+  [0.15–0.30), **37 % en [0.30–0.50), 62 % en 0.50+** → umbral de compromiso
+  0.30 validado; por debajo es EV-negativo claro.
+- **Hallazgo clave: 13/14 lunas reales del campeón nacieron con P~0.01 al
+  inicio de mano** (mediana 0.008; el gate estático habría comprometido 1/14).
+  Las lunas reales son OPORTUNISTAS de mitad de mano.
+
+**Compromiso dinámico** (implementado): la señal del abort (P mid-mano) también
+ENTRA si P sube sobre el umbral; nunca tras un abort. A/B pareado vs clon v3:
+
+| Lote (semillas) | n | Δwin pareado | mid-mano | conversión |
+|---|---|---|---|---|
+| estático (40000) | 600 | −0.7 ± 1.0 pp | — | 51.8 % |
+| dinámico (50000) | 600 | **+1.5 ± 1.2 pp** | 71/146 | 47.3 % |
+| dinámico (60000) | 1000 | **+1.1 ± 0.9 pp** | 94/231 | 45.9 % |
+
+Agregado dinámico (1600 partidas): **+1.25 ± 0.72 pp (1.7σ, p≈0.08)** —
+dirección consistente en 2 lotes independientes, aún no concluyente. Regla
+pre-declarada para evitar sesgo de parada: veredicto = pool de 3 lotes (tercer
+lote de 1400 en semillas 70000 lanzado; n total 3000, SE ~±0.53 pp).
+
+En reserva si confirma pero se quiere más efecto: **persecución-BC de los 385
+luneadores humanos exitosos** (sus jugadas completas están en el dataset) para
+reemplazar `_jugar_moon` (los fallos siguen costando ~18.5 pts).
+
 ## Artefactos
 
 - `hearts-sfs-bridge/src/export-reconstructed-from-jsonl.js` (nuevo, en el bridge;
