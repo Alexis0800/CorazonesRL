@@ -592,6 +592,28 @@ este clon. Config recomendada para el bridge: dinámico + heurística (la de
 3000 partidas de evidencia y cero dependencias extra); el BC queda disponible
 tras `--luna-bc`.
 
+## Despliegue al gate real (2026-07-22) — LISTO
+
+- `ModoLunar` cableado a producción: `Recomendador(modo_lunar=True)` intercepta
+  pase (nunca en manos hold) y jugada; `None` → campeón como siempre. Flag:
+  **`python scripts/servidor_inferencia.py --modelo models/produccion/v10c_campeon --modo-lunar`**
+  (OFF por default). Stats del modo en `/estado`. Config desplegada: la de
+  3000 partidas de evidencia (pase .10 / juego .30 dinámico / abort .10,
+  persecución heurística).
+- Fix en vivo del reveal aplicado y commiteado en el bridge (ISSUE resuelto):
+  la data del periodo nuevo llega 100 % reconstruible de fábrica.
+- **Periodo de medición limpio**: archivado pre-lanzamiento —
+  `logs/archivo_2026-07-22/` (servidor), bridge
+  `logs/archived-2026-07-22-pre-modolunar/` (sesiones + reconstructed) y
+  `data/hearts-archived-2026-07-22-pre-modolunar.db` (556 partidas, WAL
+  checkpointeado). `hearts.db` nuevo se regenera al re-ingestar las sesiones
+  del periodo ModoLunar.
+- **Métricas del gate** (leer de la DB nueva tras ~150–300 partidas):
+  lunas-a-favor/mano (baseline 0.27 %), pts en manos comprometidas
+  (`[modo-lunar]` en el log del servidor marca compromisos), win-rate
+  (baseline 23.9 %). Éxito = economía por mano positiva:
+  `lunas×26 > pts extra comidos en fallos`.
+
 ## Artefactos
 
 - `hearts-sfs-bridge/src/export-reconstructed-from-jsonl.js` (nuevo, en el bridge;
