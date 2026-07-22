@@ -75,12 +75,14 @@ class ModoLunar:
         self._comprometida = False       # persiguiendo el pozo esta mano
         self._pase_ofensivo = False      # esta mano se pasó en modo constructivo
         self._decidido_juego = False     # ya se evaluó el compromiso de juego
+        self._abortada = False           # se abortó esta mano: no re-comprometer
         self._cartas_vistas_prev = 0     # para detectar el inicio de mano nueva
 
         # Estadísticas acumuladas (para la evaluación A/B)
         self.stats = {
             "pases_ofensivos": 0,
             "manos_comprometidas": 0,
+            "compromisos_midmano": 0,
             "abortos_gate": 0,
             "abortos_prob": 0,
         }
@@ -95,6 +97,7 @@ class ModoLunar:
         self._comprometida = False
         self._pase_ofensivo = False
         self._decidido_juego = False
+        self._abortada = False
         self._bot.reset()
 
     def _prob_luna(self, motor: MotorCorazones, idx: int) -> float:
@@ -141,13 +144,24 @@ class ModoLunar:
             self._reset_mano()
         self._cartas_vistas_prev = vistas
 
-        # Compromiso: una sola vez por mano, en nuestra primera decisión
-        # (mano completa de 13, post-pase si lo hubo).
+        # Compromiso inicial: en nuestra primera decisión (mano de 13, post-pase).
         if not self._decidido_juego and len(motor.jugadores[idx].mano) == 13:
             self._decidido_juego = True
             if self._prob_luna(motor, idx) >= self._umbral_juego:
                 self._comprometida = True
                 self.stats["manos_comprometidas"] += 1
+
+        # Compromiso DINÁMICO mid-mano: 13/14 lunas reales del campeón nacieron
+        # de manos con P~0.01 al inicio (el pozo se materializa jugando) — la
+        # misma señal del abort sirve para ENTRAR si P sube sobre el umbral.
+        # Nunca tras un abort (la mano ya se juzgó perdida para el pozo), y el
+        # gate duro va implícito: con puntos ajenos el estimador devuelve 0.0.
+        if (not self._comprometida and self._decidido_juego and not self._abortada
+                and len(motor.jugadores[idx].mano) < 13
+                and self._prob_luna(motor, idx) >= self._umbral_juego):
+            self._comprometida = True
+            self.stats["manos_comprometidas"] += 1
+            self.stats["compromisos_midmano"] += 1
 
         if not self._comprometida:
             return None
@@ -155,6 +169,7 @@ class ModoLunar:
         if not self._gate_vivo(motor, idx):
             # Pozo imposible → abortar de forma definitiva esta mano.
             self._comprometida = False
+            self._abortada = True
             self.stats["abortos_gate"] += 1
             return None
 
@@ -164,6 +179,7 @@ class ModoLunar:
         if len(motor.jugadores[idx].mano) < 13 and \
                 self._prob_luna(motor, idx) < self._umbral_abort:
             self._comprometida = False
+            self._abortada = True
             self.stats["abortos_prob"] += 1
             return None
 

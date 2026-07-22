@@ -82,6 +82,23 @@ def test_abort_blando_por_prob():
     assert not modo.comprometida
 
 
+def test_compromiso_dinamico_midmano():
+    stub = _EstimadorStub(0.01)
+    modo = ModoLunar(stub, umbral_juego=0.30, umbral_abort=0.10)
+    m = _motor_13()
+    assert modo.elegir_jugada(m, 0, m.jugadores[0].mano) is None  # inicio: P baja
+    # Mid-mano el pozo se materializa (P sube) → compromiso dinámico.
+    m.jugadores[0].mano = m.jugadores[0].mano[:9]
+    stub.p = 0.60
+    assert modo.elegir_jugada(m, 0, m.jugadores[0].mano) is not None
+    assert modo.stats["compromisos_midmano"] == 1
+    # Tras un abort (gate), NO se re-compromete aunque P siga alta.
+    m.jugadores[1].bazas_ganadas = [Carta._TODAS[41]]
+    assert modo.elegir_jugada(m, 0, m.jugadores[0].mano) is None
+    assert modo.elegir_jugada(m, 0, m.jugadores[0].mano) is None
+    assert modo.stats["manos_comprometidas"] == 1
+
+
 def test_sin_compromiso_devuelve_none():
     modo = ModoLunar(_EstimadorStub(0.01), umbral_juego=0.15)
     m = _motor_13()
