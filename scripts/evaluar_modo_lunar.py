@@ -79,7 +79,8 @@ def _jugar_partidas(model, env, n_partidas: int, modo=None,
                         accion = pase_cola.pop(0)
                 else:
                     legales = env._motor.obtener_jugadas_legales(env._agente_idx)
-                    carta = modo.elegir_jugada(env._motor, env._agente_idx, legales)
+                    carta = modo.elegir_jugada(env._motor, env._agente_idx, legales,
+                                               obs_vec=obs["obs"])
                     if carta is not None:
                         accion = carta.id
                     comprometida_en_curso = comprometida_en_curso or modo.comprometida
@@ -137,6 +138,9 @@ def main() -> None:
                    help="Solo el brazo lunar (la línea base del campeón ya se conoce)")
     p.add_argument("--seed-offset", type=int, default=0,
                    help="Desplaza las semillas (para confirmar sin reusar las del barrido)")
+    p.add_argument("--luna-bc", default=None,
+                   help="Pesos .npz del BC de persecución (models/luna_bc); si se da, "
+                        "reemplaza la heurística de BotLunatico en modo comprometido")
     args = p.parse_args()
 
     policy = cargar_policy_desde_checkpoint(args.modelo)
@@ -167,8 +171,14 @@ def main() -> None:
         print(f"  win_rate: {agg['win']:.3f}  top2: {agg['top2']:.3f}  "
               f"puesto: {agg['puesto']:.3f}  moon/partida: {agg['moon']:.3f}")
 
+    persecucion = None
+    if args.luna_bc:
+        d_bc = np.load(args.luna_bc)
+        persecucion = SnapshotPolicy.from_weights(
+            {k: d_bc[k] for k in d_bc.files}, obs_dim=args.obs_dim)
     modo = ModoLunar(EstimadorMoonProb(args.moon_dir),
-                     umbral_pase=args.umbral_pase, umbral_juego=args.umbral_juego)
+                     umbral_pase=args.umbral_pase, umbral_juego=args.umbral_juego,
+                     politica_persecucion=persecucion)
     res, luna = _jugar_partidas(model, make_env(), args.partidas, modo=modo,
                                 seed_offset=args.seed_offset)
     agg = _agregar(res)

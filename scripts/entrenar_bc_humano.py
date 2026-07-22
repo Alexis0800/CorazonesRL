@@ -54,6 +54,9 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--partidas", required=True)
     p.add_argument("--out-dir", default="models/humano_bc")
+    p.add_argument("--seats-de", default="rivales", choices=["agente", "rivales", "luna"],
+                   help="'rivales' = clon humano (default); 'luna' = BC de persecución "
+                        "de pozo (solo manos con luna, perspectiva del luneador)")
     p.add_argument("--obs-dim", type=int, default=DIM_V12)
     p.add_argument("--epocas", type=int, default=40)
     p.add_argument("--batch", type=int, default=512)
@@ -77,9 +80,9 @@ def main() -> None:
     # legal de cada decisión: entrenar enmascarado alinea el BC con la inferencia
     # del env (que siempre enmascara) y concentra la probabilidad en las legales.
     Xtr, ytr, Mtr = replay.partidas_a_arrays(
-        tr_p, dim=args.obs_dim, seats_de="rivales", moon_dir=args.moon_dir, con_mask=True)
+        tr_p, dim=args.obs_dim, seats_de=args.seats_de, moon_dir=args.moon_dir, con_mask=True)
     Xva, yva, Mva = replay.partidas_a_arrays(
-        va_p, dim=args.obs_dim, seats_de="rivales", moon_dir=args.moon_dir, con_mask=True)
+        va_p, dim=args.obs_dim, seats_de=args.seats_de, moon_dir=args.moon_dir, con_mask=True)
     print(f"Ejemplos (jugadas humanas): train {len(ytr)}  val {len(yva)}")
     if len(ytr) == 0:
         raise SystemExit("Sin ejemplos: ¿partidas reconstruibles?")
@@ -150,7 +153,7 @@ def main() -> None:
         "fcnet_hiddens": [512, 512, 256],
         "val_top1": mejor_acc, "train_top1": tr_acc,
         "n_train": int(len(ytr)), "n_val": int(len(yva)),
-        "fuente": args.partidas, "seats_de": "rivales", "moon_dir": args.moon_dir,
+        "fuente": args.partidas, "seats_de": args.seats_de, "moon_dir": args.moon_dir,
         "mask_legal": True,
     }, indent=2), encoding="utf-8")
     print(f"Pesos -> {out/'pesos.npz'}  (envolver con SnapshotPolicy.from_weights)")

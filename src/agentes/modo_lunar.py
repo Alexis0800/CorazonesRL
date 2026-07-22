@@ -64,12 +64,18 @@ class ModoLunar:
         umbral_pase: float = 0.10,
         umbral_juego: float = 0.30,
         umbral_abort: float = 0.10,  # P mid-mano bajo esto → abortar antes de comer más
+        politica_persecucion=None,   # firma SnapshotPolicy: (motor, idx, legales, obs_vec)
     ):
         self._estimador = estimador
         self._umbral_pase = umbral_pase
         self._umbral_juego = umbral_juego
         self._umbral_abort = umbral_abort
         self._bot = BotLunatico()
+        # Persecución: BotLunatico._jugar_moon (heurística, default) o una
+        # política aprendida — p.ej. el BC de los 385 luneadores humanos
+        # (models/luna_bc, entrenado con seats_de="luna"). Los fallos con la
+        # heurística cuestan ~18 pts; esta es la palanca para abaratarlos.
+        self._politica_persecucion = politica_persecucion
 
         # Estado por mano
         self._comprometida = False       # persiguiendo el pozo esta mano
@@ -135,7 +141,8 @@ class ModoLunar:
         return self._bot.pasar(motor, idx)
 
     def elegir_jugada(
-        self, motor: MotorCorazones, idx: int, legales: List[Carta]
+        self, motor: MotorCorazones, idx: int, legales: List[Carta],
+        obs_vec=None,
     ) -> Optional[Carta]:
         """Carta de persecución de pozo, o None → que juegue el campeón."""
         # Detectar mano nueva sin pase (hold): el total de cartas jugadas cayó.
@@ -183,6 +190,8 @@ class ModoLunar:
             self.stats["abortos_prob"] += 1
             return None
 
+        if self._politica_persecucion is not None:
+            return self._politica_persecucion(motor, idx, legales, obs_vec)
         return self._bot._jugar_moon(motor, idx, legales)
 
     @property

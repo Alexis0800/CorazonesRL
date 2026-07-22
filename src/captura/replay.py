@@ -16,7 +16,7 @@ from typing import List, Tuple
 import numpy as np
 
 from src.dominio.carta import Carta
-from src.dominio.motor import MotorCorazones
+from src.dominio.motor import MotorCorazones, asiento_pozo
 from src.entorno.dimensiones import DIM_ENTORNO
 from src.entorno.moon_model import RUTA_MOON, EntradaBaza, EstimadorMoonProb
 from src.entorno.observacion import ObservacionBuilder, puede_alimentar
@@ -217,8 +217,10 @@ def ejemplos_de_partida(
     """Concatena los ejemplos de todas las manos reconstruibles de una partida,
     hilando el marcador acumulado entre manos (obs alineada con el env).
 
-    `seats_de`: "agente" (solo la perspectiva del agente, para BC del agente) o
-    "rivales" (los 3 asientos NO-agente = los humanos, para clonar su estilo).
+    `seats_de`: "agente" (solo la perspectiva del agente, para BC del agente),
+    "rivales" (los 3 asientos NO-agente = los humanos, para clonar su estilo), o
+    "luna" (SOLO manos con pozo coronado, SOLO la perspectiva del luneador —
+    para el BC de persecución de pozo de ModoLunar; el asiento varía por mano).
 
     `moon_dir`: pesos del `EstimadorMoonProb` para las features [187:188]. DEBE
     coincidir con el `moon_dir` del env donde el modelo se usará después (si no,
@@ -233,6 +235,8 @@ def ejemplos_de_partida(
     ag = partida.asiento_agente
     if seats_de == "rivales":
         seats = [i for i in range(4) if i != ag]
+    elif seats_de == "luna":
+        seats = None  # se resuelve por mano (el luneador cambia de mano en mano)
     else:
         seats = [ag]
 
@@ -240,9 +244,17 @@ def ejemplos_de_partida(
     out: List[Ejemplo] = []
     for mano in partida.manos:
         if mano_reconstruible(mano):
-            out.extend(ejemplos_de_mano(
-                mano, ag, builder, estimador, list(scoreboard), seats, con_mask,
-            ))
+            seats_mano = seats
+            if seats_de == "luna":
+                pozo = (asiento_pozo(mano.puntuacion_mano)
+                        if mano.puntuacion_mano and sum(mano.puntuacion_mano) == 78
+                        else None)
+                seats_mano = [pozo] if pozo is not None else []
+            if seats_mano:
+                out.extend(ejemplos_de_mano(
+                    mano, ag, builder, estimador, list(scoreboard), seats_mano,
+                    con_mask,
+                ))
         for i in range(4):
             scoreboard[i] += mano.puntuacion_mano[i]
     return out
