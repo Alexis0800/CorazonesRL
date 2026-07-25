@@ -241,3 +241,12 @@ filtro: ~6-10 % de las Q comidas (94/1542 vetos directos en la baza fatal,
 (tasa de Q-comida-evitable-causal debe caer) pero con la vara re-calibrada.
 Bug real cazado por el gate offline: la R2 original permitía liderar la Q♠
 con K/A fuera — que es autocomida GARANTIZADA (regla invertida, corregida).
+
+## Actualización 1c (2026-07-25): varas canónicas de gate
+
+`scripts/metricas_gate.py` (fuentes real/env, mismo instrumento). Varas:
+duck-temprano **bot 48.8 % vs humano 41.2 %** (las 36/22 del workflow NO se
+reprodujeron bajo ~25 variantes — brecha real +7.6 pp, misma dirección; esto
+REBAJA el techo esperado del Run B/ruido-ε otra vez: era la palanca más débil
+y ahora más); muerte-como-4º **11.0 % vs 2.9 %** (≈ claim); conversión luna
+rival humana **2.52 %/mano** (exacta). Validación cruzada env↔real: 47.8≈48.8.
