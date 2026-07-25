@@ -109,3 +109,23 @@ Compatible con el bridge en marcha (costo CPU ~nulo):
 1. El **diff + test de `opponent_pool.py`** (2.1) — solo código.
 2. Escribir el **tooling de destilación** (plan B): generador on-policy con logits/values + soft-label trainer — solo código; el cómputo del dataset son ~minutos y se corre después.
 3. La propia **medición del bridge con `--modo-lunar`** sigue siendo el dato más valioso del ciclo y no depende de nada de esto.
+---
+
+## EJECUCIÓN: intento 1 MUERTO en el gate de 5M — Φ_rank bajo sospecha (2026-07-25)
+
+Run 1 (spec completa CON --phi-rank): **matado en el gate de 5M según lo
+pre-declarado** — 9 evals a lo largo de 4.8M PLANAS (vs_experto 0.15-0.29 sin
+pendiente, vs_humano ~0.11 vs umbral 0.25; v11 al mismo paso iba SUBIENDO).
+Log archivado: data/train_v12_scratch_phirank_MUERTO5M.log.
+
+**Hipótesis mecánica (por qué Φ_rank pudo matar el aprendizaje temprano):**
+con PHI_RANK_GAP=10, las diferencias típicas de marcador (>10 pts) saturan
+las sigmoides → Φ_rank es LOCALMENTE PLANO para la mayoría de estados (señal
+densa ≈ 0; solo hay gradiente cerca de empates). La Φ vieja (escala 100) da
+gradiente en todo el rango. En la ventana 0-5M (fases 0-1, lunero aún no
+entra) la ÚNICA diferencia funcional vs la receta v10c era Φ_rank (+30% clon
+en el slot duro desde 2M) → experimento de control lanzado: run idéntico SIN
+--phi-rank. Si el control también se aplana a 5M, la "receta reproducible"
+del hallazgo central queda en duda y TODO se cierra; si sube como v10c,
+Φ_rank-en-early-training queda refutado (y se re-evalúa con GAP mayor o
+introducción tardía, solo si el control llega fuerte al final).
