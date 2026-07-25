@@ -120,3 +120,111 @@ DESPUÉS:            Run A → pareado → bridge real    │
 ## No hacer (cerrado con evidencia, no re-proponer)
 
 Regla bolt-on de romper luna (EV −0.14 a −0.46) · invertir en [188] como defensa reactiva · enseñar a rematar errores · `puedo_alimentar`/ataque al líder · heurísticas de conversión post-mitad · bazas tardías / goteo de corazones · ofensiva de luna por composición · fine-tune/desde-cero vs clon como rival único · regret PIMC como métrica · pase defensivo anti-luna · re-entrenar "para que use [188]".
+---
+
+# ANEXO: Plan detallado de ejecución + auditoría de contradicciones (2026-07-25)
+
+## Auditoría de contradicciones (verificación independiente previa a ejecutar)
+
+Antes de comprometer cómputo se re-verificaron los supuestos que cargan el plan:
+
+1. **Q♠ evitable (Fase 1a) — CONFIRMADO con método independiente.** Replay
+   propio sobre los 2 corpus (528 Q♠ comidas): 33 sustituibles + 22 jugamos
+   nuestra Q teniendo alternativa + 25 la lideramos = **80/528 = 15.2 %**
+   (workflow: 14 %). Dos instrumentos distintos, mismo número. Desglose no
+   evitable: 230 forzadas, 123 Q propia forzada, 95 líder-ambiguo.
+2. **Bug de instrumento encontrado y corregido** (los replays post-gate no
+   llamaban `resolver_baza()` → solo veían la baza 1). El veredicto del gate
+   se re-midió: comprometidas 72 (39 mid-mano), conversión 11 %, neto
+   **−2.0 pts/partida** — REPROBADO se mantiene, con números corregidos en
+   la auditoría. Regla: todo replay manual debe resolver bazas.
+3. **Tensión "solo 6 % rompible" vs "los humanos nos rompen al 89 %" —
+   RESUELTA, no es contradicción.** El 6 % está sesgado por superviviente
+   (solo lunas REALIZADAS). Las rupturas de nuestros 64 intentos fallidos
+   ocurren a lo largo de toda la mano (mediana baza 7, spread 0–12 desde el
+   compromiso): la defensa humana es captura ordinaria de bazas con puntos —
+   comportamiento APRENDIBLE, lo que sostiene la premisa del Run A.
+4. **Riesgo v10e (fine-tune sin gradiente, refutado 2×) vs Run A — abierto y
+   mitigado.** Diferencia argumentable: la presión de luna crea eventos de
+   reward nítidos (swings ±26 rel) vs el shift difuso de estilo del clon que
+   no movió gradiente. Es un argumento, no evidencia → el gate offline
+   (¿baja la conversión del lunero en el env?) mata el run barato si no hay
+   gradiente. Punto de decisión explícito abajo.
+5. **Φ_rank no puede cambiar el óptimo** (PBRS es policy-invariante con
+   cualquier Φ): el beneficio esperado es de ASIGNACIÓN DE CRÉDITO
+   (supervivencia como 4º al borde), no de objetivo. Por eso va como A/B
+   dentro del Run A, no como run propio.
+
+## FASE 1 (sin reentrenar — esta semana)
+
+### 1a. Filtro Q♠ (`--filtro-qs`, OFF por default)
+
+- **Código** (~medio día): clase `FiltroQS` en `src/agentes/` (patrón ModoLunar:
+  devuelve `None` = no aplica). Reglas: (R1) Q♠ en mesa y existe legal que
+  pierde la baza → vetar ganadoras; (R2) nunca liderar la propia Q♠ salvo
+  K/A♠ ya jugadas; (R3) siguiendo picas con la Q en mano y pudiendo jugar
+  otra → no jugar la Q salvo forzado. Excepción endgame: no aplicar si
+  capturar nos da la partida o evita nuestra muerte. Cablear en
+  `Recomendador` tras `ModoLunar` (misma cadena de intercepción).
+- **Validación offline (gratis)**: replay sobre los 80 casos evitables
+  identificados → el filtro debe disparar en ≥70 y en <2 % de las 448
+  no-evitables (falsos positivos).
+- **Pareado vs clon** (no-regresión): 3000 partidas, gate Δwin ≥ −0.5 pp.
+- **Bridge real** (gate pre-declarado ANTES de encender): ~300 partidas,
+  métrica primaria = tasa de Q♠-comida-en-clase-evitable 15.2 % → <8 %
+  (medible por replay del periodo); secundaria pts rel/mano no peor.
+- Registrar en el log del servidor cada intervención (`[filtro-qs]`).
+
+### 1b. Re-evaluación de elites archivados (1 h de cómputo)
+
+Candidatos: `models/v10c_finetune_pozo/elite/*` + últimos snapshots. Baseline:
+campeón 0.468 vs clon v3 (pareado). Protocolo winner's curse: ganador aparente
+→ confirmación con semillas frescas → held-out real solo si supera.
+
+### 1c. Métricas de gate offline (prerequisito de Fase 2)
+
+En `src/rllib/eval_bots.py`/`comparar_snapshots.py`: duck-innecesario-temprano
+(vara: bot 36 %, humano 22 %), pts propios en endgame como 4º (muerte 12 % vs
+5.3 %), conversión de luna rival vs lunero-oportunista en el env.
+
+## FASE 2 (UN run gated — después de 1c)
+
+### Pre-check de calibración (antes de lanzar)
+
+Simular 200 partidas con el pool propuesto y medir tasa de luna rival
+lograda contra el campeón congelado: objetivo ≈ 2–3 %/mano (realidad humana
+2.5 %). Si el lunero-oportunista no corona en el env, ajustar ANTES del run.
+
+### Run A: presión de luna realista + Φ_rank (A/B)
+
+- `opponent_pool.py`: ≥1 lunero por mesa en fases 2–4; lunero = wrapper de
+  oponente con la lógica dynamic-commit de `ModoLunar` (oportunista mid-mano,
+  como los humanos) sobre un arquetipo base.
+- `recompensas_partida.py`: `phi_rank: bool` en `RewardConfigPartida` —
+  Φ_rank = λ·R_terminal_interpolado(puesto, gap al rival inmediato), empates
+  promediados, Φ(0,0,0,0)=0. Test unitario de telescopaje.
+- Fine-tune desde el campeón, LR conservador, ~5–10 M pasos, dos colas A/B
+  (Φ actual vs Φ_rank) del mismo pool.
+- **Gates en orden (cada uno mata el run barato):**
+  1. Gradiente: reward de entrenamiento se mueve en 1–2 M pasos (si plano →
+     PUNTO DE DECISIÓN: aceptar cierre de la vía fine-tune con esta
+     distribución, no insistir).
+  2. Offline: conversión del lunero en env baja ≥25 % relativo; muerte-como-4º
+     baja (cola Φ_rank); sin regresión en duck/QS.
+  3. Pareado vs clon: no-regresión sobre 0.468.
+  4. Bridge real 300–500 partidas: **lunas rivales 2.5 → <2.0 %/mano** (SE
+     ~0.4 pp con ~4400 manos) y muerte-como-4º 12 → <8 %. Vara nula conocida:
+     en el periodo ModoLunar las lunas rivales NO se movieron (2.52→2.56).
+
+### Run B (condicional): ε-ruido en pool
+
+Solo si Run A paga o como ablación separada. Gate offline propio:
+duck-temprano 36 % → hacia 22 %.
+
+## Cronograma y dependencias
+
+- Día 1–2: 1a código + validación offline; 1b y 1c en paralelo.
+- Día 2–3: 1a pareado vs clon; pre-check de calibración del pool.
+- Día 3+: 1a al bridge (300 partidas ≈ 3 días al ritmo actual); Run A se lanza
+  cuando 1c esté y SIN solapar su ventana de medición con el switch del
+  filtro (estabilizar flags antes de abrir la ventana del Run A).

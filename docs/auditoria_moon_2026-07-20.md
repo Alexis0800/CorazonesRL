@@ -631,6 +631,18 @@ tal cual por la app):
 437+345=782 pts relativos). Win-rate 20.5 % vs baseline 23.0 % (±3 pp, el neto
 de −2.5 pts/partida es consistente con ese drift).
 
+**⚠ CORRECCIÓN (2026-07-25, bug de instrumento):** el replay de atribución no
+llamaba `motor.resolver_baza()` → solo veía la baza 1 (por eso "0 mid-mano" y
+"0 rupturas": artefactos). Números corregidos con el loop arreglado:
+**comprometidas 72 (39 mid-mano), 8 lunas, conversión 11 %**, fallos 64 ×
++12.2 rel → neto **−2.0 pts/partida en contra**. Lunas naturales 13−8=5 (≈6.5
+esperadas ✓). Las rupturas humanas ocurren a lo largo de toda la mano (mediana
+baza 7, spread 0–12 desde el compromiso) — la defensa humana es captura
+ordinaria de bazas con puntos, no solo stoppers finales. **El veredicto
+REPROBADO se mantiene** (misma dirección, magnitud −2.0 vs −2.5). Regla para
+futuros replays: tras `jugar_carta`, con 4 cartas en mesa SIEMPRE
+`resolver_baza()` (ver `atribucion_v2.py`).
+
 **La causa: los humanos SÍ defienden la luna.** La conversión colapsa de
 44–52 % (clon, que no defiende) a **9 %** (reales). Con 9 % de conversión el
 breakeven exigiría fallos de <3 pts; cuestan ~14.6 porque la mano ya quedó
