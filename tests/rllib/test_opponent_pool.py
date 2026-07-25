@@ -62,6 +62,7 @@ def test_lunero_no_pisa_el_ancla_ni_el_clon():
     # dos snapshots falsos (pesos triviales no hacen falta: solo la identidad)
     s = SnapshotPolicy.from_weights({}, obs_dim=228)
     pool._snapshots = [s, s]
+    _estado = _r.getstate()
     _r.seed(0)
     for _ in range(10):
         fns = pool.make_factory(progress=0.5)(agente_idx=0)
@@ -70,6 +71,7 @@ def test_lunero_no_pisa_el_ancla_ni_el_clon():
         assert "SnapshotPolicy" in tipos  # al menos un snapshot sobrevive
         # el slot duro sobrevive: o un BotExperto/arquetipo o (si hay clon) un snapshot mas
         assert len(fns) == 3
+    _r.setstate(_estado)  # no contaminar el RNG global de otros tests
 
 
 def test_mesa_humana_solo_en_fases_tardias():
@@ -79,10 +81,12 @@ def test_mesa_humana_solo_en_fases_tardias():
     pool = OpponentPool(humano_bc_path=None, mesa_humana=1.0)
     pool._humano_bc_pesos = {}  # simular pesos presentes
     import random as _r
+    _estado = _r.getstate()
     _r.seed(1)
     # progress temprano: la mesa humana NO debe activarse aunque mesa_humana=1.0
     # y haya pesos (con pesos {} el clon fallaría al construirse si la rama se
     # tomara — que no explote Y no haya SnapshotPolicy prueba que no se tomó).
     fns = pool.make_factory(progress=0.1)(agente_idx=0)
     tipos = {type(v).__name__ for v in fns.values()}
+    _r.setstate(_estado)
     assert "SnapshotPolicy" not in tipos
