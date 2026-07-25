@@ -331,7 +331,12 @@ def main() -> None:
         try:
             paso_reanudado = int(os.path.basename(resume_path).split("_")[1])
         except (IndexError, ValueError):
-            paso_reanudado = 0
+            # Checkpoints sin paso en el nombre (p.ej. models/produccion/
+            # v10c_campeon): leer el contador interno restaurado. Sin esto,
+            # --progress-fino toma base 0 y el curriculum queda clavado en la
+            # fase que dicte el contador acumulado (bug visto en el Run A
+            # v12_lunero: paso 0 detectado con 25M internos → fase 4 fija).
+            paso_reanudado = int(algo._counters.get("num_env_steps_sampled", 0))
         console.print(
             f"[green]Reanudado desde:[/green] {resume_path} (paso {paso_reanudado:,})"
         )
