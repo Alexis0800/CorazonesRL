@@ -250,3 +250,13 @@ reprodujeron bajo ~25 variantes — brecha real +7.6 pp, misma dirección; esto
 REBAJA el techo esperado del Run B/ruido-ε otra vez: era la palanca más débil
 y ahora más); muerte-como-4º **11.0 % vs 2.9 %** (≈ claim); conversión luna
 rival humana **2.52 %/mano** (exacta). Validación cruzada env↔real: 47.8≈48.8.
+
+## Actualización 1a-gate2 (2026-07-25): FiltroQS pasa el pareado vs clon
+
+2000 partidas pareadas: **Δwin +0.55 ± 0.25 pp (2.2σ), Δpuesto −0.009** —
+positivo, no solo no-regresión. 1964/2000 partidas idénticas (el filtro
+interviene 2.9 % de decisiones en el env); en las 36 divergentes gana más.
+**LISTO PARA EL BRIDGE**: `python scripts/servidor_inferencia.py
+--modelo models/produccion/v10c_campeon --filtro-qs` — gate real: en ~300
+partidas, tasa de Q♠-comida-causal-evitable baja (medible por replay del
+periodo con el clasificador de atribucion_v2) y pts rel/mano no peor.
