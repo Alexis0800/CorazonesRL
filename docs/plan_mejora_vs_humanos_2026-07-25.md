@@ -228,3 +228,16 @@ duck-temprano 36 % → hacia 22 %.
 - Día 3+: 1a al bridge (300 partidas ≈ 3 días al ritmo actual); Run A se lanza
   cuando 1c esté y SIN solapar su ventana de medición con el switch del
   filtro (estabilizar flags antes de abrir la ventana del Run A).
+
+## Actualización de ejecución (2026-07-25, Fase 1a implementada)
+
+FiltroQS implementado, testeado y validado offline. **Corrección de expectativa
+(gate offline funcionando como debía):** el "14-15 % evitable" incluía casos de
+HINDSIGHT — la Q♠ cayó DESPUÉS de nuestra decisión (descartada sobre nuestra
+carta ganadora); ningún filtro causal puede verlas. Cobertura causal real del
+filtro: ~6-10 % de las Q comidas (94/1542 vetos directos en la baza fatal,
++ disciplina preventiva R2/R3 no medible offline). Impacto revisado:
+**+0.3–0.8 pts/partida** (antes +0.8–2.0). El gate del bridge se mantiene
+(tasa de Q-comida-evitable-causal debe caer) pero con la vara re-calibrada.
+Bug real cazado por el gate offline: la R2 original permitía liderar la Q♠
+con K/A fuera — que es autocomida GARANTIZADA (regla invertida, corregida).
