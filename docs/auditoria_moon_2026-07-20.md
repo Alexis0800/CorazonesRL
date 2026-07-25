@@ -614,6 +614,46 @@ tras `--luna-bc`.
   (baseline 23.9 %). Éxito = economía por mano positiva:
   `lunas×26 > pts extra comidos en fallos`.
 
+## VEREDICTO DEL GATE REAL (2026-07-25, 286 partidas / 2459 manos): REPROBADO
+
+ModoLunar corrió en producción 3 días (`--modo-lunar`, periodo limpio post-
+archivado). Atribución por replay exacto (misma clase/pesos/umbrales sobre las
+manos reconstruidas; fidelidad verificada: 49/53 pases ofensivos ejecutados
+tal cual por la app):
+
+| Grupo | n | lunas | rel pts/mano |
+|---|---|---|---|
+| Comprometidas | 33 (1.3 %) | 3 (**conversión 9 %**) | +10.9 (fallos +14.6) |
+| Huérfanas (pase ofensivo sin compromiso) | 25 | 0 | **+13.8** |
+| Normales limpias | 2207 | 10 naturales (≈6.5 esperadas) | **−0.478 = baseline −0.49** ✓ |
+
+**Economía real: −2.5 pts/partida EN CONTRA** (ganancia 3×26=78 vs coste
+437+345=782 pts relativos). Win-rate 20.5 % vs baseline 23.0 % (±3 pp, el neto
+de −2.5 pts/partida es consistente con ese drift).
+
+**La causa: los humanos SÍ defienden la luna.** La conversión colapsa de
+44–52 % (clon, que no defiende) a **9 %** (reales). Con 9 % de conversión el
+breakeven exigiría fallos de <3 pts; cuestan ~14.6 porque la mano ya quedó
+moldeada sin escapes. La incertidumbre que el clon no podía resolver quedó
+resuelta: **en contra**. (Mi hipótesis "contra defensores los fallos se
+abaratan" era falsa: el defensor niega el payoff, no abarata el intento.)
+
+**Acción: APAGAR `--modo-lunar`** (reiniciar el servidor sin el flag). El
+campeón puro sigue siendo la mejor política en producción. Palanca de ofensiva
+de luna por composición: CERRADA con datos reales — reabrir solo con un
+enfoque cualitativamente distinto (p.ej. compromiso consciente del oponente),
+no con ajuste de umbrales (33 compromisos no dan señal para re-calibrar).
+
+**Lo que el periodo SÍ dejó:**
+- Fix del reveal verificado en producción: **100 % reconstruible** de fábrica.
+- +2459 manos limpias para el volante de datos (clon/moon models), incl. 191
+  manos de luna nuevas.
+- El instrumento de gate (flag + periodo limpio + atribución por replay)
+  queda listo para cualquier experimento futuro.
+- El diagnóstico original SIGUE en pie: los rivales nos lunean 2.56 %/mano
+  (igual que antes) y en manos normales somos mejores (−0.48). El déficit es
+  real pero su explotación requiere más que composición.
+
 ## Artefactos
 
 - `hearts-sfs-bridge/src/export-reconstructed-from-jsonl.js` (nuevo, en el bridge;

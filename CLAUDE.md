@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Reinforcement learning agent for the card game Hearts (Corazones) on **Ray RLlib v2.55.1 + PPO** (old API stack, TorchModelV2). Pipeline: **Behavioral Cloning from a PIMC oracle** → **PPO fine-tune with diverse self-play** against a pool of historical snapshots + heuristic archetypes, evaluated with a least-squares Elo system. The champion **v10c** plays full games to 100 pts including the card pass. Includes a copilot (`recomendador.py`) for real games.
 
-> **Branch `feature/v5`** (base de desarrollo; rama activa: `feature/modo-lunar` — ofensiva de luna por composición, EV-neutra vs clon, pendiente gate en bridge real). Legacy SB3 code removed; entry point is `scripts/train_rllib.py`. Champion model in `models/produccion/`. Design doc: `docs/Rediseño_v10_partida_completa.md`. Roadmap (copilot, mobile app, human dataset, on-device): `docs/ROADMAP.md`. Obsolete docs archived under `docs/historico/`.
+> **Branch `feature/v5`** (base de desarrollo; rama activa: `feature/modo-lunar` — ofensiva de luna por composición: REPROBÓ el gate real 2026-07-25, flag OFF; palanca cerrada). Legacy SB3 code removed; entry point is `scripts/train_rllib.py`. Champion model in `models/produccion/`. Design doc: `docs/Rediseño_v10_partida_completa.md`. Roadmap (copilot, mobile app, human dataset, on-device): `docs/ROADMAP.md`. Obsolete docs archived under `docs/historico/`.
 
 ## Commands
 
@@ -75,7 +75,7 @@ python -m src.torneo.elo --directorio models/v8/elite --partidas 50 --elo-puro -
 - `bot_lunatico.py`: `BotLunatico` — moon-shooter (hunts the pozo).
 - `bot_atacante_lider.py`: `BotAtacanteLider` — loads points onto the scoreboard leader.
 - `pase.py`: `pase_heuristico` — per-archetype card-pass strategy.
-- `modo_lunar.py`: `ModoLunar` — moon OFFENSE by composition (no RL): learned gate (`EstimadorMoonProb.propio`) + `BotLunatico` constructive pass, DYNAMIC commitment (enters mid-hand if P rises — 13/14 real moons are mid-hand opportunistic) + pursuit (heuristic default; `politica_persecucion` accepts the human-moon BC `models/luna_bc`) + hard/soft aborts; returns `None` when not applicable (caller falls back to the champion). Validated ~+1pp / never negative over 3000 paired games vs clone. A/B eval: `scripts/evaluar_modo_lunar.py` (paired instrument — reseeds ALL RNGs per game). **Production: `servidor_inferencia.py --modo-lunar`** (OFF by default) — the real-game gate. See `docs/auditoria_moon_2026-07-20.md`.
+- `modo_lunar.py`: `ModoLunar` — moon OFFENSE by composition (no RL): learned gate (`EstimadorMoonProb.propio`) + `BotLunatico` constructive pass, DYNAMIC commitment (enters mid-hand if P rises — 13/14 real moons are mid-hand opportunistic) + pursuit (heuristic default; `politica_persecucion` accepts the human-moon BC `models/luna_bc`) + hard/soft aborts; returns `None` when not applicable (caller falls back to the champion). Was ~+1pp vs clone (3000 paired games) but **FAILED the real-game gate (2026-07-25, 286 partidas): humans DO defend — conversion collapsed 44-52%→9%, net −2.5 pts/game → keep `--modo-lunar` OFF in production**. A/B eval: `scripts/evaluar_modo_lunar.py` (paired instrument — reseeds ALL RNGs per game). Lever CLOSED with real data; reopen only with a qualitatively different approach, not threshold tuning. See `docs/auditoria_moon_2026-07-20.md` §VEREDICTO DEL GATE REAL.
 
 **`src/rllib/`** — RLlib pipeline components (new).
 
