@@ -164,14 +164,27 @@ class TestPhiRank:
         assert phis[0] > phis[1] > phis[2] > phis[3]
         assert phis[0] > phis[3]
 
-    def test_extremos_interpolacion(self):
+    def test_extremos_interpolacion_rank_puro(self):
+        # La componente RANK pura conserva los extremos exactos (el potencial
+        # público ahora es el MIX α·rank+(1−α)·media, rediseño 2026-07-25).
         c = _calc_rank()
         cfg = RewardConfigPartida()
         lam = cfg.PHI_LAMBDA
-        # 1º claro (todos los rivales a más de GAP): r=1 → Φ = λ·R_PRIMERO
-        assert abs(c.potencial([0, 50, 60, 90], 0) - lam * cfg.R_PRIMERO) < 1e-9
-        # 4º claro: r=4 → Φ = λ·R_CUARTO
-        assert abs(c.potencial([90, 0, 10, 20], 0) - lam * cfg.R_CUARTO) < 1e-9
+        # 1º claro (todos los rivales a más de GAP=26): r=1 → λ·R_PRIMERO
+        assert abs(c._potencial_rank([0, 50, 60, 90], 0) - lam * cfg.R_PRIMERO) < 1e-9
+        # 4º claro: r=4 → λ·R_CUARTO
+        assert abs(c._potencial_rank([90, 0, 10, 20], 0) - lam * cfg.R_CUARTO) < 1e-9
+
+    def test_mix_cero_en_origen_y_entre_componentes(self):
+        # Spec del rediseño: mix([0,0,0,0]) == 0 exacto, y el mix queda entre
+        # ambas componentes en un estado no trivial.
+        c = _calc_rank()
+        assert c.potencial([0, 0, 0, 0], 0) == 0.0
+        s = [10, 50, 60, 90]
+        rank = c._potencial_rank(s, 0)
+        media = c._potencial_media(s, 0)
+        mix = c.potencial(s, 0)
+        assert min(rank, media) - 1e-9 <= mix <= max(rank, media) + 1e-9
 
     def test_telescopaje_pbrs_descontado(self):
         """Σ γ^t·F_t = γ^T·Φ(s_T) − Φ(s₀) = −Φ(s₀) porque shaping() usa

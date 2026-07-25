@@ -39,8 +39,16 @@ class RewardConfigPartida:
     PHI_ESCALA: float = 100.0    # normalización de la diferencia de marcador
 
     # --- Φ_rank opcional: potencial por puesto continuo (OFF por defecto) ---
+    # Rediseño 2026-07-25 (medido sobre 844 partidas reales, ver
+    # docs/plan_siguiente_iteracion_2026-07-25.md §3): GAP=26 (una mano
+    # completa de puntos; con GAP=10 el 59% de las sigmoides saturaba y
+    # ~21% de las manos daban ΔΦ==0) y MEZCLA con la Φ de medias
+    # (alpha·Φ_rank + (1−alpha)·Φ_media) — el mix elimina las manos muertas
+    # (ΔΦ==0 = 0.0% en el dataset canónico). PBRS es invariante para
+    # cualquier Φ, así que el cambio no altera el óptimo.
     PHI_RANK: bool = False
-    PHI_RANK_GAP: float = 10.0   # puntos de diferencia para "claramente delante"
+    PHI_RANK_GAP: float = 26.0   # puntos de diferencia para "claramente delante"
+    PHI_RANK_ALPHA: float = 0.5  # peso de Φ_rank en el mix (1.0 = rank puro)
 
     # --- Partida ---
     LIMITE_PARTIDA: int = 100
@@ -65,10 +73,17 @@ class CalculadoraRecompensasPartida:
         Por construcción Φ([0,0,0,0], ·) = 0, así que el potencial inicial de la
         partida es 0 y el shaping neto del episodio ≈ 0 (no farmeable).
 
-        Con cfg.PHI_RANK=True se usa Φ_rank (por puesto, continuo) en su lugar.
+        Con cfg.PHI_RANK=True se usa el MIX α·Φ_rank + (1−α)·Φ_media (rediseño
+        2026-07-25: el rank puro con GAP chico dejaba ~21 % de manos sin señal).
         """
+        media = self._potencial_media(scores, agente_idx)
         if self.cfg.PHI_RANK:
-            return self._potencial_rank(scores, agente_idx)
+            a = self.cfg.PHI_RANK_ALPHA
+            return a * self._potencial_rank(scores, agente_idx) + (1.0 - a) * media
+        return media
+
+    def _potencial_media(self, scores: Sequence[int], agente_idx: int) -> float:
+        """Φ clásica: diferencia contra la media rival, clip a ±1 (escala 100)."""
         mi = float(scores[agente_idx])
         otros = [float(scores[i]) for i in range(len(scores)) if i != agente_idx]
         media_otros = sum(otros) / len(otros)

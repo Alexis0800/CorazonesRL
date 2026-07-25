@@ -65,9 +65,18 @@ class HeartsCallbacks(DefaultCallbacks):
         env_r = result.get("env_runners", {})
         mean_reward = env_r.get("episode_reward_mean", float("nan"))
         custom = env_r.get("custom_metrics", {})
-        entropy = result.get("info", {}).get("learner", {}).get(
+        learner_stats = result.get("info", {}).get("learner", {}).get(
             "default_policy", {}
-        ).get("learner_stats", {}).get("entropy", float("nan"))
+        ).get("learner_stats", {})
+        entropy = learner_stats.get("entropy", float("nan"))
+        # Telemetría de learner (plan_siguiente_iteracion 2026-07-25 §A1):
+        # sin esto el KL adaptativo y la salud del value head son CIEGOS —
+        # todas las keys las expone gratis el old-stack de Ray 2.55.1.
+        telemetria_learner = {
+            k: learner_stats.get(k, float("nan"))
+            for k in ("kl", "cur_kl_coeff", "vf_loss", "vf_explained_var",
+                      "policy_loss", "grad_gnorm", "cur_lr")
+        }
 
         win_rate = custom.get("win_rate_mean", float("nan"))
         top2_rate = custom.get("top2_rate_mean", float("nan"))
@@ -89,6 +98,7 @@ class HeartsCallbacks(DefaultCallbacks):
             "puesto_medio": puesto,
             "r_terminal_medio": r_terminal,
             "manos_por_partida": manos,
+            **telemetria_learner,
         }
         with open(log_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(entrada) + "\n")
