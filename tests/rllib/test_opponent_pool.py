@@ -26,3 +26,25 @@ def test_pool_diverso_favorece_a_botlunatico():
     castigador = nombres.get("BotCastigador", 0)
     assert lunatico > experto
     assert lunatico > castigador
+
+
+def test_lunero_garantizado_en_fase_3():
+    """Con lunero_garantizado, la factory de fase 3 SIEMPRE incluye un
+    OponenteLunar en uno de los 3 slots (placeholders como snapshots)."""
+    from src.agentes.oponente_lunar import OponenteLunar
+
+    pool = OpponentPool(lunero_garantizado=True, anclar_experto=True)
+    pool._snapshots = [object(), object()]
+    factory = pool.make_factory(progress=0.5)  # fase 3
+
+    for _ in range(20):
+        oponentes = factory(agente_idx=0)
+        assert sum(isinstance(fn, OponenteLunar) for fn in oponentes.values()) == 1
+
+    # Sin la opción, ningún slot es OponenteLunar.
+    pool_off = OpponentPool(anclar_experto=True)
+    pool_off._snapshots = [object(), object()]
+    factory_off = pool_off.make_factory(progress=0.5)
+    for _ in range(20):
+        assert not any(isinstance(fn, OponenteLunar)
+                       for fn in factory_off(agente_idx=0).values())

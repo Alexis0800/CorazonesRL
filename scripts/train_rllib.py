@@ -114,6 +114,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--gamma", type=float, default=0.999,
                    help="Factor de descuento. Alto porque el episodio es una partida "
                         "completa (~100-170 steps). Debe coincidir env↔PPO (PBRS).")
+    p.add_argument("--phi-rank", action="store_true",
+                   help="PBRS con potencial por PUESTO continuo (Φ_rank) en vez "
+                        "del de medias — corrige el 9.8%% de estados donde Φ "
+                        "contradice a R_terminal en la frontera 2º/3º. A/B del "
+                        "Run A (docs/plan_mejora_vs_humanos_2026-07-25.md).")
     p.add_argument("--phi-lambda", type=float, default=0.5,
                    help="Peso del potencial Φ del shaping PBRS (default 0.5)")
     p.add_argument("--limite-partida", type=int, default=100,
@@ -148,6 +153,10 @@ def parse_args() -> argparse.Namespace:
                    help="Directorio de pesos moon (propio.pt/rival.pt) para las "
                         "features [187:189]. Default None = RUTA_MOON "
                         "(models/moon_realfull, rival AUC 0.707).")
+    p.add_argument("--lunero-garantizado", action="store_true",
+                   help="Fases 2-4: un slot de oponente es SIEMPRE OponenteLunar "
+                        "(ModoLunar + BotExperto) — presión de luna al estilo "
+                        "humano oportunista (~2.5%%/mano, compromiso mid-mano).")
     p.add_argument("--pool-diverso", action="store_true",
                    help="El oponente duro de cada fase es un arquetipo humano al "
                         "azar (experto/castigador/lunatico/atacante), no solo "
@@ -261,12 +270,14 @@ def main() -> None:
         prob_humano=args.prob_humano,
         mesa_humana=args.mesa_humana,
         temp_humano=args.temp_humano if args.temp_humano > 0 else None,
+        lunero_garantizado=args.lunero_garantizado,
     )
 
     from src.entorno.recompensas_partida import RewardConfigPartida
     reward_config = RewardConfigPartida(
         PHI_LAMBDA=args.phi_lambda,
         LIMITE_PARTIDA=args.limite_partida,
+        PHI_RANK=args.phi_rank,
     )
 
     config = build_ppo_config(

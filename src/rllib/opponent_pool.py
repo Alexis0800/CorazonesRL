@@ -280,6 +280,7 @@ class OpponentPool:
         prob_humano: float = 0.5,
         mesa_humana: float = 0.0,
         temp_humano: Optional[float] = 1.0,
+        lunero_garantizado: bool = False,
     ):
         self._agente_idx = agente_idx
         self._snapshot_dir = snapshot_dir
@@ -307,6 +308,11 @@ class OpponentPool:
         # estocástico como un humano; evita que el agente memorice una única
         # línea de explotación contra un clon determinista.
         self._temp_humano = temp_humano
+        # lunero_garantizado: en fases 2-4 uno de los slots es SIEMPRE un
+        # OponenteLunar (ModoLunar + BotExperto). Los humanos coronan lunas
+        # 2.5%/mano por rival, mayormente comprometiéndose MID-MANO; BotLunatico
+        # (compromiso desde el pase) no da esa presión realista.
+        self._lunero_garantizado = lunero_garantizado
         self._humano_bc_pesos = None
         if humano_bc_path:
             _d = np.load(humano_bc_path)
@@ -342,6 +348,7 @@ class OpponentPool:
         mesa_humana = self._mesa_humana
         temp_humano = self._temp_humano
         obs_dim_local = self._obs_dim
+        lunero = self._lunero_garantizado
 
         def _clon_humano():
             return SnapshotPolicy.from_weights(
@@ -440,6 +447,13 @@ class OpponentPool:
                 else:
                     for idx in opp_indices:
                         fns[idx] = random.choice(pool)
+
+            # Lunero garantizado (fases 2-4): 1 slot SIEMPRE es OponenteLunar.
+            # progress>=0.15 y >=1 snapshot ⇔ estamos en fase 2, 3 o 4 (las
+            # degradaciones por pool insuficiente caen en fases 0-1, sin lunero).
+            if lunero and progress >= 0.15 and len(snapshots) >= 1:
+                from src.agentes.oponente_lunar import OponenteLunar
+                fns[opp_indices[0]] = OponenteLunar()
 
             return fns
 
