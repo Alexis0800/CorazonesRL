@@ -403,7 +403,9 @@ class OpponentPool:
             # MESA HUMANA (prioridad sobre las fases): 2 clones humanos + 1 ancla.
             # Es la exposición mayoritaria al meta humano que la vía por-slot no
             # logra (ver docs/auditoria_moon_2026-07-20.md, post-mortem fine-tune).
-            if humano_pesos is not None and random.random() < mesa_humana:
+            # SOLO en fases tardías (progress>=0.40): v11 la tuvo desde el paso 0
+            # y diluyó el bootstrap (autopsia en docs/decision_desde_cero_2026-07-25.md).
+            if humano_pesos is not None and progress >= 0.40 and random.random() < mesa_humana:
                 fns[opp_indices[0]] = _clon_humano()
                 fns[opp_indices[1]] = _clon_humano()
                 fns[opp_indices[2]] = _bot_ancla_no_humano()
@@ -453,7 +455,11 @@ class OpponentPool:
             # degradaciones por pool insuficiente caen en fases 0-1, sin lunero).
             if lunero and progress >= 0.15 and len(snapshots) >= 1:
                 from src.agentes.oponente_lunar import OponenteLunar
-                fns[opp_indices[0]] = OponenteLunar()
+                # Slot [1], no [0]: el [0] es el oponente DURO (ancla experto /
+                # clon) — pisarlo dejaba la mesa sin ancla y anulaba prob-humano
+                # (bug del Run A). En todo branch donde este guard puede disparar
+                # (progress>=0.15, >=1 snapshot), opp_indices[1] es un snapshot.
+                fns[opp_indices[1]] = OponenteLunar()
 
             return fns
 
