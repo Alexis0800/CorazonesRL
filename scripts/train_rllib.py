@@ -94,6 +94,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--output-dir", type=str, default="models/v_rllib")
     p.add_argument("--workers", type=int, default=2)
     p.add_argument("--gpus", type=int, default=0)
+    p.add_argument("--eval-partidas", type=int, default=150,
+                   help="Partidas POR ESCENARIO en cada bot_eval (8 escenarios). "
+                        "Bajar (p.ej. 75) permite snapshots/evals mas frecuentes "
+                        "sin que la eval domine el wall-clock.")
     p.add_argument("--snapshot-interval", type=int, default=100_000,
                    help="Pasos entre cada snapshot guardado (default 100k)")
     p.add_argument("--max-snapshots", type=int, default=50)
@@ -439,7 +443,7 @@ def main() -> None:
                         try:
                             policy = algo.get_policy()
                             metricas_bot = evaluar_vs_bots(
-                                policy, obs_dim=args.obs_dim, n_partidas=150,
+                                policy, obs_dim=args.obs_dim, n_partidas=args.eval_partidas,
                                 con_pase=args.con_pase,
                             )
                             # RAIL humano: si hay clon humano-BC, medir también
