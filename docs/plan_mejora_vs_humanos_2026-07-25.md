@@ -260,3 +260,36 @@ interviene 2.9 % de decisiones en el env); en las 36 divergentes gana más.
 --modelo models/produccion/v10c_campeon --filtro-qs` — gate real: en ~300
 partidas, tasa de Q♠-comida-causal-evitable baja (medible por replay del
 periodo con el clasificador de atribucion_v2) y pts rel/mano no peor.
+
+## VEREDICTO RUN A (2026-07-25): REPROBADO — vehículo fine-tune agotado (4ª refutación)
+
+Run: +8M pasos desde el campeón, pool con OponenteLunar garantizado (fase 4
+constante deliberada) + Φ_rank, LR 5e-5, snapshots 100k / eval 500k.
+
+- Gate gradiente: PASÓ (reward 0.9→0.15, entropía 0.30→0.19 — la política se
+  movió; no fue el "plano" de v10e).
+- Snapshot FINAL (33M): regresión general (puesto 1.85 vs 1.66) sin aprender
+  defensa (conversión por compromiso del lunero intacta 56%). Sobre-entrenado
+  (977 alertas de entropía).
+- Snapshot PICO (28.7M, preservado por el rail de elite): defensa real
+  (conversión lunero −19%, abortos-gate ×2, muerte-como-4º 14.3% vs 21.1% con
+  fallecimientos baratos 3.6 vs 6.9 pts — la firma de Φ_rank) PERO fuerza
+  general **0.388 vs 0.453 del campeón** (mismas semillas, −6.5pp): el precio
+  de siempre.
+- FiltroQS: neutral-positivo en los 4 brazos (consistente con sus 2000
+  partidas previas) — sigue siendo lo único desplegable validado.
+
+**Señales cosechadas para el futuro (no perderlas):**
+1. Φ_rank FUNCIONA mecánicamente (la firma apareció donde debía). Su lugar
+   natural es un entrenamiento DESDE CERO futuro (moldear el aprendizaje
+   desde el inicio), no perturbar una política convergida.
+2. La defensa de luna ES movible por RL (−19% conversión) — el problema es el
+   vehículo (fine-tune degrada más rápido de lo que enseña), no la señal.
+3. Run B (ruido-ε): NO se corre — condicional a que A pagara, y su techo ya
+   había bajado con las varas canónicas.
+
+**Cierre de Fase 2.** El programa automático queda agotado; lo accionable:
+(a) desplegar campeón + `--filtro-qs` al bridge (única mejora validada);
+(b) seguir el volante de datos; (c) si algún día se reentrena desde cero
+(~30M+ pasos), incluir de serie: Φ_rank + lunero-garantizado + rail humano
+en el score de elite — las tres cosas que este ciclo dejó listas y probadas.
