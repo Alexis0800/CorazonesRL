@@ -129,3 +129,31 @@ en el slot duro desde 2M) → experimento de control lanzado: run idéntico SIN
 del hallazgo central queda en duda y TODO se cierra; si sube como v10c,
 Φ_rank-en-early-training queda refutado (y se re-evalúa con GAP mayor o
 introducción tardía, solo si el control llega fuerte al final).
+
+## RECALIBRACIÓN DE GATES (2026-07-25) — dos errores de calibración encontrados
+
+1. **Referencia equivocada**: el "v10c a 5M: 0.34-0.40" del decisor era la curva
+   de v10b/v10_bc_ppo (entropy 0.01, retiene el BC desde el eval 1). La curva
+   REAL de v10c (entropy 0.02 — nuestra receta) fue PLANA 0.18-0.28 hasta
+   ~3.7M y despegó en 4.26M al entrar su fase 2. Con entropy 0.02 el dip
+   temprano es NORMAL (erosiona BC y recupera de sobra después).
+2. **Eje equivocado**: las fases escalan con el horizonte (v10c 20M: F2 en 3M;
+   nuestro 40M: F2 en 6M). Los gates deben compararse a PROGRESS igual, no a
+   pasos absolutos. Despegue esperado del run actual: ~8-9M.
+
+**Consecuencia**: el intento 1 (Φ_rank) fue matado por un gate doblemente mal
+calibrado — a progress 0.12 su curva (0.22 vs_exp) era INDISTINGUIBLE de la
+del campeón (0.18-0.28). Φ_rank queda EXONERADO del cargo de "matar el
+aprendizaje temprano" (la hipótesis de saturación por GAP=10 queda sin
+evidencia en contra ni a favor); vuelve como A/B solo sobre un baseline
+fuerte. La sospecha de hoy la paga el proceso, no el flag.
+
+**Gates corregidos del control (40M, por progress, mediana de 3 evals):**
+| Progress (paso) | vs_experto: matar si < | referencia v10c (mismo progress) |
+|---|---|---|
+| 0.25 (~10M) | 0.30 | 0.34-0.62 (post-despegue) |
+| 0.50 (~20M) | 0.40 | 0.42-0.52 |
+| 0.75 (~30M) | 0.45 + pareado puesto ≤1.75 | 0.44-0.66 |
+| final 40M | vara compuesta (pareado clon ≥0.47 etc.) | v10c cerró 0.66-0.70 |
+La zona 0-8M es ciega por diseño (F0-F1 + dip de entropía): no se mata ahí
+salvo crash o colapso absoluto (win global <0.4 sostenido).
