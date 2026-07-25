@@ -97,7 +97,8 @@ def mano_str(cartas: List[Carta]) -> str:
 class Recomendador:
     """Mantiene el estado público de la partida y consulta al modelo."""
 
-    def __init__(self, ckpt: str, mi_idx: int = 0, modo_lunar: bool = False):
+    def __init__(self, ckpt: str, mi_idx: int = 0, modo_lunar: bool = False,
+                 filtro_qs: bool = False):
         self.snap = cargar_policy_desde_checkpoint(ckpt)
         self.obs_dim = self.snap._obs_dim
         self.con_pase = con_pase_de_obs(self.obs_dim)
@@ -112,6 +113,14 @@ class Recomendador:
         if modo_lunar:
             from src.agentes.modo_lunar import ModoLunar
             self.modo_lunar = ModoLunar(self._estimador_moon)
+        # Filtro Q♠ (Fase 1a, docs/plan_mejora_vs_humanos_2026-07-25.md):
+        # restringe las legales para no comer la Q♠ evitable (14-15% de las
+        # comidas lo eran); el campeón elige entre lo permitido. OFF por
+        # default; se activa con --filtro-qs en servidor_inferencia.py.
+        self.filtro_qs = None
+        if filtro_qs:
+            from src.agentes.filtro_qs import FiltroQS
+            self.filtro_qs = FiltroQS()
         self.scores = [0, 0, 0, 0]
         self.ultima_mano_puntos: Optional[List[int]] = None
         self.reset_mano([])
@@ -205,8 +214,21 @@ class Recomendador:
             if carta is not None and carta in legales:
                 print(f"[modo-lunar] persecución de pozo: {cstr(carta)}")
                 return carta
+        legales = self._aplicar_filtro_qs(m, legales)
         carta = self.snap(m, self.me, legales, obs_vec=obs)
         return carta if carta in legales else legales[0]
+
+    def _aplicar_filtro_qs(self, m: MotorCorazones, opciones: List[Carta]) -> List[Carta]:
+        """Restringe `opciones` con FiltroQS (si está activo y ModoLunar no
+        está persiguiendo el pozo — en persecución SÍ queremos capturar)."""
+        if self.filtro_qs is None:
+            return opciones
+        if self.modo_lunar is not None and self.modo_lunar.comprometida:
+            return opciones
+        filtradas = self.filtro_qs.filtrar(m, self.me, opciones)
+        if len(filtradas) < len(opciones):
+            print(f"[filtro-qs] veto: {' '.join(cstr(c) for c in opciones if c not in filtradas)}")
+        return filtradas
 
     def recomendar_jugada_entre(self, mesa_antes: List,
                                 candidatas: List[Carta]) -> Carta:
@@ -230,6 +252,7 @@ class Recomendador:
             if carta is not None and carta in permitidas:
                 print(f"[modo-lunar] persecución de pozo: {cstr(carta)}")
                 return carta
+        permitidas = self._aplicar_filtro_qs(m, permitidas)
         carta = self.snap(m, self.me, permitidas, obs_vec=obs)
         return carta if carta in permitidas else permitidas[0]
 

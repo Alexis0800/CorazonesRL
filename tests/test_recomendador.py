@@ -22,6 +22,7 @@ def _recomendador_sin_modelo(mi_idx: int = 0) -> Recomendador:
     r.builder = ObservacionBuilder()
     r.scores = [0, 0, 0, 0]
     r.modo_lunar = None
+    r.filtro_qs = None
     r.reset_mano([])
     return r
 

@@ -213,6 +213,11 @@ def main() -> None:
     p.add_argument("--log", default="",
                    help="Ruta al JSONL de log. Si se omite, se genera "
                    "logs/servidor_inferencia_YYYYMMDD_HHMMSS.jsonl automáticamente")
+    p.add_argument("--filtro-qs", action="store_true",
+                   help="Activa el filtro Q♠ (no comer la Dama evitable — 14-15%% "
+                        "de las comidas lo eran). Fase 1a del plan "
+                        "docs/plan_mejora_vs_humanos_2026-07-25.md. Gate real: "
+                        "tasa de Q♠-comida-evitable 15%%→<8%% en ~300 partidas.")
     p.add_argument("--modo-lunar", action="store_true",
                    help="Activa la ofensiva de luna por composición (ModoLunar: "
                         "pase constructivo + compromiso dinámico + aborts). "
@@ -227,7 +232,8 @@ def main() -> None:
 
     print(f"Cargando modelo desde {args.modelo} (asiento {args.asiento})...")
     Handler.recomendador = Recomendador(args.modelo, mi_idx=args.asiento,
-                                        modo_lunar=args.modo_lunar)
+                                        modo_lunar=args.modo_lunar,
+                                        filtro_qs=args.filtro_qs)
     Handler.log_path = _Path(args.log)
     Handler.log_path.parent.mkdir(parents=True, exist_ok=True)
     print(f"Modelo cargado (obs_dim={Handler.recomendador.obs_dim}"
