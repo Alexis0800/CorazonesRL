@@ -38,6 +38,10 @@ class RewardConfigPartida:
     PHI_LAMBDA: float = 0.5      # peso del potencial (magnitud comparable a R_terminal)
     PHI_ESCALA: float = 100.0    # normalización de la diferencia de marcador
 
+    # --- Φ_rank opcional: potencial por puesto continuo (OFF por defecto) ---
+    PHI_RANK: bool = False
+    PHI_RANK_GAP: float = 10.0   # puntos de diferencia para "claramente delante"
+
     # --- Partida ---
     LIMITE_PARTIDA: int = 100
 
@@ -60,13 +64,38 @@ class CalculadoraRecompensasPartida:
         Mayor cuando el agente va por debajo (menos puntos) que el promedio rival.
         Por construcción Φ([0,0,0,0], ·) = 0, así que el potencial inicial de la
         partida es 0 y el shaping neto del episodio ≈ 0 (no farmeable).
+
+        Con cfg.PHI_RANK=True se usa Φ_rank (por puesto, continuo) en su lugar.
         """
+        if self.cfg.PHI_RANK:
+            return self._potencial_rank(scores, agente_idx)
         mi = float(scores[agente_idx])
         otros = [float(scores[i]) for i in range(len(scores)) if i != agente_idx]
         media_otros = sum(otros) / len(otros)
         ventaja = (media_otros - mi) / self.cfg.PHI_ESCALA
         ventaja = max(-1.0, min(1.0, ventaja))
         return self.cfg.PHI_LAMBDA * ventaja
+
+    def _potencial_rank(self, scores: Sequence[int], agente_idx: int) -> float:
+        """Φ_rank: interpola [R_1º, R_2º, R_3º, R_4º] en un rango continuo.
+
+        Para cada rival i: sig_i = clip((score_i − mi)/GAP, −1, 1)/2 + 0.5
+        (1.0 = le voy claramente ganando: menos puntos es mejor en Hearts).
+        r = 4 − Σ sig_i ∈ [1, 4]; todo empatado → r = 2.5 → Φ = 0.
+        """
+        mi = float(scores[agente_idx])
+        gap = self.cfg.PHI_RANK_GAP
+        sigs = [
+            max(-1.0, min(1.0, (float(scores[i]) - mi) / gap)) / 2.0 + 0.5
+            for i in range(len(scores)) if i != agente_idx
+        ]
+        r = 4.0 - sum(sigs)
+        valores = [self.cfg.R_PRIMERO, self.cfg.R_SEGUNDO,
+                   self.cfg.R_TERCERO, self.cfg.R_CUARTO]
+        idx = max(0, min(int(r - 1.0), 2))
+        frac = (r - 1.0) - idx
+        r_interp = valores[idx] + frac * (valores[idx + 1] - valores[idx])
+        return self.cfg.PHI_LAMBDA * r_interp
 
     def shaping(
         self,

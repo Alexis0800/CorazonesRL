@@ -101,3 +101,97 @@ class TestPBRSAntiFarming:
         # Mano en la que los rivales reciben puntos y el agente no → mejora relativa
         f = c.shaping([10, 10, 10, 10], [10, 36, 10, 10], 0, gamma=0.999, terminal=False)
         assert f > 0.0
+
+
+def _calc_rank():
+    return CalculadoraRecompensasPartida(RewardConfigPartida(PHI_RANK=True))
+
+
+class TestPhiRank:
+    CASOS = [
+        ([0, 0, 0, 0], 0),
+        ([10, 50, 60, 90], 0),
+        ([10, 50, 60, 90], 3),
+        ([99, 1, 1, 1], 0),
+        ([30, 30, 30, 30], 2),
+    ]
+
+    def test_default_off_potencial_identico(self):
+        """Sin PHI_RANK, potencial() = fórmula vieja byte a byte."""
+        cfg = RewardConfigPartida()
+        assert cfg.PHI_RANK is False
+        c = _calc()
+        for scores, idx in self.CASOS:
+            mi = float(scores[idx])
+            otros = [float(s) for i, s in enumerate(scores) if i != idx]
+            ventaja = max(-1.0, min(1.0, (sum(otros) / 3.0 - mi) / cfg.PHI_ESCALA))
+            assert c.potencial(scores, idx) == cfg.PHI_LAMBDA * ventaja
+
+    def test_phi_rank_cero_en_origen(self):
+        assert _calc_rank().potencial([0, 0, 0, 0], 0) == 0.0
+
+    def test_monotonico_bajar_mi_score_no_baja_phi(self):
+        c = _calc_rank()
+        rivales = [37, 52, 88]
+        prev = None
+        # Recorro mi score de peor (alto) a mejor (bajo): Φ nunca debe bajar
+        for mi in range(120, -1, -1):
+            phi = c.potencial([mi] + rivales, 0)
+            if prev is not None:
+                assert phi >= prev - 1e-12
+            prev = phi
+
+    def test_continuidad_un_punto(self):
+        """Cambiar 1 punto de cualquier score mueve Φ < λ·0.15 (sin saltos ±0.6)."""
+        c = _calc_rank()
+        lam = RewardConfigPartida().PHI_LAMBDA
+        bases = [[10, 50, 60, 90], [30, 30, 30, 30], [95, 96, 97, 98],
+                 [0, 5, 10, 15], [49, 51, 50, 52]]
+        for base in bases:
+            for j in range(4):
+                for delta in (-1, 1):
+                    pert = list(base)
+                    pert[j] = max(0, pert[j] + delta)
+                    for idx in range(4):
+                        d = abs(c.potencial(pert, idx) - c.potencial(base, idx))
+                        assert d < lam * 0.15
+
+    def test_ordena_por_puesto(self):
+        c = _calc_rank()
+        scores = [10, 50, 60, 90]
+        phis = [c.potencial(scores, i) for i in range(4)]
+        # 1º (idx0) > 2º > 3º > 4º (idx3)
+        assert phis[0] > phis[1] > phis[2] > phis[3]
+        assert phis[0] > phis[3]
+
+    def test_extremos_interpolacion(self):
+        c = _calc_rank()
+        cfg = RewardConfigPartida()
+        lam = cfg.PHI_LAMBDA
+        # 1º claro (todos los rivales a más de GAP): r=1 → Φ = λ·R_PRIMERO
+        assert abs(c.potencial([0, 50, 60, 90], 0) - lam * cfg.R_PRIMERO) < 1e-9
+        # 4º claro: r=4 → Φ = λ·R_CUARTO
+        assert abs(c.potencial([90, 0, 10, 20], 0) - lam * cfg.R_CUARTO) < 1e-9
+
+    def test_telescopaje_pbrs_descontado(self):
+        """Σ γ^t·F_t = γ^T·Φ(s_T) − Φ(s₀) = −Φ(s₀) porque shaping() usa
+        Φ(terminal)=0. Con PHI_RANK activo la propiedad PBRS se mantiene."""
+        c = _calc_rank()
+        gamma = 0.999
+        agente = 0
+        trayectoria = [
+            [0, 0, 0, 0],
+            [5, 10, 8, 3],
+            [5, 36, 8, 29],
+            [31, 36, 8, 29],
+            [31, 62, 8, 55],
+            [57, 62, 34, 101],  # terminal
+        ]
+        total = 0.0
+        for t in range(len(trayectoria) - 1):
+            terminal = (t == len(trayectoria) - 2)
+            f = c.shaping(trayectoria[t], trayectoria[t + 1], agente,
+                          gamma=gamma, terminal=terminal)
+            total += (gamma ** t) * f
+        esperado = -c.potencial(trayectoria[0], agente)  # γ^T·0 − Φ(s₀)
+        assert abs(total - esperado) < 1e-9
