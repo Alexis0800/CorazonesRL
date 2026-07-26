@@ -197,3 +197,31 @@ negativa del filtro) — plausible que el modelo internalizara la disciplina
 de Q♠ del entrenamiento con lunero; decidir filtro-sí/no del sucesor con la
 confirmación. En curso: confirmación 1500 partidas semillas frescas (900k,
 campeón y candidato) + métricas de defensa (muerte-4º, anti-lunero).
+
+## VEREDICTO FINAL (2026-07-26): SUCESOR PROMOVIDO — v12_campeon
+
+Confirmación con semillas frescas (900k, 1500 partidas c/u, pareadas):
+candidato **0.472** (con FiltroQS **0.477**) vs campeón 0.445 (0.449).
+**+2.7 pp en dos lotes de semillas independientes** (screening 800k y
+confirmación 900k dieron el delta idéntico — sin winner's curse).
+
+Promovido a `models/produccion/v12_campeon` (v10c_campeon intacto como
+fallback). Metadata completa: `models/produccion/v12_campeon_promocion.json`.
+Despliegue: `python scripts/servidor_inferencia.py --modelo
+models/produccion/v12_campeon --filtro-qs`.
+
+**Naturaleza de la ganancia**: fuerza general (+robustez ante mesas con
+luna: 0.633 vs 0.585), NO defensa especializada (conversión por compromiso
+del lunero sin cambio; muerte-4º sin cambio — Φ_rank iba OFF). Esas dos son
+las palancas del siguiente A/B (Φ_rank-mix GAP26/α0.5, ya implementado)
+SOBRE esta nueva base.
+
+**Gate real pendiente (el único juez definitivo)**: ~300 partidas del bridge
+con el sucesor — vara: win-rate real vs 23.0% del campeón, lunas en contra,
+Q♠ comidas. La correlación clon→real es débil (lección cara de la campaña):
+el +2.7 pp vs clon es condición necesaria, no suficiente.
+
+**El arco completo de la campaña, en una línea**: el secreto no era un
+ingrediente nuevo — era saber ejecutar la receta existente (base no
+convergida + remate a LR mínimo), y solo se encontró reproduciendo la
+historia con instrumentos pareados y gates honestos.

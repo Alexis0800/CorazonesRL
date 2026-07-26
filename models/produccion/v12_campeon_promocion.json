@@ -1,0 +1,23 @@
+{
+  "modelo": "v12_campeon",
+  "origen": "models/v12_scratch/snapshots/snapshot_000045006848",
+  "fecha_promocion": "2026-07-26",
+  "obs_dim": 228,
+  "con_pase": true,
+  "receta": "desde-cero 40M (BC-PIMC init, receta v10c + lunero_garantizado + clon v3 dosificado, mesas humanas gated >=0.40) + REMATE 5M lr 3e-5->1e-5",
+  "validacion": {
+    "pareado_vs_clon_v3_semillas_800k_600": {
+      "candidato": 0.462,
+      "campeon_v10c": 0.435
+    },
+    "confirmacion_semillas_900k_1500": {
+      "candidato": 0.472,
+      "candidato_con_filtro_qs": 0.477,
+      "campeon": 0.445,
+      "campeon_con_filtro": 0.449
+    },
+    "gates_defensa": "paridad (fuerza general, no defensa especializada); muerte-4to y conversion-lunero sin mejora - palancas del proximo A/B phi_rank-mix",
+    "gate_real_pendiente": "bridge (~300 partidas): win-rate vs baseline 23%, lunas, Q-comidas"
+  },
+  "despliegue": "python scripts/servidor_inferencia.py --modelo models/produccion/v12_campeon --filtro-qs"
+}
