@@ -183,3 +183,17 @@ distribución de su entrenamiento (lunero+clon+ancla), desde el snapshot 40M.
 Si el remate replica el salto del campeón (+6pp → ~0.43-0.44 con las mejoras
 de defensa del pool nuevo encima), hay sucesor candidato: confirmación 2000
 partidas semillas frescas + métricas de gate + anti-lunero + FiltroQS.
+
+## EL REMATE REPLICÓ EL SALTO — primer modelo que SUPERA al campeón (pendiente confirmación)
+
+Pareado semillas 800k, 600 partidas: v12 pre-remate 0.370-0.375 → **remate
+final (45M) 0.462** (+8.7pp por el remate; campeón 0.435 → **+2.7pp sobre el
+campeón**). El elite del remate (44.26M): 0.443. La tesis "el secreto del
+campeón es el remate a LR mínimo sobre base no convergida" queda validada
+EXPERIMENTALMENTE (el salto se replicó en una base independiente).
+
+Nota: FiltroQS sobre el remate-final midió −0.7pp (±0.3, primera lectura
+negativa del filtro) — plausible que el modelo internalizara la disciplina
+de Q♠ del entrenamiento con lunero; decidir filtro-sí/no del sucesor con la
+confirmación. En curso: confirmación 1500 partidas semillas frescas (900k,
+campeón y candidato) + métricas de defensa (muerte-4º, anti-lunero).
