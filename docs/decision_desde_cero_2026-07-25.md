@@ -157,3 +157,29 @@ fuerte. La sospecha de hoy la paga el proceso, no el flag.
 | final 40M | vara compuesta (pareado clon ≥0.47 etc.) | v10c cerró 0.66-0.70 |
 La zona 0-8M es ciega por diseño (F0-F1 + dip de entropía): no se mata ahí
 salvo crash o colapso absoluto (win global <0.4 sostenido).
+
+## HALLAZGO MAYOR (post-run): la receta REPRODUJO — y el secreto del campeón es el REMATE
+
+Batería final pareada (semillas 800000, 600 partidas c/u, vs clon v3):
+
+| Modelo | win |
+|---|---|
+| v10c-base (20M, PRE-finetune_pozo) | 0.373 |
+| v12 elite 36.7M | 0.375 |
+| v12 final 40M | 0.370 |
+| Campeón (= v10c-base + 5M finetune_pozo) | **0.435** |
+
+**El desde-cero v12 reprodujo la receta v10c-base EXACTO** (0.375 ≈ 0.373).
+Los +6 pp del campeón vienen ÍNTEGROS de la etapa de REMATE (finetune_pozo:
++5M a lr 3e-5→1e-5 sobre la política de 20M AÚN NO convergida). Esto
+reconcilia toda la evidencia de la campaña: "los fine-tunes están refutados"
+aplica a afinar al CAMPEÓN convergido; el remate a LR mínimo sobre una base
+fresca es justamente cómo el campeón se volvió campeón. El rail de 0.447
+vs_humano del elite era ruido+winner's curse (150 partidas, máximo de 75
+evals): el pareado real da 0.375.
+
+**Acción en curso**: remate de v12 lanzado — +5M a lr 3e-5→1e-5, misma
+distribución de su entrenamiento (lunero+clon+ancla), desde el snapshot 40M.
+Si el remate replica el salto del campeón (+6pp → ~0.43-0.44 con las mejoras
+de defensa del pool nuevo encima), hay sucesor candidato: confirmación 2000
+partidas semillas frescas + métricas de gate + anti-lunero + FiltroQS.
