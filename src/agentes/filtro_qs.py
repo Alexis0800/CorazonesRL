@@ -60,6 +60,17 @@ class FiltroQS:
         # Excepción endgame: región terminal → criterio del campeón intacto.
         if any(s >= _UMBRAL_ENDGAME for s in motor.puntuaciones_historicas()):
             return legales
+        # Excepción LUNA PROPIA (fix 2026-07-26): coronar exige GANAR la baza
+        # de la Q♠ — vetar ganadoras bloqueaba las lunas naturales del modelo
+        # (periodo v12: 0 lunas en 1309 manos vs ~3.5 esperadas). Si NOSOTROS
+        # tenemos puntos y nadie más los tiene, puede haber luna en curso:
+        # el filtro no aplica.
+        mis_pts = motor.jugadores[idx].contar_puntos_bazas()
+        if mis_pts > 0 and not any(
+            motor.jugadores[i].contar_puntos_bazas() > 0
+            for i in range(4) if i != idx
+        ):
+            return legales
 
         mesa = motor.mesa
         palo_salida = motor.palo_de_salida

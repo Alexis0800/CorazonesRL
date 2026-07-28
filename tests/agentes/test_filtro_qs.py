@@ -112,3 +112,22 @@ def test_nunca_vacia_y_cuenta_stats():
     m = _motor(mesa=[(1, _c(29)), (2, _QS)])
     out = f.filtrar(m, 0, [_KS, _c(27)])
     assert out and f.stats["intervenciones"] == 1 and f.stats["consultas"] == 1
+
+
+def test_luna_propia_en_curso_desactiva_el_filtro():
+    """Fix 2026-07-26: si tenemos puntos y nadie más — posible luna en curso —
+    el filtro no veta (coronar exige ganar la baza de la Q♠)."""
+    m = _motor(mesa=[(1, _c(29)), (2, _QS)])
+    m.jugadores[0].bazas_ganadas = [_c(40), _c(41), _c(42), _c(43)]  # corazones nuestros
+    legales = [_KS, _c(27)]
+    out = FiltroQS().filtrar(m, 0, legales)
+    assert out == legales  # sin veto: podríamos estar coronando
+
+
+def test_rival_con_puntos_mantiene_el_veto():
+    m = _motor(mesa=[(1, _c(29)), (2, _QS)])
+    m.jugadores[0].bazas_ganadas = [_c(40)]
+    m.jugadores[2].bazas_ganadas = [_c(41)]  # un rival también tiene → luna imposible
+    legales = [_KS, _c(27)]
+    out = FiltroQS().filtrar(m, 0, legales)
+    assert out == [_c(27)]  # veto normal
